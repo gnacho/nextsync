@@ -37,12 +37,11 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gio::prelude::ListModelExt;
 use libadwaita::prelude::*;
 
 use crate::core::desktop_integration::DesktopIntegration;
 use crate::core::triggers::TriggerSettings;
-use crate::nextcloud::api::NextcloudApi;
+use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::credentials::CredentialsStore;
 use crate::storage::config::{
     default_sync_root, expanduser, remote_path_for, validate_pattern, AccountConfig, Config,
@@ -445,6 +444,7 @@ fn build_network_page(
     proxy.set_title(t("Custom HTTP proxy"));
     proxy.set_text(network.custom_proxy.as_deref().unwrap_or(""));
     proxy.set_show_apply_button(true);
+    proxy.set_tooltip_text(Some(t("Save the custom HTTP proxy")));
     let trust = libadwaita::SwitchRow::builder()
         .title(t("Allow invalid or self-signed certificates"))
         .subtitle(t(
@@ -692,6 +692,7 @@ fn build_advanced_page(
     let remove = libadwaita::ActionRow::builder()
         .title(t("Remove Account"))
         .subtitle(t("Rarely needed. Keeps all local files."))
+        .tooltip_text(t("Disconnect this account; local files are kept"))
         .activatable(true)
         .build();
     remove.add_css_class("error");
@@ -915,6 +916,7 @@ impl FolderUi {
         let add_row = libadwaita::ActionRow::builder()
             .title(t("Add Folder"))
             .subtitle(t("Mirror another local folder from this account"))
+            .tooltip_text(t("Add a local folder to synchronize with this account"))
             .activatable(true)
             .build();
         let add_icon = gtk4::Image::builder()
@@ -939,128 +941,193 @@ impl FolderUi {
 
     /// Present the Add Folder dialog. `previous` and `error` let a failed
     /// attempt re-open with the typed values and an inline message.
+    /// Present the Add Folder dialog. `previous` and `error` let a failed
+    /// attempt re-open with the typed values and an inline message.
+    ///
+    /// Thin wrapper around the freestanding [`present_add_folder_dialog`]:
+    /// supplies this group's refresh + the window toast from the folder UI's
+    /// own state so the Settings call site stays a one-liner.
     fn present_add_folder_dialog(&self, previous: Option<(String, String)>, error: Option<String>) {
-        let (previous_local, previous_remote) = previous.unwrap_or_default();
-        let local_default = if previous_local.is_empty() {
-            default_sync_root().to_string_lossy().into_owned()
-        } else {
-            previous_local
+        let on_folder_added = {
+            let ui = self.clone();
+            Rc::new(move || {
+                ui.refresh();
+                invoke(&ui.callbacks.on_folder_changed);
+            })
         };
-
-        let dialog = libadwaita::AlertDialog::new(
-            Some(t("Add Folder")),
-            Some(t(
-                "Choose a local folder and an optional remote folder to mirror from this account.",
-            )),
+        let on_error = {
+            let window = self.window.clone();
+            Rc::new(move |message: String| {
+                window.add_toast(libadwaita::Toast::new(&message));
+            })
+        };
+        present_add_folder_dialog(
+            self.store.clone(),
+            self.account_id.clone(),
+            self.window.upcast_ref::<gtk4::Widget>(),
+            on_folder_added,
+            on_error,
+            previous,
+            error,
         );
-        let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-
-        let local_entry = libadwaita::EntryRow::new();
-        local_entry.set_title(t("Local folder"));
-        local_entry.set_text(&local_default);
-
-        let choose = gtk4::Button::builder()
-            .icon_name("folder-open-symbolic")
-            .valign(gtk4::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        let entry_for_picker = local_entry.clone();
-        choose.connect_clicked(move |_| {
-            choose_local_folder(entry_for_picker.clone());
-        });
-        local_entry.add_suffix(&choose);
-        entry_box.append(&local_entry);
-
-        let remote_entry = libadwaita::EntryRow::new();
-        remote_entry.set_title(t("Remote folder (empty: use the local folder name)"));
-        if !previous_remote.is_empty() {
-            remote_entry.set_text(&previous_remote);
-        }
-        let remote_list = gtk4::StringList::new(&[]);
-        let picker = gtk4::DropDown::from_strings(&[]);
-        picker.set_model(Some(&remote_list));
-        picker.set_selected(u32::MAX);
-        picker.set_sensitive(false);
-        picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
-        let entry_for_pick = remote_entry.clone();
-        picker.connect_selected_notify(move |picker| {
-            if let Some(item) = picker.selected_item() {
-                if let Ok(item) = item.downcast::<gtk4::StringObject>() {
-                    entry_for_pick.set_text(&item.string());
-                    picker.set_selected(u32::MAX);
-                }
-            }
-        });
-        remote_entry.add_suffix(&picker);
-        entry_box.append(&remote_entry);
-
-        if let Some(message) = error {
-            let label = gtk4::Label::builder()
-                .label(message)
-                .xalign(0.0)
-                .wrap(true)
-                .css_classes(["error"])
-                .build();
-            entry_box.append(&label);
-        }
-
-        dialog.set_extra_child(Some(&entry_box));
-        dialog.add_response("cancel", t("Cancel"));
-        dialog.add_response("add", t("Add"));
-        dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
-
-        if let Ok(Some(account)) = self.store.account(&self.account_id) {
-            populate_remote_picker(
-                &self.account_id,
-                &account.server_url,
-                &account.login_name,
-                &picker,
-                &remote_list,
-            );
-        }
-
-        let store = self.store.clone();
-        let account_id = self.account_id.clone();
-        let folder_ui = self.clone();
-        dialog.connect_response(None, move |_dialog, response| {
-            if response != "add" {
-                return;
-            }
-            let local_root = local_entry.text().to_string();
-            let remote_text = remote_entry.text().to_string();
-            let root = expanduser(&local_root);
-            let outcome = if !root.is_absolute() {
-                Err(ConfigError::new(t("Choose an absolute local folder.")))
-            } else {
-                remote_path_for(&local_root, &remote_text).and_then(|remote| {
-                    store.add_folder(
-                        &account_id,
-                        &FolderConfig {
-                            id: String::new(),
-                            local_root: root.to_string_lossy().into_owned(),
-                            remote_path: remote,
-                            space_id: None,
-                        },
-                    )
-                })
-            };
-            match outcome {
-                Ok(_) => {
-                    folder_ui.refresh();
-                    invoke(&folder_ui.callbacks.on_folder_changed);
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    let toast = libadwaita::Toast::new(&message);
-                    folder_ui.window.add_toast(toast);
-                    folder_ui
-                        .present_add_folder_dialog(Some((local_root, remote_text)), Some(message));
-                }
-            }
-        });
-
-        dialog.present(Some(&self.window));
     }
+}
+
+/// Present the Add Folder dialog for an account against a config store.
+///
+/// This is the single construction site for the dialog, shared by the
+/// Settings window and the main window's account view. `parent`
+/// is the transient-for widget — the Settings `PreferencesWindow` or the main
+/// `ApplicationWindow`. `on_folder_added` runs after a folder is committed;
+/// `on_error` is invoked with the validation message (the caller usually
+/// surfaces it as a toast) in addition to the dialog's own inline re-present.
+///
+/// The remote-folder picker is always sensitive (see `populate_remote_picker`):
+/// when the lookup fails or returns nothing the user can still type a remote
+/// path into the adjacent entry, which is the actual source of truth.
+pub fn present_add_folder_dialog(
+    store: ConfigStore,
+    account_id: String,
+    parent: &gtk4::Widget,
+    on_folder_added: Rc<dyn Fn()>,
+    on_error: Rc<dyn Fn(String)>,
+    previous: Option<(String, String)>,
+    error: Option<String>,
+) {
+    let (previous_local, previous_remote) = previous.unwrap_or_default();
+    let local_default = if previous_local.is_empty() {
+        default_sync_root().to_string_lossy().into_owned()
+    } else {
+        previous_local
+    };
+
+    let dialog = libadwaita::AlertDialog::new(
+        Some(t("Add Folder")),
+        Some(t(
+            "Choose a local folder and an optional remote folder to mirror from this account.",
+        )),
+    );
+    let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let local_entry = libadwaita::EntryRow::new();
+    local_entry.set_title(t("Local folder"));
+    local_entry.set_text(&local_default);
+
+    let choose = gtk4::Button::builder()
+        .icon_name("folder-open-symbolic")
+        .tooltip_text(t("Choose a local folder to synchronize"))
+        .valign(gtk4::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    let entry_for_picker = local_entry.clone();
+    choose.connect_clicked(move |_| {
+        choose_local_folder(entry_for_picker.clone());
+    });
+    local_entry.add_suffix(&choose);
+    entry_box.append(&local_entry);
+
+    let remote_entry = libadwaita::EntryRow::new();
+    remote_entry.set_title(t("Remote folder (empty: use the local folder name)"));
+    if !previous_remote.is_empty() {
+        remote_entry.set_text(&previous_remote);
+    }
+    let remote_list = gtk4::StringList::new(&[]);
+    let picker = gtk4::DropDown::from_strings(&[]);
+    picker.set_model(Some(&remote_list));
+    picker.set_selected(u32::MAX);
+    picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
+    let entry_for_pick = remote_entry.clone();
+    picker.connect_selected_notify(move |picker| {
+        if let Some(item) = picker.selected_item() {
+            if let Ok(item) = item.downcast::<gtk4::StringObject>() {
+                entry_for_pick.set_text(&item.string());
+                picker.set_selected(u32::MAX);
+            }
+        }
+    });
+    remote_entry.add_suffix(&picker);
+    entry_box.append(&remote_entry);
+
+    let picker_status = gtk4::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["dim-label"])
+        .build();
+    entry_box.append(&picker_status);
+
+    if let Some(message) = error {
+        let label = gtk4::Label::builder()
+            .label(message)
+            .xalign(0.0)
+            .wrap(true)
+            .css_classes(["error"])
+            .build();
+        entry_box.append(&label);
+    }
+
+    dialog.set_extra_child(Some(&entry_box));
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("add", t("Add"));
+    dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
+
+    if let Ok(Some(account)) = store.account(&account_id) {
+        populate_remote_picker(
+            &account_id,
+            &account.server_url,
+            &account.login_name,
+            &remote_list,
+            &picker_status,
+        );
+    }
+
+    let store_for_response = store;
+    let account_id_for_response = account_id;
+    let on_folder_added_for_response = on_folder_added.clone();
+    let on_error_for_response = on_error.clone();
+    let parent_for_response = parent.clone();
+    dialog.connect_response(None, move |_dialog, response| {
+        if response != "add" {
+            return;
+        }
+        let local_root = local_entry.text().to_string();
+        let remote_text = remote_entry.text().to_string();
+        let root = expanduser(&local_root);
+        let outcome = if !root.is_absolute() {
+            Err(ConfigError::new(t("Choose an absolute local folder.")))
+        } else {
+            remote_path_for(&local_root, &remote_text).and_then(|remote| {
+                store_for_response.add_folder(
+                    &account_id_for_response,
+                    &FolderConfig {
+                        id: String::new(),
+                        local_root: root.to_string_lossy().into_owned(),
+                        remote_path: remote,
+                        space_id: None,
+                    },
+                )
+            })
+        };
+        match outcome {
+            Ok(_) => on_folder_added_for_response(),
+            Err(error) => {
+                let message = error.to_string();
+                on_error_for_response(message.clone());
+                // Re-open with the typed values and an inline error so the user
+                // can correct them without losing what was entered.
+                present_add_folder_dialog(
+                    store_for_response.clone(),
+                    account_id_for_response.clone(),
+                    &parent_for_response,
+                    on_folder_added_for_response.clone(),
+                    on_error_for_response.clone(),
+                    Some((local_root, remote_text)),
+                    Some(message),
+                );
+            }
+        }
+    });
+
+    dialog.present(Some(parent));
 }
 
 /// Present a folder chooser and write the selection into the entry row.
@@ -1082,37 +1149,106 @@ fn choose_local_folder(entry: libadwaita::EntryRow) {
     );
 }
 
-/// Fill the remote picker with folders that already exist on the server.
+/// Outcome of resolving the remote-folder list for the Add Folder picker.
+///
+/// Every error path maps to one of these variants so the UI can surface a
+/// short, translated hint instead of silently graying out the picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RemoteFolderLookup {
+    /// Folders resolved successfully (possibly empty).
+    Ok(Vec<String>),
+    /// No usable credential was found in the keyring.
+    NoCredentials,
+    /// The server rejected the stored credentials.
+    AuthFailed,
+    /// The folder list could not be retrieved (network, HTTP or protocol).
+    Network,
+}
+
+/// Map the resolved keyring credential and the remote-folder fetch into a
+/// single picker outcome.
+///
+/// Pure on purpose: the blocking I/O (Secret Service lookup + WebDAV PROPFIND)
+/// happens in the caller, which feeds the already-resolved results here. This
+/// keeps the three error paths unit-testable without a keyring or a live
+/// server. `None` covers both "no item stored" and "the keyring itself was
+/// unavailable" — in either case there is no password to authenticate with.
+fn classify_remote_lookup(
+    resolved: Option<(String, Result<Vec<String>, ApiError>)>,
+) -> RemoteFolderLookup {
+    match resolved {
+        None => RemoteFolderLookup::NoCredentials,
+        Some((_password, folders)) => match folders {
+            Ok(list) => RemoteFolderLookup::Ok(list),
+            Err(ApiError::AuthRejected) => RemoteFolderLookup::AuthFailed,
+            Err(_) => RemoteFolderLookup::Network,
+        },
+    }
+}
+
+/// Fill the remote picker with folders that already exist on the server, and
+/// report why when that is not possible.
 ///
 /// The keyring lookup and the PROPFIND run off the UI thread (blocking Secret
-/// Service + network); the model is updated back on the main loop.
+/// Service + network); the model and the status label are updated back on the
+/// main loop. The picker itself is left always-sensitive by the caller: an
+/// empty model is harmless because the adjacent remote EntryRow is the source
+/// of truth.
 fn populate_remote_picker(
     account_id: &str,
     server: &str,
     username: &str,
-    picker: &gtk4::DropDown,
     list: &gtk4::StringList,
+    status: &gtk4::Label,
 ) {
     let account_id = account_id.to_string();
     let server = server.to_string();
     let username = username.to_string();
-    let picker = picker.clone();
     let list = list.clone();
-    let handle = gio::spawn_blocking(move || -> Vec<String> {
-        let Ok(Some(password)) = CredentialsStore::get(&account_id) else {
-            return Vec::new();
+    let status = status.clone();
+    let handle = gio::spawn_blocking(move || -> RemoteFolderLookup {
+        let password = match CredentialsStore::get(&account_id) {
+            Ok(Some(password)) => Some(password),
+            Ok(None) => {
+                eprintln!("remote picker: no stored credentials for account {account_id}");
+                None
+            }
+            Err(error) => {
+                eprintln!("remote picker: keyring lookup failed for account {account_id}: {error}");
+                None
+            }
         };
-        NextcloudApi::new()
-            .list_remote_folders(&server, &username, &password)
-            .unwrap_or_default()
+        let Some(password) = password else {
+            return classify_remote_lookup(None);
+        };
+        let folders = NextcloudApi::new().list_remote_folders(&server, &username, &password);
+        if let Err(error) = &folders {
+            eprintln!(
+                "remote picker: list_remote_folders failed for account {account_id}: {error}"
+            );
+        }
+        classify_remote_lookup(Some((password, folders)))
     });
     glib::spawn_future_local(async move {
-        if let Ok(folders) = handle.await {
-            for folder in folders {
-                list.append(&folder);
+        let Ok(outcome) = handle.await else {
+            return;
+        };
+        match outcome {
+            RemoteFolderLookup::Ok(folders) => {
+                for folder in folders {
+                    list.append(&folder);
+                }
+                // An empty list is fine: the user can still type a remote path.
+                status.set_text("");
             }
-            if list.n_items() > 0 {
-                picker.set_sensitive(true);
+            RemoteFolderLookup::NoCredentials => {
+                status.set_text(t("No saved credentials for this account."));
+            }
+            RemoteFolderLookup::AuthFailed => {
+                status.set_text(t("Could not authenticate with the server."));
+            }
+            RemoteFolderLookup::Network => {
+                status.set_text(t("Could not reach the server."));
             }
         }
     });
@@ -1327,6 +1463,9 @@ impl ExclusionsDialog {
 
         let restore = gtk4::Button::builder()
             .label(t("Restore Defaults"))
+            .tooltip_text(t(
+                "Reset the exclusion patterns to the recommended defaults",
+            ))
             .halign(gtk4::Align::Start)
             .build();
         content.append(&restore);
@@ -1627,6 +1766,64 @@ mod tests {
     fn folder_subtitle_uses_root_for_empty_remote() {
         assert_eq!(folder_subtitle(""), "/");
         assert_eq!(folder_subtitle("/Documents"), "/Documents");
+    }
+
+    #[test]
+    fn classify_lookup_success_keeps_the_folder_list() {
+        assert_eq!(
+            classify_remote_lookup(Some((
+                "pw".to_string(),
+                Ok(vec!["/Documents".to_string(), "/Photos".to_string()])
+            ))),
+            RemoteFolderLookup::Ok(vec!["/Documents".to_string(), "/Photos".to_string()])
+        );
+    }
+
+    #[test]
+    fn classify_lookup_empty_success_is_still_ok() {
+        // An empty folder list is a legitimate result, not an error: the user
+        // can still type a remote path next to the picker.
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Ok(Vec::new())))),
+            RemoteFolderLookup::Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn classify_lookup_auth_rejection_maps_to_auth_failed() {
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Err(ApiError::AuthRejected)))),
+            RemoteFolderLookup::AuthFailed
+        );
+    }
+
+    #[test]
+    fn classify_lookup_non_auth_api_errors_map_to_network() {
+        // Transport, unexpected HTTP status and a malformed body are all
+        // "could not reach the server" from the user's point of view.
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Err(ApiError::Transport)))),
+            RemoteFolderLookup::Network
+        );
+        assert_eq!(
+            classify_remote_lookup(Some((
+                "pw".to_string(),
+                Err(ApiError::Http { status: 500 })
+            ))),
+            RemoteFolderLookup::Network
+        );
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Err(ApiError::InvalidResponse)))),
+            RemoteFolderLookup::Network
+        );
+    }
+
+    #[test]
+    fn classify_lookup_missing_credential_maps_to_no_credentials() {
+        assert_eq!(
+            classify_remote_lookup(None),
+            RemoteFolderLookup::NoCredentials
+        );
     }
 
     #[test]

@@ -20,7 +20,7 @@ use crate::state::{AppState, StateSnapshot};
 use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
-use crate::ui::settings::{SettingsCallbacks, SettingsWindow};
+use crate::ui::settings::{present_add_folder_dialog, SettingsCallbacks, SettingsWindow};
 use crate::util::i18n::t;
 
 /// Translated window title (also used as a machine-readable page name).
@@ -53,6 +53,8 @@ pub struct AccountCallbacks {
     pub on_open_folder: Option<OpenFolderCallback>,
     pub on_remove_folder: Option<RemoveFolderCallback>,
     pub on_edit_ignored: Option<EditIgnoredCallback>,
+    /// Invoked when the user clicks the in-view "Add Folder" row.
+    pub on_add_folder: Option<Rc<dyn Fn()>>,
 }
 
 /// One account rendered as the content of the split view: a list of folder
@@ -162,6 +164,33 @@ impl AccountView {
             row.add_prefix(&icon);
             account_list.append(&row);
         }
+
+        // "Add Folder" entry point directly from the account view, so the
+        // user does not have to open Settings to add a folder. It opens the
+        // same dialog the Settings Synchronization page uses.
+        if let Some(on_add_folder) = &callbacks.on_add_folder {
+            let add_row = libadwaita::ActionRow::builder()
+                .title(t("Add Folder"))
+                .subtitle(t("Mirror another local folder from this account"))
+                .tooltip_text(t("Add a local folder to synchronize with this account"))
+                .activatable(true)
+                .build();
+            let add_icon = gtk4::Image::builder()
+                .icon_name("list-add-symbolic")
+                .pixel_size(16)
+                .build();
+            add_row.add_prefix(&add_icon);
+            let next = gtk4::Image::builder()
+                .icon_name("go-next-symbolic")
+                .pixel_size(16)
+                .build();
+            add_row.add_suffix(&next);
+            let on_add_folder = on_add_folder.clone();
+            add_row.connect_activated(move |_| {
+                on_add_folder();
+            });
+            account_list.append(&add_row);
+        }
         root.append(&account_list);
 
         // Sync Now / Pause buttons.
@@ -177,6 +206,7 @@ impl AccountView {
             .build();
         let sync_button = gtk4::Button::builder()
             .child(&sync_content)
+            .tooltip_text(t("Synchronize this account now"))
             .css_classes(["suggested-action", "pill"])
             .build();
         let runtime_for_sync = runtime.clone();
@@ -196,6 +226,7 @@ impl AccountView {
             .build();
         let pause_button = gtk4::Button::builder()
             .child(&pause_content)
+            .tooltip_text(t("Pause or resume synchronization"))
             .css_classes(["pill"])
             .build();
         let runtime_for_pause = runtime.clone();
@@ -268,6 +299,7 @@ pub struct MainWindow {
     update_result_dialog: Option<libadwaita::Dialog>,
     accounts_list: gtk4::ListBox,
     content_stack: gtk4::Stack,
+    toast_overlay: libadwaita::ToastOverlay,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
     account_view: Option<AccountView>,
     settings_handler: SettingsHandler,
@@ -403,6 +435,7 @@ impl MainWindow {
             update_result_dialog: None,
             accounts_list,
             content_stack,
+            toast_overlay,
             account_rows: std::collections::HashMap::new(),
             account_view: None,
             settings_handler,
@@ -659,6 +692,37 @@ impl MainWindow {
         self.settings_window = Some(window);
     }
 
+    /// Open the Add Folder dialog for the active account from the main window.
+    /// Shares the same dialog the Settings Synchronization page uses; on
+    /// success it refreshes the account view, and validation errors surface as
+    /// a toast on the main window's overlay (in addition to the dialog's own
+    /// inline re-present).
+    pub fn show_add_folder_dialog(&mut self) {
+        let Some(account_id) = self.active_account_id.clone() else {
+            return;
+        };
+        let store = self.config_store.clone();
+        let weak = self.self_weak.clone();
+        let on_folder_added = Rc::new(move || {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().refresh_after_config_change();
+            }
+        });
+        let overlay = self.toast_overlay.clone();
+        let on_error = Rc::new(move |message: String| {
+            overlay.add_toast(libadwaita::Toast::new(&message));
+        });
+        present_add_folder_dialog(
+            store,
+            account_id,
+            self.window.upcast_ref::<gtk4::Widget>(),
+            on_folder_added,
+            on_error,
+            None,
+            None,
+        );
+    }
+
     /// Re-read the configuration, refresh the sidebar and re-present the
     /// active account (called after Settings mutates folders).
     fn refresh_after_config_change(&mut self) {
@@ -810,6 +874,14 @@ impl MainWindow {
             })),
             on_remove_folder: None,
             on_edit_ignored: None,
+            on_add_folder: {
+                let weak = self.self_weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().show_add_folder_dialog();
+                    }
+                }))
+            },
         };
         let view = AccountView::new(runtime, callbacks);
         self.content_stack.add_named(&view.root, Some("account"));
@@ -848,6 +920,7 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
     let add_button = gtk4::Button::builder()
         .label(t("Add Account"))
         .icon_name("list-add-symbolic")
+        .tooltip_text(t("Add a new account"))
         .halign(gtk4::Align::Fill)
         .css_classes(["flat"])
         .build();

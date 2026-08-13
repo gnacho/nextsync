@@ -1813,6 +1813,86 @@ msgstr "Historial completo de cambios"
 msgid "{count} changes in this release"
 msgstr "{count} cambios en esta versión"
 
+#: src/ui/settings.rs
+msgid "Could not authenticate with the server."
+msgstr "No se pudo autenticar con el servidor."
+
+#: src/ui/settings.rs
+msgid "Could not reach the server."
+msgstr "No se pudo contactar con el servidor."
+
+#: src/ui/settings.rs
+msgid "No saved credentials for this account."
+msgstr "No hay credenciales guardadas para esta cuenta."
+
+#: src/ui/main_window.rs src/ui/settings.rs src/ui/setup.rs
+msgid "Add a local folder to synchronize"
+msgstr "Añade una carpeta local para sincronizar"
+
+#: src/ui/main_window.rs
+msgid "Add a new account"
+msgstr "Añadir una cuenta nueva"
+
+#: src/ui/settings.rs
+msgid "Add a local folder to synchronize with this account"
+msgstr "Añade una carpeta local para sincronizar con esta cuenta"
+
+#: src/ui/settings.rs
+msgid "Choose a local folder to synchronize"
+msgstr "Elige una carpeta local para sincronizar"
+
+#: src/ui/setup.rs
+msgid "Choose the synchronization provider"
+msgstr "Elige el proveedor de sincronización"
+
+#: src/ui/setup.rs
+msgid "Continue to the next step"
+msgstr "Continuar al siguiente paso"
+
+#: src/ui/settings.rs
+msgid "Disconnect this account; local files are kept"
+msgstr "Desconecta esta cuenta; los archivos locales se conservan"
+
+#: src/ui/setup.rs
+msgid "Finish setup and start synchronizing"
+msgstr "Finalizar la configuración y empezar a sincronizar"
+
+#: src/ui/setup.rs
+msgid "Go back to the previous step"
+msgstr "Volver al paso anterior"
+
+#: src/ui/setup.rs
+msgid "Optional OpenCloud space identifier"
+msgstr "Identificador opcional del espacio de OpenCloud"
+
+#: src/ui/main_window.rs
+msgid "Pause or resume synchronization"
+msgstr "Pausar o reanudar la sincronización"
+
+#: src/ui/settings.rs
+msgid "Reset the exclusion patterns to the recommended defaults"
+msgstr "Restablece los patrones de exclusión a los valores recomendados"
+
+#: src/ui/settings.rs
+msgid "Save the custom HTTP proxy"
+msgstr "Guarda el proxy HTTP personalizado"
+
+#: src/ui/main_window.rs
+msgid "Synchronize this account now"
+msgstr "Sincroniza esta cuenta ahora"
+
+#: src/ui/setup.rs
+msgid "The address of your Nextcloud or OpenCloud server"
+msgstr "La dirección de tu servidor Nextcloud u OpenCloud"
+
+#: src/ui/setup.rs
+msgid "Your account password or app password"
+msgstr "La contraseña de tu cuenta o la contraseña de aplicación"
+
+#: src/ui/setup.rs
+msgid "Your account user name"
+msgstr "El nombre de usuario de tu cuenta"
+
 #~ msgid "Connected. Add folders from Settings."
 #~ msgstr "Conectado. Añade carpetas desde Ajustes."
 
