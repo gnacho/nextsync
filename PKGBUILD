@@ -20,6 +20,9 @@ prepare() {
 build() {
     cd "$pkgname-$pkgver"
     export CARGO_TARGET_DIR=target
+    # aws-lc-sys' bundled C library does not link under the distro's
+    # hardening/LTO flags; build with the toolchain defaults instead.
+    unset CFLAGS CXXFLAGS LDFLAGS
     cargo build --frozen --release
 }
 
