@@ -401,31 +401,28 @@ mod tests {
 
     #[test]
     fn row_construction_smoke() {
-        set_locale(Locale::English);
-        if gtk4::init().is_err() {
-            eprintln!("skipped: no display available");
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let folder = FolderConfig {
+                id: "f1".to_string(),
+                local_root: "/tmp/a".to_string(),
+                remote_path: "/docs".to_string(),
+                space_id: None,
+            };
+            let state = StateController::new(AppState::IdleOk);
+            let row = FolderStatusRow::new(
+                folder,
+                Some(state),
+                FolderRowCallbacks::default(),
+                None,
+                None,
+            );
+            assert_eq!(row.row.title(), "a");
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Synchronized · Remote: /docs")
+            );
             reset_locale();
-            return;
-        }
-        let folder = FolderConfig {
-            id: "f1".to_string(),
-            local_root: "/tmp/a".to_string(),
-            remote_path: "/docs".to_string(),
-            space_id: None,
-        };
-        let state = StateController::new(AppState::IdleOk);
-        let row = FolderStatusRow::new(
-            folder,
-            Some(state),
-            FolderRowCallbacks::default(),
-            None,
-            None,
-        );
-        assert_eq!(row.row.title(), "a");
-        assert_eq!(
-            row.row.subtitle().as_deref(),
-            Some("Synchronized · Remote: /docs")
-        );
-        reset_locale();
+        });
     }
 }
