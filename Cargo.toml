@@ -8,6 +8,7 @@ description = "NextSync - Nextcloud desktop client for GNOME (Rust rewrite)"
 
 [dependencies]
 async-channel = "2"
+gio = "0.22"
 glib = { version = "0.22", features = ["futures"] }
 gtk4 = { version = "0.11", features = ["v4_22"] }
 ksni = { version = "0.3", features = ["blocking"] }
