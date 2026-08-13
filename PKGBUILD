@@ -34,8 +34,6 @@ package() {
     local colored=(
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
-        nextsync-info-symbolic
-        nextsync-settings-2-symbolic
         nextsync-tray-cloud
         nextsync-tray-cloud-off
         nextsync-tray-settings
@@ -55,6 +53,8 @@ package() {
         nextsync-status-ok-symbolic
         nextsync-status-paused-symbolic
         nextsync-status-syncing-symbolic
+        nextsync-info-symbolic
+        nextsync-settings-2-symbolic
     )
     for icon in "${symbolic[@]}"; do
         install -Dm644 "data/icons/$icon.svg" \
