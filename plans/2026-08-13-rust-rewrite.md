@@ -45,6 +45,8 @@ La siguiente release soporta **ambos proveedores** seleccionables por cuenta. In
 
 **Empaquetado (Task 6.2)**: depender de `nextcloud-client` (nextcloudcmd) y opcionalmente `opencloud-desktop-git`/build del desktop oficial (opencloudcmd). La app detecta binarios presentes; si el proveedor elegido no tiene binario, aviso en setup.
 
+**Ejemplo de uso (confirmado por diseño)**: una carpeta compartida con Nextcloud y otra con OpenCloud = **dos cuentas** (una `provider: nextcloud` con sus `folders[]`, otra `provider: opencloud` con sus `folders[]` y `space_id`). El `provider` vive en la cuenta, no en la carpeta: no se mezclan proveedores dentro de un mismo login (difieren en binario CLI, args y credenciales). Cada cuenta tiene su propio estado, triggers, delete guard y credenciales; el scheduler, SyncPermit y la UI multi-cuenta son compartidos.
+
 ## Inventario de features (de la v0.2.x, para paridad)
 
 **Core/estado**: AccountManager (multi-cuenta), AccountRuntime (fachada RuntimeController — fix #20), FolderRuntime por folder, StateController/AggregateStateController, SyncPermit (semáforo 1-a-la-vez), scheduler (4 triggers), debounce, sync_engine (spawn nextcloudcmd + progreso).
