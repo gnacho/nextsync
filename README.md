@@ -7,6 +7,10 @@
     ·
     <a href="https://github.com/gnacho/nextsync-rs/issues">Report an issue</a>
   </p>
+  <p align="center">
+    <a href="README.md">English</a> |
+    <a href="README.es.md">Español</a>
+  </p>
   <p>
     <img src="https://img.shields.io/badge/version-0.1.0-dev-6557e8?style=flat-square" alt="Version 0.1.0 dev">
     <img src="https://img.shields.io/badge/platform-Linux-f0c674?style=flat-square&logo=linux&logoColor=111" alt="Linux">
