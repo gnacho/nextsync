@@ -2,17 +2,24 @@
 //!
 //! Thin binary launcher; all logic lives in the `nextsync` library.
 
-use nextsync::state::StateController;
+use nextsync::state::{AppState, StateController};
 
 fn main() {
-    println!("NextSync (Rust) scaffold");
-    println!("state ready: {}", StateController::ready());
+    let state = StateController::new(AppState::Unconfigured);
+    println!(
+        "NextSync (Rust) scaffold — state: {}",
+        state.snapshot().state
+    );
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn smoke_scaffold() {
-        assert!(nextsync::state::StateController::ready());
+        let state = nextsync::state::StateController::new(nextsync::state::AppState::Unconfigured);
+        assert_eq!(
+            state.snapshot().state,
+            nextsync::state::AppState::Unconfigured
+        );
     }
 }

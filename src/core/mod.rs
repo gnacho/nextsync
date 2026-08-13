@@ -2,6 +2,7 @@
 //! desktop integration. Fases 2, 3 and 5.
 
 pub mod autostart;
+pub mod debounce;
 pub mod delete_guard;
 pub mod desktop_integration;
 pub mod network;
