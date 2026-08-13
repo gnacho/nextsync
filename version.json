@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "mandatory": false,
   "summary": "First Rust rewrite milestone: folder-focused main window, settings, setup wizard, tray, conflict resolver and i18n.",
   "changelog": [
