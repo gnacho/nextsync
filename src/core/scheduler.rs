@@ -27,6 +27,7 @@ use crate::core::sync_permit::SyncPermit;
 use crate::core::triggers::{manual_only, CoalescingQueue, Trigger, TriggerSettings};
 use crate::state::{AppState, StateController};
 use crate::storage::config::SyncConfig;
+use crate::util::i18n::t;
 
 /// Quiet window before local feedback collapses into a start (ms).
 pub const DEBOUNCE_MS: u64 = 2000;
@@ -325,13 +326,13 @@ impl SchedulerInner {
         if !self.online {
             self.queue.add(trigger);
             self.state
-                .set(AppState::Offline, "Waiting for a network connection");
+                .set(AppState::Offline, t("Waiting for a network connection"));
             return;
         }
         if self.keyring_locked && trigger != Trigger::Manual {
             self.queue.add(trigger);
             self.state
-                .set(AppState::KeyringLocked, "Password keyring is locked");
+                .set(AppState::KeyringLocked, t("Password keyring is locked"));
             return;
         }
         self.queue.add(trigger);
@@ -345,8 +346,10 @@ impl SchedulerInner {
     }
 
     fn schedule_debounce(&mut self) {
-        self.state
-            .set(AppState::SyncQueued, "Waiting for local changes to settle");
+        self.state.set(
+            AppState::SyncQueued,
+            t("Waiting for local changes to settle"),
+        );
         self.debounce().kick();
     }
 
@@ -360,7 +363,7 @@ impl SchedulerInner {
             return;
         }
         self.state
-            .set(AppState::SyncQueued, "Synchronization scheduled");
+            .set(AppState::SyncQueued, t("Synchronization scheduled"));
         let weak = self.self_ref.clone();
         let id = self.source.borrow_mut().add_idle(Box::new(move || {
             if let Some(inner) = weak.upgrade() {
@@ -402,7 +405,7 @@ impl SchedulerInner {
     }
 
     fn prepare_sync(&mut self, reasons: Vec<Trigger>) {
-        self.state.set(AppState::Syncing, "Synchronizing files…");
+        self.state.set(AppState::Syncing, t("Synchronizing files…"));
         self.state.set_progress(None);
         self.preparing = true;
         self.begin_run(reasons);
@@ -415,7 +418,7 @@ impl SchedulerInner {
                 self.queue.extend(reasons.iter().copied());
                 self.state.set(
                     AppState::SyncQueued,
-                    "Waiting for another account to finish…",
+                    t("Waiting for another account to finish…"),
                 );
                 let source = self.source.clone();
                 let weak = self.self_ref.clone();
@@ -460,7 +463,7 @@ impl SchedulerInner {
                 self.keyring_locked = false;
                 self.state.set(
                     AppState::IdleOk,
-                    "Synchronized with conflicts — review the log",
+                    t("Synchronized with conflicts — review the log"),
                 );
                 true
             }
@@ -468,20 +471,20 @@ impl SchedulerInner {
                 self.keyring_locked = false;
                 self.state.set(
                     AppState::AuthRequired,
-                    "Your Nextcloud account needs attention",
+                    t("Your Nextcloud account needs attention"),
                 );
                 false
             }
             SyncOutcome::KeyringLocked => {
                 self.keyring_locked = true;
                 self.state
-                    .set(AppState::KeyringLocked, "Password keyring is locked");
+                    .set(AppState::KeyringLocked, t("Password keyring is locked"));
                 false
             }
             SyncOutcome::Failed => {
                 self.keyring_locked = false;
                 self.state
-                    .set(AppState::Error, "Synchronization failed — view the log");
+                    .set(AppState::Error, t("Synchronization failed — view the log"));
                 true
             }
         };
@@ -546,7 +549,7 @@ impl SchedulerInner {
         self.user_paused = paused;
         if paused {
             self.state
-                .set(AppState::PausedUser, "Synchronization is paused");
+                .set(AppState::PausedUser, t("Synchronization is paused"));
         } else {
             let should_reconcile =
                 self.local_dirty || self.remote_pending || !self.queue.is_empty();
@@ -565,9 +568,9 @@ impl SchedulerInner {
         self.battery_paused = paused;
         if paused {
             let message = if self.running {
-                "Will pause after the current synchronization"
+                t("Will pause after the current synchronization")
             } else {
-                "Paused on battery"
+                t("Paused on battery")
             };
             self.state.set(AppState::PausedBattery, message);
         } else if was_paused && !self.user_paused {
@@ -588,7 +591,7 @@ impl SchedulerInner {
         self.online = online;
         if !online {
             self.state
-                .set(AppState::Offline, "Waiting for a network connection");
+                .set(AppState::Offline, t("Waiting for a network connection"));
         } else if !was_online {
             if !self.queue.is_empty() || !self.manual_only() {
                 self.request(Trigger::NetworkRestored);
@@ -604,17 +607,20 @@ impl SchedulerInner {
                 .set(AppState::DeleteReview, alert.message.clone());
         } else if self.user_paused {
             self.state
-                .set(AppState::PausedUser, "Synchronization is paused");
+                .set(AppState::PausedUser, t("Synchronization is paused"));
         } else if self.battery_paused {
-            self.state.set(AppState::PausedBattery, "Paused on battery");
+            self.state
+                .set(AppState::PausedBattery, t("Paused on battery"));
         } else if !self.online {
             self.state
-                .set(AppState::Offline, "Waiting for a network connection");
+                .set(AppState::Offline, t("Waiting for a network connection"));
         } else if self.manual_only() {
-            self.state
-                .set(AppState::IdleManualOnly, "Automatic synchronization is off");
+            self.state.set(
+                AppState::IdleManualOnly,
+                t("Automatic synchronization is off"),
+            );
         } else {
-            self.state.set(AppState::IdleOk, "Synchronized");
+            self.state.set(AppState::IdleOk, t("Synchronized"));
         }
     }
 
@@ -796,6 +802,9 @@ mod tests {
         permit: Option<SyncPermit>,
         settings: TriggerSettings,
     ) -> (Scheduler, Rc<RefCell<FakeTimeoutSource>>, FakeRunner) {
+        // Pin English so the translated state messages are deterministic
+        // regardless of the ambient locale (LANG=es_ES on the dev machine).
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
         let source = fake_source();
         let source_dyn: Rc<RefCell<dyn TimeoutSource>> = source.clone();
         let runner = FakeRunner::default();
@@ -1050,6 +1059,7 @@ mod tests {
 
     #[test]
     fn on_completed_reports_the_outcome() {
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
         let source = fake_source();
         let source_dyn: Rc<RefCell<dyn TimeoutSource>> = source.clone();
         let runner = FakeRunner::default();
@@ -1272,5 +1282,36 @@ mod tests {
         run_idle(&source);
         finish(&runner, SyncOutcome::Conflict);
         assert_eq!(guard.0.borrow().record_calls, 1);
+    }
+
+    // ---- i18n ---------------------------------------------------------------
+
+    #[test]
+    fn synchronized_message_translates_from_the_spanish_catalog() {
+        // "Synchronized" is the one core state message present in the embedded
+        // Spanish catalog (src/util/translations/es.rs); under a Spanish locale
+        // the idle state surfaces its translation instead of the source string.
+        let (scheduler, source, runner) = make_scheduler(None);
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::Spanish);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(scheduler.state().snapshot().message, "Sincronizado");
+    }
+
+    #[test]
+    fn untranslated_scheduler_message_falls_back_to_english_in_spanish() {
+        // "Waiting for local changes to settle" is not in the catalog yet, so
+        // t() falls back to the English source even under a Spanish locale.
+        // This pins the real behavior until po/es.po adds the translation.
+        let (scheduler, _source, _runner) = make_scheduler(None);
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::Spanish);
+        scheduler.request(Trigger::LocalInotify);
+        assert_eq!(scheduler.state().snapshot().state, AppState::SyncQueued);
+        assert_eq!(
+            scheduler.state().snapshot().message,
+            "Waiting for local changes to settle"
+        );
     }
 }

@@ -29,6 +29,7 @@ use crate::storage::config::{
     ensure_private_directory, expanduser, folder_fingerprint, AccountConfig, DeleteGuardConfig,
     FolderConfig,
 };
+use crate::util::i18n::t;
 use crate::util::paths::state_dir;
 
 /// Version of the manifest layout. Manifests with another format are ignored.
@@ -299,7 +300,7 @@ impl DeleteGuard {
         if !root.exists() || !root.is_dir() {
             return Some(DeleteAlert {
                 reason: "folder_missing".to_string(),
-                message: MESSAGE_FOLDER_MISSING.to_string(),
+                message: t(MESSAGE_FOLDER_MISSING).to_string(),
                 missing_paths: Vec::new(),
                 previous_count: manifest.files.len(),
                 current_count: 0,
@@ -317,7 +318,7 @@ impl DeleteGuard {
         if previous_count > 0 && current_count == 0 {
             return Some(DeleteAlert {
                 reason: "folder_emptied".to_string(),
-                message: MESSAGE_FOLDER_EMPTIED.to_string(),
+                message: t(MESSAGE_FOLDER_EMPTIED).to_string(),
                 missing_paths: missing,
                 previous_count,
                 current_count,

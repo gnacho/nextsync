@@ -25,6 +25,7 @@ use crate::core::sync_permit::SyncPermit;
 use crate::nextcloud::sync_engine::{SyncEngine, SyncProgress};
 use crate::state::{AggregateStateController, AppState, StateController};
 use crate::storage::config::{AccountConfig, Config, FolderConfig, NetworkConfig};
+use crate::util::i18n::t;
 
 /// One running synchronization runtime for a single folder pair.
 pub struct FolderRuntime {
@@ -318,7 +319,7 @@ impl AccountRuntime {
         self.sync_folders();
         if self.folders.is_empty() && self.idle.is_none() {
             let idle = StateController::new(AppState::IdleOk);
-            idle.set(AppState::IdleOk, "Connected. Add folders from Settings.");
+            idle.set(AppState::IdleOk, t("Connected. Add folders from Settings."));
             self.aggregate.add(idle.clone());
             self.idle = Some(idle);
         }
@@ -490,6 +491,9 @@ mod tests {
     use crate::state::StateSnapshot;
 
     fn fake_source() -> Rc<RefCell<FakeTimeoutSource>> {
+        // Pin English so the translated state messages stay deterministic
+        // regardless of the ambient locale (LANG=es_ES on the dev machine).
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
         Rc::new(RefCell::new(FakeTimeoutSource::default()))
     }
 
