@@ -9,7 +9,7 @@
 //! separators, no `..`, and the three too-broad patterns (`*`, `.*`, `*.*`)
 //! are rejected.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::storage::config::{validate_pattern, DEFAULT_PATTERNS};
 
@@ -64,6 +64,19 @@ impl ExclusionMatcher {
             .and_then(|name| name.to_str())
             .map(|name| self.matches_name(name))
             .unwrap_or(false)
+    }
+
+    /// Write the validated patterns to a `nextcloudcmd --exclude` file.
+    ///
+    /// Mirrors `exclusions.py::write_nextcloudcmd_file`: the engine consumes
+    /// this file, so the watcher and the deletion guard must see exactly the
+    /// same names. Returns `None` when the matcher is disabled or empty.
+    pub fn write_nextcloudcmd_file(&self, destination: &Path) -> std::io::Result<Option<PathBuf>> {
+        if !self.enabled || self.patterns.is_empty() {
+            return Ok(None);
+        }
+        std::fs::write(destination, format!("{}\n", self.patterns.join("\n")))?;
+        Ok(Some(destination.to_path_buf()))
     }
 }
 
@@ -242,5 +255,28 @@ mod tests {
                 message: "Pattern is invalid or too long.".into()
             }
         );
+    }
+
+    #[test]
+    fn write_nextcloudcmd_file_writes_joined_patterns() {
+        let dir = std::env::temp_dir();
+        let file = dir.join("nextsync-exclude-test.lst");
+        let matcher = ExclusionMatcher::new(["*.swp", "Thumbs.db"], true);
+        let written = matcher.write_nextcloudcmd_file(&file).unwrap();
+        assert_eq!(written.as_deref(), Some(file.as_path()));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "*.swp\nThumbs.db\n");
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn write_nextcloudcmd_file_returns_none_when_disabled_or_empty() {
+        let dir = std::env::temp_dir();
+        let file = dir.join("nextsync-exclude-none.lst");
+        let disabled = ExclusionMatcher::new(["*.swp"], false);
+        assert!(disabled.write_nextcloudcmd_file(&file).unwrap().is_none());
+        let empty = ExclusionMatcher::new(std::iter::empty::<&str>(), true);
+        assert!(empty.write_nextcloudcmd_file(&file).unwrap().is_none());
+        assert!(!file.exists());
     }
 }

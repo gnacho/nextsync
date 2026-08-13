@@ -222,6 +222,21 @@ impl Scheduler {
         self.inner.borrow().paused()
     }
 
+    /// Whether the user has manually paused synchronization.
+    pub fn user_paused(&self) -> bool {
+        self.inner.borrow().user_paused
+    }
+
+    /// Whether synchronization is paused because of battery status.
+    pub fn battery_paused(&self) -> bool {
+        self.inner.borrow().battery_paused
+    }
+
+    /// The current deletion-guard alert, if the scheduler is blocked on one.
+    pub fn delete_alert(&self) -> Option<DeleteAlert> {
+        self.inner.borrow().delete_alert.clone()
+    }
+
     /// Whether only manual synchronization is allowed.
     pub fn manual_only(&self) -> bool {
         self.inner.borrow().manual_only()
@@ -988,6 +1003,31 @@ mod tests {
         assert!(source.borrow().pending() >= 1);
         run_idle(&source);
         assert_eq!(runner.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn pause_and_delete_alert_getters_reflect_the_inner_state() {
+        let (scheduler, _, _) = make_scheduler(None);
+        assert!(!scheduler.user_paused());
+        assert!(!scheduler.battery_paused());
+        assert!(scheduler.delete_alert().is_none());
+
+        scheduler.set_user_paused(true);
+        assert!(scheduler.user_paused());
+        scheduler.set_battery_paused(true);
+        assert!(scheduler.battery_paused());
+
+        scheduler.set_user_paused(false);
+        scheduler.set_battery_paused(false);
+
+        scheduler.set_delete_alert(DeleteAlert {
+            reason: "folder_emptied".to_string(),
+            message: "The local folder was emptied".to_string(),
+            can_approve_once: false,
+            ..DeleteAlert::default()
+        });
+        let alert = scheduler.delete_alert().expect("alert is present");
+        assert_eq!(alert.reason, "folder_emptied");
     }
 
     #[test]

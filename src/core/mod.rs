@@ -1,6 +1,7 @@
 //! Core non-UI services: scheduling, triggers, watchers, guards and
 //! desktop integration. Fases 2, 3 and 5.
 
+pub mod account_runtime;
 pub mod autostart;
 pub mod debounce;
 pub mod delete_guard;
