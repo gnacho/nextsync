@@ -37,12 +37,11 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gio::prelude::ListModelExt;
 use libadwaita::prelude::*;
 
 use crate::core::desktop_integration::DesktopIntegration;
 use crate::core::triggers::TriggerSettings;
-use crate::nextcloud::api::NextcloudApi;
+use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::credentials::CredentialsStore;
 use crate::storage::config::{
     default_sync_root, expanduser, remote_path_for, validate_pattern, AccountConfig, Config,
@@ -980,7 +979,10 @@ impl FolderUi {
         let picker = gtk4::DropDown::from_strings(&[]);
         picker.set_model(Some(&remote_list));
         picker.set_selected(u32::MAX);
-        picker.set_sensitive(false);
+        // The picker is always sensitive: when the remote-folder lookup fails
+        // (or returns nothing) the user can still type a remote path into the
+        // adjacent entry, which is the actual source of truth. A grayed-out
+        // picker was reported as "the dropdown does not open".
         picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
         let entry_for_pick = remote_entry.clone();
         picker.connect_selected_notify(move |picker| {
@@ -993,6 +995,16 @@ impl FolderUi {
         });
         remote_entry.add_suffix(&picker);
         entry_box.append(&remote_entry);
+
+        // Status line under the picker: empty on success, a short translated
+        // message when the remote-folder lookup could not complete. It never
+        // blocks the dialog (the entry is still editable).
+        let picker_status = gtk4::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .css_classes(["dim-label"])
+            .build();
+        entry_box.append(&picker_status);
 
         if let Some(message) = error {
             let label = gtk4::Label::builder()
@@ -1014,8 +1026,8 @@ impl FolderUi {
                 &self.account_id,
                 &account.server_url,
                 &account.login_name,
-                &picker,
                 &remote_list,
+                &picker_status,
             );
         }
 
@@ -1082,37 +1094,106 @@ fn choose_local_folder(entry: libadwaita::EntryRow) {
     );
 }
 
-/// Fill the remote picker with folders that already exist on the server.
+/// Outcome of resolving the remote-folder list for the Add Folder picker.
+///
+/// Every error path maps to one of these variants so the UI can surface a
+/// short, translated hint instead of silently graying out the picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RemoteFolderLookup {
+    /// Folders resolved successfully (possibly empty).
+    Ok(Vec<String>),
+    /// No usable credential was found in the keyring.
+    NoCredentials,
+    /// The server rejected the stored credentials.
+    AuthFailed,
+    /// The folder list could not be retrieved (network, HTTP or protocol).
+    Network,
+}
+
+/// Map the resolved keyring credential and the remote-folder fetch into a
+/// single picker outcome.
+///
+/// Pure on purpose: the blocking I/O (Secret Service lookup + WebDAV PROPFIND)
+/// happens in the caller, which feeds the already-resolved results here. This
+/// keeps the three error paths unit-testable without a keyring or a live
+/// server. `None` covers both "no item stored" and "the keyring itself was
+/// unavailable" — in either case there is no password to authenticate with.
+fn classify_remote_lookup(
+    resolved: Option<(String, Result<Vec<String>, ApiError>)>,
+) -> RemoteFolderLookup {
+    match resolved {
+        None => RemoteFolderLookup::NoCredentials,
+        Some((_password, folders)) => match folders {
+            Ok(list) => RemoteFolderLookup::Ok(list),
+            Err(ApiError::AuthRejected) => RemoteFolderLookup::AuthFailed,
+            Err(_) => RemoteFolderLookup::Network,
+        },
+    }
+}
+
+/// Fill the remote picker with folders that already exist on the server, and
+/// report why when that is not possible.
 ///
 /// The keyring lookup and the PROPFIND run off the UI thread (blocking Secret
-/// Service + network); the model is updated back on the main loop.
+/// Service + network); the model and the status label are updated back on the
+/// main loop. The picker itself is left always-sensitive by the caller: an
+/// empty model is harmless because the adjacent remote EntryRow is the source
+/// of truth.
 fn populate_remote_picker(
     account_id: &str,
     server: &str,
     username: &str,
-    picker: &gtk4::DropDown,
     list: &gtk4::StringList,
+    status: &gtk4::Label,
 ) {
     let account_id = account_id.to_string();
     let server = server.to_string();
     let username = username.to_string();
-    let picker = picker.clone();
     let list = list.clone();
-    let handle = gio::spawn_blocking(move || -> Vec<String> {
-        let Ok(Some(password)) = CredentialsStore::get(&account_id) else {
-            return Vec::new();
+    let status = status.clone();
+    let handle = gio::spawn_blocking(move || -> RemoteFolderLookup {
+        let password = match CredentialsStore::get(&account_id) {
+            Ok(Some(password)) => Some(password),
+            Ok(None) => {
+                eprintln!("remote picker: no stored credentials for account {account_id}");
+                None
+            }
+            Err(error) => {
+                eprintln!("remote picker: keyring lookup failed for account {account_id}: {error}");
+                None
+            }
         };
-        NextcloudApi::new()
-            .list_remote_folders(&server, &username, &password)
-            .unwrap_or_default()
+        let Some(password) = password else {
+            return classify_remote_lookup(None);
+        };
+        let folders = NextcloudApi::new().list_remote_folders(&server, &username, &password);
+        if let Err(error) = &folders {
+            eprintln!(
+                "remote picker: list_remote_folders failed for account {account_id}: {error}"
+            );
+        }
+        classify_remote_lookup(Some((password, folders)))
     });
     glib::spawn_future_local(async move {
-        if let Ok(folders) = handle.await {
-            for folder in folders {
-                list.append(&folder);
+        let Ok(outcome) = handle.await else {
+            return;
+        };
+        match outcome {
+            RemoteFolderLookup::Ok(folders) => {
+                for folder in folders {
+                    list.append(&folder);
+                }
+                // An empty list is fine: the user can still type a remote path.
+                status.set_text("");
             }
-            if list.n_items() > 0 {
-                picker.set_sensitive(true);
+            RemoteFolderLookup::NoCredentials => {
+                status.set_text(t("No saved credentials for this account."));
+            }
+            RemoteFolderLookup::AuthFailed => {
+                status.set_text(t("Could not authenticate with the server."));
+            }
+            RemoteFolderLookup::Network => {
+                status.set_text(t("Could not reach the server."));
             }
         }
     });
@@ -1627,6 +1708,64 @@ mod tests {
     fn folder_subtitle_uses_root_for_empty_remote() {
         assert_eq!(folder_subtitle(""), "/");
         assert_eq!(folder_subtitle("/Documents"), "/Documents");
+    }
+
+    #[test]
+    fn classify_lookup_success_keeps_the_folder_list() {
+        assert_eq!(
+            classify_remote_lookup(Some((
+                "pw".to_string(),
+                Ok(vec!["/Documents".to_string(), "/Photos".to_string()])
+            ))),
+            RemoteFolderLookup::Ok(vec!["/Documents".to_string(), "/Photos".to_string()])
+        );
+    }
+
+    #[test]
+    fn classify_lookup_empty_success_is_still_ok() {
+        // An empty folder list is a legitimate result, not an error: the user
+        // can still type a remote path next to the picker.
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Ok(Vec::new())))),
+            RemoteFolderLookup::Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn classify_lookup_auth_rejection_maps_to_auth_failed() {
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Err(ApiError::AuthRejected)))),
+            RemoteFolderLookup::AuthFailed
+        );
+    }
+
+    #[test]
+    fn classify_lookup_non_auth_api_errors_map_to_network() {
+        // Transport, unexpected HTTP status and a malformed body are all
+        // "could not reach the server" from the user's point of view.
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Err(ApiError::Transport)))),
+            RemoteFolderLookup::Network
+        );
+        assert_eq!(
+            classify_remote_lookup(Some((
+                "pw".to_string(),
+                Err(ApiError::Http { status: 500 })
+            ))),
+            RemoteFolderLookup::Network
+        );
+        assert_eq!(
+            classify_remote_lookup(Some(("pw".to_string(), Err(ApiError::InvalidResponse)))),
+            RemoteFolderLookup::Network
+        );
+    }
+
+    #[test]
+    fn classify_lookup_missing_credential_maps_to_no_credentials() {
+        assert_eq!(
+            classify_remote_lookup(None),
+            RemoteFolderLookup::NoCredentials
+        );
     }
 
     #[test]

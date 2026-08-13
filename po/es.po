@@ -1813,6 +1813,18 @@ msgstr "Historial completo de cambios"
 msgid "{count} changes in this release"
 msgstr "{count} cambios en esta versión"
 
+#: src/ui/settings.rs
+msgid "Could not authenticate with the server."
+msgstr "No se pudo autenticar con el servidor."
+
+#: src/ui/settings.rs
+msgid "Could not reach the server."
+msgstr "No se pudo contactar con el servidor."
+
+#: src/ui/settings.rs
+msgid "No saved credentials for this account."
+msgstr "No hay credenciales guardadas para esta cuenta."
+
 #~ msgid "Connected. Add folders from Settings."
 #~ msgstr "Conectado. Añade carpetas desde Ajustes."
 
