@@ -313,6 +313,12 @@ pub struct MainWindow {
 
 impl MainWindow {
     /// Build the window. `account_manager` must already be started.
+    ///
+    /// `self_weak` must be the `Weak` pointing back to the `Rc<RefCell<MainWindow>>`
+    /// that owns this window. It is captured eagerly by the per-account view
+    /// (Add Folder row) constructed during `present_account`, so it has to be
+    /// valid from the start; passing `Weak::new()` here would leave the Add
+    /// Folder handler dead on first show.
     pub fn new(
         application: &libadwaita::Application,
         config: Config,
@@ -320,6 +326,7 @@ impl MainWindow {
         account_manager: AccountManager,
         logger: crate::core::log::LogBuffer,
         on_show_about: Option<Rc<dyn Fn()>>,
+        self_weak: Weak<RefCell<MainWindow>>,
     ) -> Self {
         let window = libadwaita::ApplicationWindow::builder()
             .application(application)
@@ -440,7 +447,7 @@ impl MainWindow {
             account_view: None,
             settings_handler,
             add_account_handler,
-            self_weak: Weak::new(),
+            self_weak,
             _subscription: None,
             _sidebar_page: sidebar_page,
             _content_page: content_page,
@@ -969,6 +976,7 @@ mod tests {
                 manager,
                 crate::core::log::LogBuffer::new(),
                 None,
+                Weak::new(),
             );
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),

@@ -89,6 +89,7 @@ fn main() {
                         account_manager,
                         logger,
                         on_show_about,
+                        weak.clone(),
                     ))
                 });
             let weak = Rc::downgrade(&main_window);
