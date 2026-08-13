@@ -2,11 +2,13 @@
 
 > **Decisiones (13-Ago-2026, usuario A FUEGO):** refactor a Rust aprobado. Se abandona la caza de bugs de la línea Python (el bug de Settings de ryzen-ai queda sin diagnosticar). Todo el conocimiento de git se usa para el rewrite: issues #4/#5/#7/#8/#9/#12/#13/#16-#22, `docs/REDESIGN.md`, `docs/REFACTOR-NOTES.md`, CHANGELOG, arquitectura v0.2.5 y spike validado en `/tmp/opencode/spike-ncsync`.
 
-**Goal:** Reescribir NextSync (wrapper fino sobre `nextcloudcmd`) en Rust + gtk-rs + libadwaita, con paridad de features con la v0.2.x Python y empaquetado nativo.
+**Actualización paridad (13-Ago-2026):** el Python avanzó a **v0.3.0** con features nuevas que el plan original no recogía. Se añaden a paridad (ver §Delta v0.2.5→v0.3.0): #25 (remote folder picker + auto-name), #33 (per-folder sync status), #30/#31 (log row + conflictos solo presentes), #32 (accent en Settings post-#16), fixes v0.2.6-v0.2.9. El plan se actualiza contra **origin/main v0.3.0**, no v0.2.4.
+
+**Goal:** Reescribir NextSync (wrapper fino sobre `nextcloudcmd`) en Rust + gtk-rs + libadwaita, con paridad de features con la v0.3.0 Python y empaquetado nativo.
 
 **Architecture:** App GNOME nativa (gtk-rs plano + `Rc<RefCell>`/GObject, sin relm4 ni tokio en el main thread). El motor de sync sigue siendo `nextcloudcmd` (no se reimplementa). Rust es la capa de escritorio: config, credenciales, scheduling, watchers, tray, ventanas, logs, resolución de conflictos.
 
-**Tech Stack:** Rust 1.97 (MSRV 1.83 ok), `gtk4 0.11` (feat `v4_22`), `libadwaita 0.9`, `glib 0.22` (feat `futures`), `ksni 0.3` (feat `blocking`), `notify 8`, `secret-service 5` (feat `rt-tokio-crypto-rust`), `async-channel 2`, `serde`/`serde_json`, `zbus 5` (push protocol). Todas verificadas contra docs.rs el 13-Ago-2026.
+**Tech Stack:** Rust 1.97 (MSRV 1.83 ok), `gtk4 0.11` (feat `v4_22`), `libadwaita 0.9`, `glib 0.22` (feat `futures`), `ksni 0.3` (feat `blocking`), `notify 8`, `secret-service 5` (feat `rt-tokio-crypto-rust`), `async-channel 2`, `serde`/`serde_json`. **Push protocol:** `tungstenite 0.30` (feature `rustls-tls-native-roots`), en hilo `gio::spawn_blocking`, **handshake manual tolerante** + `WebSocket::from_partially_read` (mitiga el bug `Upgrade: h2,h2c` de openresty; los PRs #548/#549 de tungstenite que lo arreglarían siguen sin mergear). Verificado 13-Ago-2026: la familia tungstenite/tokio-tungstenite/async-tungstenite comparte validación estricta de handshake; GIO no tiene WebSocket nativo; libsoup3 es el origen del bug en Python. `zbus 5` solo si hace falta (login/OCS).
 
 ---
 
@@ -34,6 +36,21 @@
 **UI**: main window (sidebar cuentas + NavigationSplitView), Settings (Adw PreferencesWindow), setup wizard (login flow v2 + first-sync dialog #8), conflict resolver (#7), recent activity + log view, About (Lucide info), update window, tray icon 2 estados.
 
 **Privacidad/red**: redact de logs, network watcher, power/suspend.
+
+## Delta v0.2.5 → v0.3.0 (features/fixes nuevos en Python, pendientes de paridad)
+
+Verificado contra origin/main v0.3.0 el 13-Ago-2026:
+
+| Commit/merge | Feature/fix | Impacto en Rust |
+|---|---|---|
+| #25 `eaf703a` | **Remote folder picker + auto-name**: `NextcloudApi.list_remote_folders(server, user)` hace PROPFIND contra `/remote.php/dav/files/{user}` y lista las carpetas top-level existentes como `"/nombre"`; `remote_path_for(local_root, text)` auto-nombra un remote_path en blanco con el nombre de la carpeta local (`/home/user/NextCloud` → `/NextCloud`). | Nuevo endpoint API WebDAV en Rust + helper de auto-nombre. Fase de UI Settings (5.2). |
+| #33 `4f87994` | **Per-folder sync status**: `ui/folder_status.py` (126 líneas) con `folder_status_presentation(state)` (etiqueta+icono por estado) y `FolderStatusRow` (Adw.ActionRow que se suscribe al estado de cada folder y renderiza). Main window muestra una fila por folder con su estado. | Fase 5.1 main window: row por folder con estado individual (ya tenemos StateController por folder; falta la presentación). |
+| #30/#31 `00badaf` | **Log row siempre attachada + conflictos solo si presentes**: fix de la Activity view (log row no se despega; la fila de conflictos solo aparece cuando hay conflicted copies). | Detalle de Fase 5.4 (activity/conflict view). |
+| #32 `3865d13` | **Settings controls al accent** (extensión de #16): test de contrato que fija que los controles de Settings post-#16 siguen el accent. | Ya cubierto por diseño Rust (adwaita nativo usa accent); añadir test de contrato equivalente. |
+| `f647328` | **Refresh main window cuando cierra Settings**: al cerrar Settings se refresca la ventana principal. | Conectar señal close-request de Settings → refresh de main window (Fase 5.1/5.2). |
+| `36b59c5` | **Pick up added/removed folders sin restart**: `AccountRuntime` reconfigura en caliente cuando cambian los folders de una cuenta. | AccountManager Rust debe reconfigurar FolderRuntimes en caliente (añadir/eliminar). Fase de core. |
+| `f71ea90` | Fix Settings: `set_placeholder_text` → título compatible con EntryRow. | Detalle UI (Fase 5.2). |
+| `a261c31` | Fix Settings: `delete_guard` leído con default para evitar KeyError. | ConfigStore Rust ya usa `#[serde(default)]` → cubierto. |
 
 ## Fases y tareas
 
@@ -102,12 +119,16 @@
 
 **Task 5.1: Ventana principal**
 - `src/ui/main_window.rs`: `Adw.ApplicationWindow` con `NavigationSplitView` (sidebar cuentas + content), label estado, progreso, botones header (Lucide settings-2/info — issue #21), Accent en botones (issue #16).
-- Tests: smoke (construcción), contracts.
-- Commit: `feat(ui): main window with account sidebar`
+- **Per-folder sync status (#33)**: una `FolderStatusRow` por folder con su estado individual (replica `folder_status.py`: etiqueta+icono por estado via `folder_status_presentation`).
+- **Refresh al cerrar Settings (v0.2.9)**: conectar close-request de Settings → refrescar main window.
+- Tests: smoke (construcción), contracts, presentación por estado de folder.
+- Commit: `feat(ui): main window with account sidebar and per-folder status`
 
 **Task 5.2: Settings**
-- `src/ui/settings.rs`: `Adw.PreferencesWindow` con General/Sync/Network/Advanced + grupos por folder + Add Folder. Acepta un runtime (fachada). Empty state con cero folders (issue #17).
-- Commit: `feat(ui): settings window`
+- `src/ui/settings.rs`: `Adw.PreferencesWindow` con General/Sync/Network/Advanced + grupos por folder + Add Folder. Acepta un runtime (fachada). Empty state con cero folders (issue #17). Fix EntryRow title (v0.2.7).
+- **Remote folder picker (#25)**: al configurar una carpeta, listar las carpetas remotas existentes (`list_remote_folders` PROPFIND contra `/remote.php/dav/files/{user}`) y ofrecerlas; `remote_path_for(local_root, text)` auto-nombra un blank con el nombre de la carpeta local.
+- Tests: contrato accent (#32), empty state, picker con fixtures PROPFIND.
+- Commit: `feat(ui): settings window with remote folder picker`
 
 **Task 5.3: Setup wizard**
 - `src/ui/setup.rs`: login flow v2 (browser), first-sync confirmation dialog (issue #8, PROPFIND Depth 1).
@@ -115,6 +136,7 @@
 
 **Task 5.4: Conflict resolver + activity + log**
 - `src/ui/conflict_resolver.rs` (issue #7: keep local/remote/open), `src/ui/activity.rs` (recent), `src/ui/log_view.rs`.
+- **Fix v0.2.9 (#30/#31)**: log row siempre adjunta a la actividad; la fila de conflictos solo aparece si hay conflicted copies.
 - Commit: `feat(ui): conflict resolver, activity, log view`
 
 **Task 5.5: Tray**
