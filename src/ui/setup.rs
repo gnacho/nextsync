@@ -129,6 +129,7 @@ impl SetupWidgets {
     fn new() -> Self {
         let provider_row = libadwaita::ComboRow::builder()
             .title(t("Sync provider"))
+            .tooltip_text(t("Choose the synchronization provider"))
             .build();
         let model = gtk4::StringList::new(&["Nextcloud", "OpenCloud"]);
         provider_row.set_model(Some(&model));
@@ -138,6 +139,7 @@ impl SetupWidgets {
         let server_title = title_label(t("Connect to Nextcloud"));
         let server_entry = libadwaita::EntryRow::new();
         server_entry.set_title(t("Nextcloud server URL"));
+        server_entry.set_tooltip_text(Some(t("The address of your Nextcloud or OpenCloud server")));
         server_entry.set_text("https://");
         let trust_invalid =
             gtk4::CheckButton::with_label(t("Allow invalid or self-signed certificates"));
@@ -153,8 +155,10 @@ impl SetupWidgets {
         opencloud_hint.set_visible(false);
         let username_entry = libadwaita::EntryRow::new();
         username_entry.set_title(t("Username"));
+        username_entry.set_tooltip_text(Some(t("Your account user name")));
         let password_entry = libadwaita::PasswordEntryRow::new();
         password_entry.set_title(t("Password or app password"));
+        password_entry.set_tooltip_text(Some(t("Your account password or app password")));
         let auth_error = error_label("");
         let manual_button = gtk4::Button::with_label(t("Sign In"));
         manual_button.add_css_class("suggested-action");
@@ -176,6 +180,7 @@ impl SetupWidgets {
         );
         let start_button = gtk4::Button::with_label(t("Start Synchronizing"));
         start_button.add_css_class("suggested-action");
+        start_button.set_tooltip_text(Some(t("Finish setup and start synchronizing")));
 
         Self {
             provider_row,
@@ -309,6 +314,7 @@ fn build_welcome_page(ctx: &SetupContext) {
     });
 
     let continue_button = gtk4::Button::with_label(t("Continue"));
+    continue_button.set_tooltip_text(Some(t("Continue to the next step")));
     continue_button.add_css_class("suggested-action");
     continue_button.add_css_class("pill");
     continue_button.set_halign(gtk4::Align::Center);
@@ -343,6 +349,7 @@ fn build_server_page(ctx: &SetupContext) {
     let actions = action_box();
     actions.append(&back_button(&ctx.stack, "welcome"));
     let continue_button = gtk4::Button::with_label(t("Continue"));
+    continue_button.set_tooltip_text(Some(t("Continue to the next step")));
     continue_button.add_css_class("suggested-action");
     {
         let ctx = ctx.clone();
@@ -415,6 +422,7 @@ fn build_folders_page(ctx: &SetupContext) {
     let add_row = libadwaita::ActionRow::builder()
         .title(t("Add Folder"))
         .subtitle(t("Mirror another local folder from this account"))
+        .tooltip_text(t("Add a local folder to synchronize"))
         .activatable(true)
         .build();
     let add_icon = gtk4::Image::builder()
@@ -661,6 +669,7 @@ fn present_add_folder_dialog(
     entry_box.append(&remote_entry);
 
     let space_entry = libadwaita::EntryRow::new();
+    space_entry.set_tooltip_text(Some(t("Optional OpenCloud space identifier")));
     if opencloud {
         space_entry.set_title(t("Space ID (optional)"));
         let space_default = if previous_space.is_empty() {
@@ -1188,6 +1197,7 @@ fn action_box() -> gtk4::Box {
 
 fn back_button(stack: &gtk4::Stack, page: &'static str) -> gtk4::Button {
     let button = gtk4::Button::with_label(t("Back"));
+    button.set_tooltip_text(Some(t("Go back to the previous step")));
     let stack = stack.clone();
     button.connect_clicked(move |_| stack.set_visible_child_name(page));
     button

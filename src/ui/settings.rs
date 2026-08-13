@@ -444,6 +444,7 @@ fn build_network_page(
     proxy.set_title(t("Custom HTTP proxy"));
     proxy.set_text(network.custom_proxy.as_deref().unwrap_or(""));
     proxy.set_show_apply_button(true);
+    proxy.set_tooltip_text(Some(t("Save the custom HTTP proxy")));
     let trust = libadwaita::SwitchRow::builder()
         .title(t("Allow invalid or self-signed certificates"))
         .subtitle(t(
@@ -691,6 +692,7 @@ fn build_advanced_page(
     let remove = libadwaita::ActionRow::builder()
         .title(t("Remove Account"))
         .subtitle(t("Rarely needed. Keeps all local files."))
+        .tooltip_text(t("Disconnect this account; local files are kept"))
         .activatable(true)
         .build();
     remove.add_css_class("error");
@@ -914,6 +916,7 @@ impl FolderUi {
         let add_row = libadwaita::ActionRow::builder()
             .title(t("Add Folder"))
             .subtitle(t("Mirror another local folder from this account"))
+            .tooltip_text(t("Add a local folder to synchronize with this account"))
             .activatable(true)
             .build();
         let add_icon = gtk4::Image::builder()
@@ -960,6 +963,7 @@ impl FolderUi {
 
         let choose = gtk4::Button::builder()
             .icon_name("folder-open-symbolic")
+            .tooltip_text(t("Choose a local folder to synchronize"))
             .valign(gtk4::Align::Center)
             .css_classes(["flat"])
             .build();
@@ -1408,6 +1412,9 @@ impl ExclusionsDialog {
 
         let restore = gtk4::Button::builder()
             .label(t("Restore Defaults"))
+            .tooltip_text(t(
+                "Reset the exclusion patterns to the recommended defaults",
+            ))
             .halign(gtk4::Align::Start)
             .build();
         content.append(&restore);

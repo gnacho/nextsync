@@ -177,6 +177,7 @@ impl AccountView {
             .build();
         let sync_button = gtk4::Button::builder()
             .child(&sync_content)
+            .tooltip_text(t("Synchronize this account now"))
             .css_classes(["suggested-action", "pill"])
             .build();
         let runtime_for_sync = runtime.clone();
@@ -196,6 +197,7 @@ impl AccountView {
             .build();
         let pause_button = gtk4::Button::builder()
             .child(&pause_content)
+            .tooltip_text(t("Pause or resume synchronization"))
             .css_classes(["pill"])
             .build();
         let runtime_for_pause = runtime.clone();
@@ -848,6 +850,7 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
     let add_button = gtk4::Button::builder()
         .label(t("Add Account"))
         .icon_name("list-add-symbolic")
+        .tooltip_text(t("Add a new account"))
         .halign(gtk4::Align::Fill)
         .css_classes(["flat"])
         .build();
