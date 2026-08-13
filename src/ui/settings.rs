@@ -86,6 +86,14 @@ impl SettingsWindow {
         window.set_title(Some(t("Settings")));
         window.set_default_size(720, 640);
 
+        // PreferencesWindow does not auto-associate with the application and
+        // is held alive by the MainWindow's Rc; wire close-request explicitly
+        // so the X button destroys it as users expect.
+        window.connect_close_request(move |_| {
+            eprintln!("nextsync: settings window close-request");
+            glib::Propagation::Proceed
+        });
+
         // Top-level sections (general/logging/network) come from the current
         // configuration; account-owned settings come from the snapshot.
         let config = config_store.load().unwrap_or_default();

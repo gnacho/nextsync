@@ -374,6 +374,18 @@ impl MainWindow {
         toolbar.set_content(Some(&split));
         window.set_content(Some(&toolbar));
 
+        // Close button quits the application outright. The StatusNotifier tray
+        // runs on its own thread and would otherwise keep the process alive
+        // after the last window is gone, leaving an invisible app with no way
+        // back in. If a "minimize to tray" pattern is wanted later, this is
+        // the single place to change.
+        let app_for_close = application.clone();
+        window.connect_close_request(move |_| {
+            eprintln!("nextsync: main window close-request, quitting application");
+            app_for_close.quit();
+            glib::Propagation::Proceed
+        });
+
         let mut main = Self {
             window,
             application: application.clone(),
