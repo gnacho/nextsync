@@ -59,10 +59,12 @@ fn main() {
                 config_store,
                 account_manager,
                 None,
-                None,
             )));
             let weak = Rc::downgrade(&main_window);
             main_window.borrow_mut().install_settings_handler(weak);
+            main_window
+                .borrow_mut()
+                .install_add_account_handler(Rc::downgrade(&main_window));
             *window_slot.borrow_mut() = Some(main_window);
         });
     }

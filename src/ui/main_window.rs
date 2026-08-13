@@ -37,6 +37,9 @@ pub type EditIgnoredCallback = Rc<dyn Fn()>;
 /// window lives in a shared cell.
 pub type SettingsHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
 
+/// Shared holder for the Add Account sidebar-button handler.
+pub type AddAccountHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
+
 /// Folder row callbacks as plain functions the view can invoke.
 pub struct AccountCallbacks {
     pub on_open_folder: Option<OpenFolderCallback>,
@@ -238,16 +241,19 @@ impl AccountView {
 /// The main application window.
 pub struct MainWindow {
     window: libadwaita::ApplicationWindow,
+    application: libadwaita::Application,
     account_manager: AccountManager,
     config: Config,
     config_store: ConfigStore,
     active_account_id: Option<String>,
     settings_window: Option<SettingsWindow>,
+    setup_window: Option<crate::ui::setup::SetupWindow>,
     accounts_list: gtk4::ListBox,
     content_stack: gtk4::Stack,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
     account_view: Option<AccountView>,
     settings_handler: SettingsHandler,
+    add_account_handler: AddAccountHandler,
     self_weak: Weak<RefCell<MainWindow>>,
     _subscription: Option<crate::state::Subscription>,
     // Kept alive while the window exists.
@@ -257,13 +263,11 @@ pub struct MainWindow {
 
 impl MainWindow {
     /// Build the window. `account_manager` must already be started.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         application: &libadwaita::Application,
         config: Config,
         config_store: ConfigStore,
         account_manager: AccountManager,
-        on_add_account: Option<Rc<dyn Fn()>>,
         on_show_about: Option<Rc<dyn Fn()>>,
     ) -> Self {
         let window = libadwaita::ApplicationWindow::builder()
@@ -317,10 +321,11 @@ impl MainWindow {
 
         let (sidebar, accounts_list, add_button) = build_sidebar();
         let sidebar_page = libadwaita::NavigationPage::new(&sidebar, "Accounts");
-        let on_add_account = on_add_account.clone();
+        let add_account_handler: AddAccountHandler = Rc::new(RefCell::new(None));
+        let handler_for_add = add_account_handler.clone();
         add_button.connect_clicked(move |_button| {
-            if let Some(cb) = &on_add_account {
-                cb();
+            if let Some(handler) = handler_for_add.borrow_mut().as_mut() {
+                handler();
             }
         });
 
@@ -352,16 +357,19 @@ impl MainWindow {
 
         let mut main = Self {
             window,
+            application: application.clone(),
             account_manager,
             config,
             config_store,
             active_account_id: None,
             settings_window: None,
+            setup_window: None,
             accounts_list,
             content_stack,
             account_rows: std::collections::HashMap::new(),
             account_view: None,
             settings_handler,
+            add_account_handler,
             self_weak: Weak::new(),
             _subscription: None,
             _sidebar_page: sidebar_page,
@@ -394,6 +402,45 @@ impl MainWindow {
                 main.borrow_mut().show_settings();
             }
         }));
+    }
+
+    /// Wire the Add Account sidebar button to open the setup wizard.
+    ///
+    /// Called once from the launcher once the window lives in a shared cell.
+    pub fn install_add_account_handler(&mut self, weak: Weak<RefCell<MainWindow>>) {
+        let handler = self.add_account_handler.clone();
+        *handler.borrow_mut() = Some(Box::new(move || {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().show_add_account();
+            }
+        }));
+    }
+
+    /// Open (or bring to front) the account setup wizard.
+    pub fn show_add_account(&mut self) {
+        if let Some(window) = &self.setup_window {
+            window.present();
+            return;
+        }
+        let callbacks = crate::ui::setup::SetupCallbacks {
+            on_complete: Some(Rc::new({
+                let weak = self.self_weak.clone();
+                move |account: crate::storage::config::AccountConfig| {
+                    if let Some(main) = weak.upgrade() {
+                        let mut main = main.borrow_mut();
+                        main.account_manager.ensure_account_runtime(account);
+                        main.refresh_after_config_change();
+                    }
+                }
+            })),
+        };
+        let window = crate::ui::setup::SetupWindow::new(
+            &self.application,
+            self.config_store.clone(),
+            callbacks,
+        );
+        window.present();
+        self.setup_window = Some(window);
     }
 
     /// Open (or bring to front) the Settings window for the active account.
@@ -638,7 +685,7 @@ mod tests {
                 crate::core::debounce::FakeTimeoutSource::default(),
             )));
             let store = ConfigStore::with_path(std::env::temp_dir().join("nextsync-smoke.json"));
-            let window = MainWindow::new(&app, Config::default(), store, manager, None, None);
+            let window = MainWindow::new(&app, Config::default(), store, manager, None);
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
                 "NextSync"
