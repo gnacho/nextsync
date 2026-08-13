@@ -10,11 +10,16 @@
 //!
 //! - i18n (Task 6.1): user-visible strings go through [`crate::util::i18n::t`];
 //!   msgids missing from the Spanish catalog fall back to the English source.
-//! - No `runtime`/`desktop_integration` parameters. The window only receives a
-//!   [`ConfigStore`], the [`AccountConfig`] snapshot, the account id and the
-//!   [`SettingsCallbacks`] closures. The live Diagnostics rows (inotify
-//!   watches, push state) are dropped because the window has no handle to the
-//!   runtimes; `runtime.last_exit_code` is shown instead.
+//! - No `runtime` parameter. The window only receives a [`ConfigStore`], the
+//!   [`AccountConfig`] snapshot, the account id and the [`SettingsCallbacks`]
+//!   closures. The live Diagnostics rows (inotify watches, push state) are
+//!   dropped because the window has no handle to the runtimes;
+//!   `runtime.last_exit_code` is shown instead.
+//! - Desktop integrations (`_build_desktop_integrations`): the three switches
+//!   target the account's FIRST folder instead of the Python's "active"
+//!   folder (the rewrite has no active-account concept); with no folders the
+//!   switches are absent, like the Python. The [`DesktopIntegration`] runs on
+//!   the UI thread (tiny file/metadata writes, same as the Python handlers).
 //! - Autostart is persisted to the configuration and mirrored into the
 //!   desktop session immediately (atomic `~/.config/autostart` entry).
 //! - The Add Folder dialog is rebuilt on every open so a failed attempt can
@@ -29,11 +34,13 @@
 //!   private validator in `storage::config`.
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gio::prelude::ListModelExt;
 use libadwaita::prelude::*;
 
+use crate::core::desktop_integration::DesktopIntegration;
 use crate::core::triggers::TriggerSettings;
 use crate::nextcloud::api::NextcloudApi;
 use crate::nextcloud::credentials::CredentialsStore;
@@ -112,6 +119,14 @@ impl SettingsWindow {
         window.add(&advanced);
 
         folder_ui.refresh();
+
+        // Desktop integrations sit in the folders group, after the Add Folder
+        // row (same order as `_build_desktop_integrations` in the Python).
+        // They are added once and are NOT tracked in `FolderUi::rows`, so a
+        // folder add/remove refresh never destroys them.
+        for row in desktop_integration_rows(&account, &window) {
+            folder_ui.group.add(&row);
+        }
 
         Self { window }
     }
@@ -1095,6 +1110,122 @@ fn populate_remote_picker(
     });
 }
 
+// ---------------------------------------------------------------------------
+// Desktop integration switches
+// ---------------------------------------------------------------------------
+
+/// The folder the desktop integration switches target: the account's first
+/// folder (the Python used the "active" folder; the rewrite has none).
+fn integration_target(account: &AccountConfig) -> Option<&FolderConfig> {
+    account.folders.first()
+}
+
+/// Build the three desktop integration switches for the first folder of the
+/// account, replicating `_build_desktop_integrations`: "Show in Files
+/// sidebar" (Nautilus bookmark), "Show on Desktop" (shortcut) and "Use
+/// special folder icon". Returns an empty list when the account has no
+/// folders (the Python also hides the rows in that case).
+///
+/// Each switch applies its [`DesktopIntegration`] setter on toggle; a `false`
+/// result (e.g. a missing icon asset) reverts the switch to the real state
+/// and surfaces a toast.
+fn desktop_integration_rows(
+    account: &AccountConfig,
+    window: &libadwaita::PreferencesWindow,
+) -> Vec<libadwaita::SwitchRow> {
+    let Some(folder) = integration_target(account) else {
+        return Vec::new();
+    };
+    let local_root = folder.local_root.clone();
+    // One instance per closure: `DesktopIntegration` is not `Clone`, and each
+    // instance is a cheap paths-only struct over the same real XDG dirs.
+    let make_integration =
+        || DesktopIntegration::new(PathBuf::from(local_root.clone()), None, None);
+    let state = make_integration().state();
+
+    let bookmark = libadwaita::SwitchRow::builder()
+        .title(t("Show in Files sidebar"))
+        .subtitle(t(
+            "Adds the synchronized folder to the file manager sidebar.",
+        ))
+        .active(state.nautilus_bookmark)
+        .build();
+    let shortcut = libadwaita::SwitchRow::builder()
+        .title(t("Show on Desktop"))
+        .subtitle(t(
+            "Creates a link to the synchronized folder on the desktop.",
+        ))
+        .active(state.desktop_shortcut)
+        .build();
+    let icon = libadwaita::SwitchRow::builder()
+        .title(t("Use special folder icon"))
+        .subtitle(t(
+            "Identifies the synchronized folder and its shortcuts in Files.",
+        ))
+        .active(state.special_icon)
+        .build();
+
+    connect_integration_switch(
+        &bookmark,
+        window,
+        {
+            let integration = make_integration();
+            move |enabled| integration.set_nautilus_bookmark(enabled)
+        },
+        {
+            let integration = make_integration();
+            move || integration.state().nautilus_bookmark
+        },
+    );
+    connect_integration_switch(
+        &shortcut,
+        window,
+        {
+            let integration = make_integration();
+            move |enabled| integration.set_desktop_shortcut(enabled)
+        },
+        {
+            let integration = make_integration();
+            move || integration.state().desktop_shortcut
+        },
+    );
+    connect_integration_switch(
+        &icon,
+        window,
+        {
+            let integration = make_integration();
+            move |enabled| integration.set_special_icon(enabled)
+        },
+        {
+            let integration = make_integration();
+            move || integration.state().special_icon
+        },
+    );
+
+    vec![bookmark, shortcut, icon]
+}
+
+/// Wire one integration switch: apply the setter on toggle and, when it
+/// reports `false`, revert to the real state (a no-op notification when the
+/// switch already matches, so the re-entry terminates) and toast.
+fn connect_integration_switch(
+    row: &libadwaita::SwitchRow,
+    window: &libadwaita::PreferencesWindow,
+    apply: impl Fn(bool) -> bool + 'static,
+    read_state: impl Fn() -> bool + 'static,
+) {
+    let window = window.clone();
+    row.connect_active_notify(move |row| {
+        let desired = row.is_active();
+        if !apply(desired) {
+            row.set_active(read_state());
+            window.add_toast(libadwaita::Toast::new(t(
+                "The change could not be applied.",
+            )));
+        }
+    });
+}
+
 /// Open the log folder in the file manager, creating it when missing.
 fn open_log_folder() {
     let directory = state_dir();
@@ -1516,6 +1647,20 @@ mod tests {
         assert_eq!(validate_pattern("*.swp").unwrap(), "*.swp");
     }
 
+    #[test]
+    fn integration_target_is_the_first_folder_or_none() {
+        let account = sample_account();
+        assert_eq!(
+            integration_target(&account).map(|folder| folder.id.as_str()),
+            Some("folder-1")
+        );
+        let empty = AccountConfig {
+            folders: Vec::new(),
+            ..account
+        };
+        assert!(integration_target(&empty).is_none());
+    }
+
     // ---- persistence without GTK ------------------------------------------
 
     #[test]
@@ -1610,6 +1755,42 @@ mod tests {
                 "Configuración"
             );
             reset_locale();
+        });
+    }
+
+    /// The three integration switches carry the Python titles/subtitles and
+    /// disappear without folders. Building them only READS the real user
+    /// state (gtk-3.0 bookmarks, GIO metadata); nothing is written here.
+    #[test]
+    fn desktop_integration_switches_replicate_the_python_rows() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let window = libadwaita::PreferencesWindow::new();
+
+            set_locale(Locale::English);
+            let rows = desktop_integration_rows(&sample_account(), &window);
+            assert_eq!(rows.len(), 3);
+            assert_eq!(rows[0].title().as_str(), "Show in Files sidebar");
+            assert_eq!(rows[1].title().as_str(), "Show on Desktop");
+            assert_eq!(rows[2].title().as_str(), "Use special folder icon");
+
+            set_locale(Locale::Spanish);
+            let rows = desktop_integration_rows(&sample_account(), &window);
+            assert_eq!(
+                rows[0].title().as_str(),
+                "Mostrar en la barra lateral de Archivos"
+            );
+            assert_eq!(rows[1].title().as_str(), "Mostrar en el escritorio");
+            assert_eq!(
+                rows[2].title().as_str(),
+                "Usar un icono especial para la carpeta"
+            );
+            reset_locale();
+
+            let empty = AccountConfig {
+                folders: Vec::new(),
+                ..sample_account()
+            };
+            assert!(desktop_integration_rows(&empty, &window).is_empty());
         });
     }
 }
