@@ -245,9 +245,12 @@ pub struct MainWindow {
     account_manager: AccountManager,
     config: Config,
     config_store: ConfigStore,
+    logger: crate::core::log::LogBuffer,
     active_account_id: Option<String>,
     settings_window: Option<SettingsWindow>,
     setup_window: Option<crate::ui::setup::SetupWindow>,
+    log_window: Option<crate::ui::log_view::LogWindow>,
+    conflicts_window: Option<crate::ui::conflict_resolver::ConflictResolverWindow>,
     accounts_list: gtk4::ListBox,
     content_stack: gtk4::Stack,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
@@ -268,6 +271,7 @@ impl MainWindow {
         config: Config,
         config_store: ConfigStore,
         account_manager: AccountManager,
+        logger: crate::core::log::LogBuffer,
         on_show_about: Option<Rc<dyn Fn()>>,
     ) -> Self {
         let window = libadwaita::ApplicationWindow::builder()
@@ -361,9 +365,12 @@ impl MainWindow {
             account_manager,
             config,
             config_store,
+            logger,
             active_account_id: None,
             settings_window: None,
             setup_window: None,
+            log_window: None,
+            conflicts_window: None,
             accounts_list,
             content_stack,
             account_rows: std::collections::HashMap::new(),
@@ -417,6 +424,54 @@ impl MainWindow {
     }
 
     /// Open (or bring to front) the account setup wizard.
+    /// Open (or bring to front) the live synchronization log window.
+    pub fn show_log(&mut self) {
+        if let Some(window) = &self.log_window {
+            window.present();
+            return;
+        }
+        let window = crate::ui::log_view::LogWindow::new(Some(&self.window), &self.logger);
+        window.present();
+        self.log_window = Some(window);
+    }
+
+    /// Open (or bring to front) the activity/conflicts window for the active
+    /// account's first synchronized folder.
+    pub fn show_conflicts(&mut self) {
+        if let Some(window) = &self.conflicts_window {
+            window.present();
+            return;
+        }
+        let Some(account_id) = &self.active_account_id else {
+            return;
+        };
+        let Some(account) = self
+            .config
+            .accounts
+            .iter()
+            .find(|account| &account.id == account_id)
+        else {
+            return;
+        };
+        let Some(folder) = account.folders.first() else {
+            return;
+        };
+        let matcher = crate::core::exclusions::ExclusionMatcher::new(
+            account.sync.exclude_patterns.clone(),
+            account.sync.exclude_patterns_enabled,
+        );
+        let logger = self.logger.clone();
+        let window = crate::ui::conflict_resolver::ConflictResolverWindow::new(
+            &self.application,
+            &folder.local_root,
+            matcher,
+            Rc::new(logger),
+            None,
+        );
+        window.present();
+        self.conflicts_window = Some(window);
+    }
+
     pub fn show_add_account(&mut self) {
         if let Some(window) = &self.setup_window {
             window.present();
@@ -685,7 +740,14 @@ mod tests {
                 crate::core::debounce::FakeTimeoutSource::default(),
             )));
             let store = ConfigStore::with_path(std::env::temp_dir().join("nextsync-smoke.json"));
-            let window = MainWindow::new(&app, Config::default(), store, manager, None);
+            let window = MainWindow::new(
+                &app,
+                Config::default(),
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+            );
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
                 "NextSync"

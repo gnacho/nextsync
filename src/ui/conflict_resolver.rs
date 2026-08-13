@@ -70,6 +70,14 @@ pub trait RecentLog {
     fn recent_lines(&self, max: usize) -> Vec<String>;
 }
 
+/// The application [`LogBuffer`](crate::core::log::LogBuffer) already exposes
+/// the exact surface the Recent tab needs.
+impl RecentLog for crate::core::log::LogBuffer {
+    fn recent_lines(&self, max: usize) -> Vec<String> {
+        crate::core::log::LogBuffer::recent_lines(self, max)
+    }
+}
+
 /// The unified Sync Activity and Conflicts window.
 pub struct ConflictResolverWindow {
     window: libadwaita::Window,

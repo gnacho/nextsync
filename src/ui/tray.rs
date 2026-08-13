@@ -49,6 +49,8 @@ pub enum TrayAction {
     Open,
     /// Open the settings window.
     Settings,
+    /// Open the activity/conflicts window.
+    Conflicts,
     /// Quit the application.
     Quit,
 }
@@ -60,6 +62,8 @@ pub struct TrayCallbacks {
     pub open_window: Rc<dyn Fn()>,
     /// Open the settings window.
     pub open_settings: Rc<dyn Fn()>,
+    /// Open the activity/conflicts window (optional; hides the menu item).
+    pub open_conflicts: Option<Rc<dyn Fn()>>,
     /// Quit the application.
     pub quit: Rc<dyn Fn()>,
 }
@@ -96,21 +100,23 @@ pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
 
 /// Number of items in the tray menu (Open, Settings, Quit), mirroring the
 /// Python layout `(1, 7, 8)`.
-pub const MENU_ITEM_COUNT: usize = 3;
+pub const MENU_ITEM_COUNT: usize = 4;
 
 /// The StatusNotifier item. Only `Send` data lives here, satisfying the
 /// `ksni::Tray` bound; user actions leave through the [`TrayAction`] channel.
 struct TrayItem {
     state: AppState,
     presentation: TrayPresentation,
+    show_conflicts: bool,
     actions: Sender<TrayAction>,
 }
 
 impl TrayItem {
-    fn new(state: AppState, actions: Sender<TrayAction>) -> Self {
+    fn new(state: AppState, actions: Sender<TrayAction>, show_conflicts: bool) -> Self {
         Self {
             state,
             presentation: presentation_for(state),
+            show_conflicts,
             actions,
         }
     }
@@ -121,8 +127,9 @@ impl TrayItem {
         self.presentation = presentation_for(state);
     }
 
-    /// The three menu items, matching `StatusNotifier._layout_data` in tray.py
-    /// (item ids 1, 7 and 8).
+    /// The menu items: Open, Settings, Conflicts (when wired) and Quit,
+    /// following the v0.4.0 tray (`_layout_data` item ids 1, 7, 8 plus the
+    /// conflicts entry `application.py` wires via `open_conflicts`).
     ///
     /// The callbacks run on the ksni service thread, so they only post a
     /// [`TrayAction`] with `try_send` (async-channel 2.x `Sender::send` is an
@@ -131,7 +138,7 @@ impl TrayItem {
         let open = self.actions.clone();
         let settings = self.actions.clone();
         let quit = self.actions.clone();
-        vec![
+        let mut items: Vec<MenuItem<Self>> = vec![
             StandardItem {
                 label: "Open NextSync".into(),
                 icon_name: "window-new-symbolic".into(),
@@ -150,6 +157,22 @@ impl TrayItem {
                 ..Default::default()
             }
             .into(),
+        ];
+        if self.show_conflicts {
+            let conflicts = self.actions.clone();
+            items.push(
+                StandardItem {
+                    label: "Sync Activity and Conflicts…".into(),
+                    icon_name: "emblem-synchronizing-symbolic".into(),
+                    activate: Box::new(move |_this: &mut Self| {
+                        let _ = conflicts.try_send(TrayAction::Conflicts);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        items.push(
             StandardItem {
                 label: "Quit".into(),
                 icon_name: "application-exit-symbolic".into(),
@@ -159,7 +182,8 @@ impl TrayItem {
                 ..Default::default()
             }
             .into(),
-        ]
+        );
+        items
     }
 }
 
@@ -227,8 +251,9 @@ impl Tray {
     /// caller should log the error and continue without a tray (the app is
     /// fully usable from the main window).
     pub fn new(initial: AppState, callbacks: TrayCallbacks) -> Result<Self, ksni::Error> {
+        let show_conflicts = callbacks.open_conflicts.is_some();
         let (sender, receiver) = async_channel::unbounded();
-        let item = TrayItem::new(initial, sender);
+        let item = TrayItem::new(initial, sender, show_conflicts);
         let handle = item.spawn()?;
         let dispatcher = MainContext::default().spawn_local(dispatch(receiver, callbacks));
         Ok(Self {
@@ -242,9 +267,11 @@ impl Tray {
         let _ = self.handle.update(|item| item.apply_state(state));
     }
 
-    /// Number of menu items (Open, Settings, Quit).
-    pub fn menu_items() -> usize {
-        MENU_ITEM_COUNT
+    /// Number of menu items (Open, Settings, [Conflicts], Quit).
+    pub fn menu_items(&self) -> usize {
+        self.handle
+            .update(|item| item.build_menu().len())
+            .unwrap_or(MENU_ITEM_COUNT)
     }
 }
 
@@ -254,6 +281,11 @@ async fn dispatch(receiver: async_channel::Receiver<TrayAction>, callbacks: Tray
         match action {
             TrayAction::Open => (callbacks.open_window)(),
             TrayAction::Settings => (callbacks.open_settings)(),
+            TrayAction::Conflicts => {
+                if let Some(open_conflicts) = &callbacks.open_conflicts {
+                    open_conflicts();
+                }
+            }
             TrayAction::Quit => (callbacks.quit)(),
         }
     }
@@ -266,14 +298,37 @@ mod tests {
 
     fn item_with(state: AppState) -> (TrayItem, async_channel::Receiver<TrayAction>) {
         let (tx, rx) = async_channel::unbounded();
-        (TrayItem::new(state, tx), rx)
+        (TrayItem::new(state, tx, true), rx)
     }
 
     #[test]
-    fn menu_has_three_items_matching_the_python_layout() {
+    fn menu_has_four_items_when_conflicts_is_wired() {
         let (item, _rx) = item_with(AppState::IdleOk);
         let menu = item.build_menu();
-        assert_eq!(menu.len(), Tray::menu_items());
+        assert_eq!(menu.len(), MENU_ITEM_COUNT);
+        let labels: Vec<&str> = menu
+            .iter()
+            .map(|entry| match entry {
+                MenuItem::Standard(standard) => standard.label.as_str(),
+                _ => panic!("unexpected menu item type"),
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Open NextSync",
+                "Settings",
+                "Sync Activity and Conflicts…",
+                "Quit"
+            ]
+        );
+    }
+
+    #[test]
+    fn menu_omits_conflicts_when_not_wired() {
+        let (tx, _rx) = async_channel::unbounded();
+        let item = TrayItem::new(AppState::IdleOk, tx, false);
+        let menu = item.build_menu();
         let labels: Vec<&str> = menu
             .iter()
             .map(|entry| match entry {
@@ -296,6 +351,7 @@ mod tests {
         }
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Open);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Settings);
+        assert_eq!(rx.try_recv().unwrap(), TrayAction::Conflicts);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Quit);
         assert!(rx.try_recv().is_err(), "no extra actions should be sent");
     }

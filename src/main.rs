@@ -67,11 +67,13 @@ fn main() {
             account_manager.start(&config);
             let aggregate = account_manager.aggregate_state();
 
+            let logger = nextsync::core::log::LogBuffer::new();
             let main_window = Rc::new(RefCell::new(MainWindow::new(
                 app,
                 config,
                 config_store,
                 account_manager,
+                logger,
                 None,
             )));
             let weak = Rc::downgrade(&main_window);
@@ -101,6 +103,14 @@ fn main() {
                         }
                     }
                 }),
+                open_conflicts: Some(Rc::new({
+                    let weak = weak.clone();
+                    move || {
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow_mut().show_conflicts();
+                        }
+                    }
+                })),
                 quit: Rc::new({
                     let app = app.clone();
                     move || app.quit()
