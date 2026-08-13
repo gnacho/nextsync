@@ -1,9 +1,10 @@
-//! Configuration storage: schema v6 model, validation and atomic file IO.
+//! Configuration storage: schema v7 model, validation and atomic file IO.
 //!
 //! The on-disk format is byte-compatible with the Python `nextsync` v0.2.x
-//! (`~/.config/nextsync/settings.json`, `schema_version: 6`). Reading tolerates
-//! legacy v1-v5 files (migrating them in order) and missing keys (merging with
-//! defaults); writing always emits a clean v6 payload.
+//! (`~/.config/nextsync/settings.json`, `schema_version: 6`), plus the v7
+//! additions (account `provider`, folder `space_id`). Reading tolerates legacy
+//! v1-v6 files (migrating them in order) and missing keys (merging with
+//! defaults); writing always emits a clean v7 payload.
 //!
 //! Reference implementation: `src/nextsync/storage/config.py` (v0.2.5).
 
@@ -14,13 +15,16 @@ use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::nextcloud::driver::Provider;
+
 /// Current configuration schema version.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Default exclusion patterns, mirroring `nextsync.core.exclusions`.
 pub const DEFAULT_PATTERNS: [&str; 10] = [
@@ -98,6 +102,8 @@ pub struct AccountConfig {
     pub server_url: String,
     pub login_name: String,
     pub authentication_type: String,
+    /// The sync engine this account uses (defaults to Nextcloud).
+    pub provider: Provider,
     pub folders: Vec<FolderConfig>,
     pub sync: SyncConfig,
     pub delete_guard: DeleteGuardConfig,
@@ -111,6 +117,7 @@ impl Default for AccountConfig {
             server_url: String::new(),
             login_name: String::new(),
             authentication_type: "manual".to_string(),
+            provider: Provider::default(),
             folders: Vec::new(),
             sync: SyncConfig::default(),
             delete_guard: DeleteGuardConfig::default(),
@@ -125,6 +132,9 @@ pub struct FolderConfig {
     pub id: String,
     pub local_root: String,
     pub remote_path: String,
+    /// OpenCloud space id; unused by Nextcloud folders.
+    #[serde(default)]
+    pub space_id: Option<String>,
 }
 
 /// Per-account sync triggers and exclusions.
@@ -366,6 +376,7 @@ pub fn validate_config(value: Value) -> Result<Config, ConfigError> {
     migrate_to_v3(&mut data);
     migrate_to_v5(&mut data);
     migrate_to_v6(&mut data);
+    migrate_to_v7(&mut data);
     data.insert("schema_version".to_string(), Value::from(SCHEMA_VERSION));
 
     let mut accounts = Vec::new();
@@ -607,6 +618,16 @@ fn migrate_to_v6(raw: &mut Map<String, Value>) {
     raw.insert("accounts".to_string(), Value::Array(migrated));
 }
 
+/// Add the account `provider` and the folder `space_id` (schema v7).
+///
+/// This is a metadata-only migration: legacy files carry neither key, and both
+/// default at validation time (`Provider` defaults to `Nextcloud`, `space_id`
+/// to `None`). The step exists to mark the version bump in the same place as
+/// the other migrations.
+fn migrate_to_v7(raw: &mut Map<String, Value>) {
+    let _ = raw;
+}
+
 // ---------------------------------------------------------------------------
 // Per-section validators, mirroring `config.py`.
 // ---------------------------------------------------------------------------
@@ -649,6 +670,10 @@ fn validate_account(raw: &Value) -> Result<AccountConfig, ConfigError> {
         folders.push(folder);
     }
 
+    let provider = match obj.get("provider") {
+        Some(Value::String(value)) => Provider::from_str(value).unwrap_or_default(),
+        _ => Provider::default(),
+    };
     let sync = validate_sync(obj.get("sync"))?;
     let delete_guard = validate_delete_guard(obj.get("delete_guard"))?;
     let runtime = validate_runtime(obj.get("runtime"));
@@ -659,6 +684,7 @@ fn validate_account(raw: &Value) -> Result<AccountConfig, ConfigError> {
         server_url,
         login_name,
         authentication_type,
+        provider,
         folders,
         sync,
         delete_guard,
@@ -688,11 +714,16 @@ fn validate_folder(
     let local_root = root.to_string_lossy().into_owned();
     let remote_path =
         normalize_remote_path(&obj.get("remote_path").map(json_str).unwrap_or_default())?;
+    let space_id = match obj.get("space_id") {
+        Some(Value::String(value)) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        _ => None,
+    };
     let id = folder_fingerprint(server_url, login_name, &local_root, &remote_path);
     Ok(FolderConfig {
         id,
         local_root,
         remote_path,
+        space_id,
     })
 }
 
@@ -1243,11 +1274,11 @@ mod tests {
 
     #[test]
     fn future_schema_rejected() {
-        let cfg = json!({ "schema_version": 7 });
+        let cfg = json!({ "schema_version": 8 });
         let err = validate_config(cfg).unwrap_err();
         assert!(err
             .message
-            .contains("Configuration schema 7 is newer than this application supports"));
+            .contains("Configuration schema 8 is newer than this application supports"));
     }
 
     #[test]
@@ -1283,7 +1314,7 @@ mod tests {
             }]
         });
         let config = validate_config(cfg).unwrap();
-        assert_eq!(config.schema_version, 6);
+        assert_eq!(config.schema_version, 7);
         assert_eq!(config.accounts.len(), 1);
         let account = &config.accounts[0];
         assert_eq!(account.folders.len(), 1);
@@ -1350,6 +1381,68 @@ mod tests {
         });
         let config = validate_config(cfg).unwrap();
         assert!(config.accounts[0].folders.is_empty());
+    }
+
+    #[test]
+    fn migrate_v6_to_v7_adds_provider_default() {
+        let cfg = json!({
+            "schema_version": 6,
+            "accounts": [{
+                "server_url": "https://cloud.example.com",
+                "login_name": "alice"
+            }]
+        });
+        let config = validate_config(cfg).unwrap();
+        assert_eq!(config.schema_version, 7);
+        assert_eq!(config.accounts[0].provider, Provider::Nextcloud);
+    }
+
+    #[test]
+    fn provider_parsed_from_account() {
+        let cfg = json!({
+            "schema_version": 7,
+            "accounts": [{
+                "server_url": "https://cloud.example.com",
+                "login_name": "alice",
+                "provider": "opencloud"
+            }]
+        });
+        let config = validate_config(cfg).unwrap();
+        assert_eq!(config.accounts[0].provider, Provider::OpenCloud);
+    }
+
+    #[test]
+    fn unknown_provider_falls_back_to_nextcloud() {
+        let cfg = json!({
+            "schema_version": 7,
+            "accounts": [{
+                "server_url": "https://cloud.example.com",
+                "login_name": "alice",
+                "provider": "kde"
+            }]
+        });
+        let config = validate_config(cfg).unwrap();
+        assert_eq!(config.accounts[0].provider, Provider::Nextcloud);
+    }
+
+    #[test]
+    fn space_id_optional_and_parsed() {
+        let cfg = json!({
+            "schema_version": 7,
+            "accounts": [{
+                "server_url": "https://cloud.example.com",
+                "login_name": "alice",
+                "provider": "opencloud",
+                "folders": [
+                    { "local_root": "/home/alice/OC", "remote_path": "", "space_id": "space:abcd" },
+                    { "local_root": "/home/alice/OC2", "remote_path": "" }
+                ]
+            }]
+        });
+        let config = validate_config(cfg).unwrap();
+        let folders = &config.accounts[0].folders;
+        assert_eq!(folders[0].space_id.as_deref(), Some("space:abcd"));
+        assert_eq!(folders[1].space_id, None);
     }
 
     #[test]
@@ -1422,6 +1515,7 @@ mod tests {
             server_url: "https://cloud.example.com".to_string(),
             login_name: "alice".to_string(),
             authentication_type: "manual".to_string(),
+            provider: Provider::OpenCloud,
             folders: vec![FolderConfig {
                 id: folder_fingerprint(
                     "https://cloud.example.com",
@@ -1431,6 +1525,7 @@ mod tests {
                 ),
                 local_root: "/home/alice/NC".to_string(),
                 remote_path: "/Docs".to_string(),
+                space_id: Some("space:abcd".to_string()),
             }],
             sync: SyncConfig::default(),
             delete_guard: DeleteGuardConfig::default(),
@@ -1448,7 +1543,7 @@ mod tests {
 
         let raw: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let obj = raw.as_object().unwrap();
-        assert_eq!(obj.get("schema_version"), Some(&json!(6)));
+        assert_eq!(obj.get("schema_version"), Some(&json!(7)));
         assert!(!obj.contains_key("account"));
         assert!(!obj.contains_key("sync"));
         assert!(!obj.contains_key("runtime"));
@@ -1460,7 +1555,7 @@ mod tests {
         let store = ConfigStore::with_path(dir.path().join("settings.json"));
         let config = store.load().unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(config.schema_version, 6);
+        assert_eq!(config.schema_version, 7);
         assert!(config.accounts.is_empty());
     }
 
@@ -1478,7 +1573,7 @@ mod tests {
     fn empty_document_validates_to_defaults() {
         let config = validate_config(json!({})).unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(config.schema_version, 6);
+        assert_eq!(config.schema_version, 7);
         assert!(config.accounts.is_empty());
     }
 

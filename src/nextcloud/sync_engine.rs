@@ -1,9 +1,12 @@
 //! Sync engine.
 //!
-//! Fase 2 (Task 2.3): spawns `nextcloudcmd`, drains stdout and stderr in
+//! Fase 2 (Task 2.3): spawns the provider's sync binary (resolved through the
+//! [`SyncDriver`] of `account.provider`), drains stdout and stderr in
 //! parallel threads (anti-deadlock on the 64 KB pipe, a spike finding),
 //! forwards progress lines to a channel and reports the [`SyncOutcome`] to
-//! the scheduler.
+//! the scheduler. The engine never branches on the provider: the driver
+//! produces the [`CommandSpec`] and the progress parser is shared (both
+//! binaries are forks of the same Qt codebase).
 //!
 //! Mirrors `core/sync_engine.py`: stdout drives live progress, both streams
 //! feed a bounded diagnostic tail, and the final classification
@@ -37,10 +40,9 @@ use std::time::{Duration, Instant};
 
 use crate::core::scheduler::{SyncOutcome, SyncRunner};
 use crate::core::triggers::Trigger;
-use crate::nextcloud::command::{
-    build_command, BoundedOutputCapture, Classification, DEFAULT_MAX_LINES,
-};
+use crate::nextcloud::command::{BoundedOutputCapture, Classification, DEFAULT_MAX_LINES};
 use crate::nextcloud::credentials::CredentialsStore;
+use crate::nextcloud::driver::{driver_for, DriverContext};
 use crate::storage::config::{AccountConfig, FolderConfig, NetworkConfig};
 use crate::util::redact::Redact;
 
@@ -243,14 +245,16 @@ fn engine_thread(
             return EngineRun::Direct(SyncOutcome::AuthFailed);
         }
     };
-    let spec = match build_command(
+    let driver = driver_for(inputs.account.provider);
+    let ctx = DriverContext::from_folder(
         &inputs.account,
         &inputs.folder,
         &inputs.network,
-        &password,
-        inputs.exclude_file.as_deref(),
-        inputs.executable.as_deref(),
-    ) {
+        password,
+        inputs.exclude_file.clone(),
+        inputs.executable.clone(),
+    );
+    let spec = match driver.build_command(&ctx) {
         Ok(spec) => spec,
         Err(_) => return EngineRun::Direct(SyncOutcome::Failed),
     };
@@ -350,6 +354,8 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
+    use crate::nextcloud::driver::Provider;
+
     /// Credential source with a fixed answer.
     struct FakeCredentials(CredentialLookup);
 
@@ -365,6 +371,7 @@ mod tests {
             server_url: "https://cloud.example.com".to_string(),
             login_name: "alice".to_string(),
             authentication_type: "manual".to_string(),
+            provider: Default::default(),
             folders: Vec::new(),
             sync: Default::default(),
             delete_guard: Default::default(),
@@ -377,6 +384,7 @@ mod tests {
             id: "test-folder".to_string(),
             local_root: "/tmp/NextCloud".to_string(),
             remote_path: String::new(),
+            space_id: None,
         }
     }
 
@@ -565,6 +573,64 @@ mod tests {
         .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Missing)));
         let (outcome, events) = run_engine(engine, &progress_rx);
         assert_eq!(outcome, SyncOutcome::AuthFailed);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn opencloud_provider_syncs_with_space_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(
+            dir.path(),
+            "fake-opencloudcmd",
+            "#!/bin/sh\n\
+             [ -n \"$OPENCLOUD_TOKEN\" ] || exit 3\n\
+             [ \"$1\" = \"https://cloud.example.com\" ] || exit 4\n\
+             [ \"$2\" = \"space:abcd\" ] || exit 5\n\
+             [ \"$3\" = \"/tmp/NextCloud/\" ] || exit 6\n\
+             [ \"$4\" = \"--user\" ] || exit 7\n\
+             [ \"$5\" = \"alice\" ] || exit 8\n\
+             echo 'Downloading: /home/user/NextCloud/a.pdf'\n\
+             exit 0\n",
+        );
+        let mut account = account();
+        account.provider = Provider::OpenCloud;
+        let mut folder = folder();
+        folder.space_id = Some("space:abcd".to_string());
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account,
+            folder,
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))));
+        let (outcome, events) = run_engine(engine, &progress_rx);
+        assert_eq!(outcome, SyncOutcome::Success);
+        assert_eq!(events[0].action, "download");
+    }
+
+    #[test]
+    fn opencloud_missing_space_id_maps_to_failed() {
+        let mut account = account();
+        account.provider = Provider::OpenCloud;
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account,
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some("/bin/true".into()),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))));
+        let (outcome, events) = run_engine(engine, &progress_rx);
+        assert_eq!(outcome, SyncOutcome::Failed);
         assert!(events.is_empty());
     }
 

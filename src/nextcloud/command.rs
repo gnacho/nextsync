@@ -16,7 +16,8 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::storage::config::{normalize_remote_path, AccountConfig, FolderConfig, NetworkConfig};
+use crate::nextcloud::driver::{DriverContext, NextcloudDriver, SyncDriver};
+use crate::storage::config::{AccountConfig, FolderConfig, NetworkConfig};
 
 /// Name of the wrapped binary (searched on `$PATH`).
 pub const BINARY_NAME: &str = "nextcloudcmd";
@@ -29,17 +30,23 @@ pub const DEFAULT_MAX_LINES: usize = 200;
 pub enum CommandError {
     /// The binary was not found on `$PATH` (Python `NextcloudCmdMissingError`).
     MissingBinary,
-    /// The remote path did not normalize to a valid `--path` value.
+    /// The remote path did not normalize to a valid `--path`/`--remote-folder` value.
     InvalidRemotePath(String),
+    /// The OpenCloud account folder has no `space_id` configured.
+    MissingSpaceId,
 }
 
 impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingBinary => f.write_str(
-                "nextcloudcmd is not installed (Ubuntu package: nextcloud-desktop-cmd).",
+                "the sync binary is not installed (nextcloudcmd: nextcloud-desktop-cmd; \
+                 opencloudcmd: opencloud-desktop-git).",
             ),
             Self::InvalidRemotePath(message) => f.write_str(message),
+            Self::MissingSpaceId => {
+                f.write_str("OpenCloud folders require a space id to synchronize.")
+            }
         }
     }
 }
@@ -65,16 +72,21 @@ impl CommandSpec {
     }
 }
 
-/// Locate the `nextcloudcmd` executable on `$PATH` (mirror of `shutil.which`).
-pub fn find_nextcloudcmd() -> Option<PathBuf> {
+/// Locate an executable on `$PATH` (mirror of `shutil.which`).
+pub fn find_binary(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(BINARY_NAME);
+        let candidate = dir.join(name);
         if is_executable(&candidate) {
             return Some(candidate);
         }
     }
     None
+}
+
+/// Locate the `nextcloudcmd` executable on `$PATH`.
+pub fn find_nextcloudcmd() -> Option<PathBuf> {
+    find_binary(BINARY_NAME)
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -89,6 +101,10 @@ fn is_executable(path: &Path) -> bool {
 /// Mirrors `command.py::build_command`: one invocation per folder
 /// (`local_root` + `remote_path`), account settings and network settings. The
 /// password never appears on the command line, only in `NC_PASSWORD`.
+///
+/// This is the Nextcloud-only entry point kept for compatibility: it delegates
+/// to [`NextcloudDriver`]. Provider-agnostic callers should ask
+/// `driver_for(provider)` for the driver instead (see [`SyncDriver`]).
 pub fn build_command(
     account: &AccountConfig,
     folder: &FolderConfig,
@@ -97,48 +113,15 @@ pub fn build_command(
     exclude_file: Option<&Path>,
     executable: Option<&Path>,
 ) -> Result<CommandSpec, CommandError> {
-    let binary = match executable {
-        Some(path) => path.to_string_lossy().into_owned(),
-        None => find_nextcloudcmd()
-            .map(|path| path.to_string_lossy().into_owned())
-            .ok_or(CommandError::MissingBinary)?,
-    };
-    let mut argv = vec![
-        binary,
-        "--non-interactive".to_string(),
-        "--max-sync-retries".to_string(),
-        account.sync.max_sync_retries.max(1).to_string(),
-        "-h".to_string(),
-    ];
-    if !account.sync.detailed_output {
-        argv.push("--silent".to_string());
-    }
-    if network.trust_invalid_certificates {
-        argv.push("--trust".to_string());
-    }
-    if let Some(proxy) = &network.custom_proxy {
-        argv.push("--httpproxy".to_string());
-        argv.push(proxy.clone());
-    }
-    if let Some(path) = exclude_file {
-        argv.push("--exclude".to_string());
-        argv.push(path.to_string_lossy().into_owned());
-    }
-    let remote_path = normalize_remote_path(&folder.remote_path)
-        .map_err(|error| CommandError::InvalidRemotePath(error.message))?;
-    if !remote_path.is_empty() {
-        argv.push("--path".to_string());
-        argv.push(remote_path);
-    }
-    argv.push(folder.local_root.clone());
-    argv.push(account.server_url.clone());
-    Ok(CommandSpec {
-        argv,
-        environment: vec![
-            ("NC_USER".to_string(), account.login_name.clone()),
-            ("NC_PASSWORD".to_string(), password.to_string()),
-        ],
-    })
+    let ctx = DriverContext::from_folder(
+        account,
+        folder,
+        network,
+        password.to_string(),
+        exclude_file.map(Path::to_path_buf),
+        executable.map(Path::to_path_buf),
+    );
+    NextcloudDriver.build_command(&ctx)
 }
 
 /// Text markers that indicate an authentication failure, in lower case.
@@ -264,6 +247,7 @@ pub fn classify_output(output: &str, exit_code: i32) -> Classification {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nextcloud::driver::Provider;
     use crate::storage::config::{DeleteGuardConfig, RuntimeConfig, SyncConfig};
 
     fn account() -> AccountConfig {
@@ -271,6 +255,7 @@ mod tests {
             server_url: "https://cloud.example.com".to_string(),
             login_name: "alice".to_string(),
             authentication_type: "manual".to_string(),
+            provider: Provider::default(),
             folders: vec![folder()],
             sync: SyncConfig {
                 max_sync_retries: 3,
@@ -288,6 +273,7 @@ mod tests {
             id: "test-folder".to_string(),
             local_root: "/tmp/NextCloud".to_string(),
             remote_path: String::new(),
+            space_id: None,
         }
     }
 

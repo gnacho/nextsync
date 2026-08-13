@@ -3,6 +3,7 @@
 
 pub mod command;
 pub mod credentials;
+pub mod driver;
 pub mod nextcloudcmd_progress;
 pub mod push;
 pub mod sync_engine;
