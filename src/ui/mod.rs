@@ -8,6 +8,7 @@ pub mod main_window;
 pub mod settings;
 pub mod setup;
 pub mod tray;
+pub mod tray_state;
 
 #[cfg(test)]
 mod test_helpers {
