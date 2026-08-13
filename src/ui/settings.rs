@@ -941,142 +941,193 @@ impl FolderUi {
 
     /// Present the Add Folder dialog. `previous` and `error` let a failed
     /// attempt re-open with the typed values and an inline message.
+    /// Present the Add Folder dialog. `previous` and `error` let a failed
+    /// attempt re-open with the typed values and an inline message.
+    ///
+    /// Thin wrapper around the freestanding [`present_add_folder_dialog`]:
+    /// supplies this group's refresh + the window toast from the folder UI's
+    /// own state so the Settings call site stays a one-liner.
     fn present_add_folder_dialog(&self, previous: Option<(String, String)>, error: Option<String>) {
-        let (previous_local, previous_remote) = previous.unwrap_or_default();
-        let local_default = if previous_local.is_empty() {
-            default_sync_root().to_string_lossy().into_owned()
-        } else {
-            previous_local
+        let on_folder_added = {
+            let ui = self.clone();
+            Rc::new(move || {
+                ui.refresh();
+                invoke(&ui.callbacks.on_folder_changed);
+            })
         };
-
-        let dialog = libadwaita::AlertDialog::new(
-            Some(t("Add Folder")),
-            Some(t(
-                "Choose a local folder and an optional remote folder to mirror from this account.",
-            )),
+        let on_error = {
+            let window = self.window.clone();
+            Rc::new(move |message: String| {
+                window.add_toast(libadwaita::Toast::new(&message));
+            })
+        };
+        present_add_folder_dialog(
+            self.store.clone(),
+            self.account_id.clone(),
+            self.window.upcast_ref::<gtk4::Widget>(),
+            on_folder_added,
+            on_error,
+            previous,
+            error,
         );
-        let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    }
+}
 
-        let local_entry = libadwaita::EntryRow::new();
-        local_entry.set_title(t("Local folder"));
-        local_entry.set_text(&local_default);
+/// Present the Add Folder dialog for an account against a config store.
+///
+/// This is the single construction site for the dialog, shared by the
+/// Settings window and the main window's account view. `parent`
+/// is the transient-for widget — the Settings `PreferencesWindow` or the main
+/// `ApplicationWindow`. `on_folder_added` runs after a folder is committed;
+/// `on_error` is invoked with the validation message (the caller usually
+/// surfaces it as a toast) in addition to the dialog's own inline re-present.
+///
+/// The remote-folder picker is always sensitive (see `populate_remote_picker`):
+/// when the lookup fails or returns nothing the user can still type a remote
+/// path into the adjacent entry, which is the actual source of truth.
+pub fn present_add_folder_dialog(
+    store: ConfigStore,
+    account_id: String,
+    parent: &gtk4::Widget,
+    on_folder_added: Rc<dyn Fn()>,
+    on_error: Rc<dyn Fn(String)>,
+    previous: Option<(String, String)>,
+    error: Option<String>,
+) {
+    let (previous_local, previous_remote) = previous.unwrap_or_default();
+    let local_default = if previous_local.is_empty() {
+        default_sync_root().to_string_lossy().into_owned()
+    } else {
+        previous_local
+    };
 
-        let choose = gtk4::Button::builder()
-            .icon_name("folder-open-symbolic")
-            .tooltip_text(t("Choose a local folder to synchronize"))
-            .valign(gtk4::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        let entry_for_picker = local_entry.clone();
-        choose.connect_clicked(move |_| {
-            choose_local_folder(entry_for_picker.clone());
-        });
-        local_entry.add_suffix(&choose);
-        entry_box.append(&local_entry);
+    let dialog = libadwaita::AlertDialog::new(
+        Some(t("Add Folder")),
+        Some(t(
+            "Choose a local folder and an optional remote folder to mirror from this account.",
+        )),
+    );
+    let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-        let remote_entry = libadwaita::EntryRow::new();
-        remote_entry.set_title(t("Remote folder (empty: use the local folder name)"));
-        if !previous_remote.is_empty() {
-            remote_entry.set_text(&previous_remote);
-        }
-        let remote_list = gtk4::StringList::new(&[]);
-        let picker = gtk4::DropDown::from_strings(&[]);
-        picker.set_model(Some(&remote_list));
-        picker.set_selected(u32::MAX);
-        // The picker is always sensitive: when the remote-folder lookup fails
-        // (or returns nothing) the user can still type a remote path into the
-        // adjacent entry, which is the actual source of truth. A grayed-out
-        // picker was reported as "the dropdown does not open".
-        picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
-        let entry_for_pick = remote_entry.clone();
-        picker.connect_selected_notify(move |picker| {
-            if let Some(item) = picker.selected_item() {
-                if let Ok(item) = item.downcast::<gtk4::StringObject>() {
-                    entry_for_pick.set_text(&item.string());
-                    picker.set_selected(u32::MAX);
-                }
+    let local_entry = libadwaita::EntryRow::new();
+    local_entry.set_title(t("Local folder"));
+    local_entry.set_text(&local_default);
+
+    let choose = gtk4::Button::builder()
+        .icon_name("folder-open-symbolic")
+        .tooltip_text(t("Choose a local folder to synchronize"))
+        .valign(gtk4::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    let entry_for_picker = local_entry.clone();
+    choose.connect_clicked(move |_| {
+        choose_local_folder(entry_for_picker.clone());
+    });
+    local_entry.add_suffix(&choose);
+    entry_box.append(&local_entry);
+
+    let remote_entry = libadwaita::EntryRow::new();
+    remote_entry.set_title(t("Remote folder (empty: use the local folder name)"));
+    if !previous_remote.is_empty() {
+        remote_entry.set_text(&previous_remote);
+    }
+    let remote_list = gtk4::StringList::new(&[]);
+    let picker = gtk4::DropDown::from_strings(&[]);
+    picker.set_model(Some(&remote_list));
+    picker.set_selected(u32::MAX);
+    picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
+    let entry_for_pick = remote_entry.clone();
+    picker.connect_selected_notify(move |picker| {
+        if let Some(item) = picker.selected_item() {
+            if let Ok(item) = item.downcast::<gtk4::StringObject>() {
+                entry_for_pick.set_text(&item.string());
+                picker.set_selected(u32::MAX);
             }
-        });
-        remote_entry.add_suffix(&picker);
-        entry_box.append(&remote_entry);
+        }
+    });
+    remote_entry.add_suffix(&picker);
+    entry_box.append(&remote_entry);
 
-        // Status line under the picker: empty on success, a short translated
-        // message when the remote-folder lookup could not complete. It never
-        // blocks the dialog (the entry is still editable).
-        let picker_status = gtk4::Label::builder()
+    let picker_status = gtk4::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["dim-label"])
+        .build();
+    entry_box.append(&picker_status);
+
+    if let Some(message) = error {
+        let label = gtk4::Label::builder()
+            .label(message)
             .xalign(0.0)
             .wrap(true)
-            .css_classes(["dim-label"])
+            .css_classes(["error"])
             .build();
-        entry_box.append(&picker_status);
-
-        if let Some(message) = error {
-            let label = gtk4::Label::builder()
-                .label(message)
-                .xalign(0.0)
-                .wrap(true)
-                .css_classes(["error"])
-                .build();
-            entry_box.append(&label);
-        }
-
-        dialog.set_extra_child(Some(&entry_box));
-        dialog.add_response("cancel", t("Cancel"));
-        dialog.add_response("add", t("Add"));
-        dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
-
-        if let Ok(Some(account)) = self.store.account(&self.account_id) {
-            populate_remote_picker(
-                &self.account_id,
-                &account.server_url,
-                &account.login_name,
-                &remote_list,
-                &picker_status,
-            );
-        }
-
-        let store = self.store.clone();
-        let account_id = self.account_id.clone();
-        let folder_ui = self.clone();
-        dialog.connect_response(None, move |_dialog, response| {
-            if response != "add" {
-                return;
-            }
-            let local_root = local_entry.text().to_string();
-            let remote_text = remote_entry.text().to_string();
-            let root = expanduser(&local_root);
-            let outcome = if !root.is_absolute() {
-                Err(ConfigError::new(t("Choose an absolute local folder.")))
-            } else {
-                remote_path_for(&local_root, &remote_text).and_then(|remote| {
-                    store.add_folder(
-                        &account_id,
-                        &FolderConfig {
-                            id: String::new(),
-                            local_root: root.to_string_lossy().into_owned(),
-                            remote_path: remote,
-                            space_id: None,
-                        },
-                    )
-                })
-            };
-            match outcome {
-                Ok(_) => {
-                    folder_ui.refresh();
-                    invoke(&folder_ui.callbacks.on_folder_changed);
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    let toast = libadwaita::Toast::new(&message);
-                    folder_ui.window.add_toast(toast);
-                    folder_ui
-                        .present_add_folder_dialog(Some((local_root, remote_text)), Some(message));
-                }
-            }
-        });
-
-        dialog.present(Some(&self.window));
+        entry_box.append(&label);
     }
+
+    dialog.set_extra_child(Some(&entry_box));
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("add", t("Add"));
+    dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
+
+    if let Ok(Some(account)) = store.account(&account_id) {
+        populate_remote_picker(
+            &account_id,
+            &account.server_url,
+            &account.login_name,
+            &remote_list,
+            &picker_status,
+        );
+    }
+
+    let store_for_response = store;
+    let account_id_for_response = account_id;
+    let on_folder_added_for_response = on_folder_added.clone();
+    let on_error_for_response = on_error.clone();
+    let parent_for_response = parent.clone();
+    dialog.connect_response(None, move |_dialog, response| {
+        if response != "add" {
+            return;
+        }
+        let local_root = local_entry.text().to_string();
+        let remote_text = remote_entry.text().to_string();
+        let root = expanduser(&local_root);
+        let outcome = if !root.is_absolute() {
+            Err(ConfigError::new(t("Choose an absolute local folder.")))
+        } else {
+            remote_path_for(&local_root, &remote_text).and_then(|remote| {
+                store_for_response.add_folder(
+                    &account_id_for_response,
+                    &FolderConfig {
+                        id: String::new(),
+                        local_root: root.to_string_lossy().into_owned(),
+                        remote_path: remote,
+                        space_id: None,
+                    },
+                )
+            })
+        };
+        match outcome {
+            Ok(_) => on_folder_added_for_response(),
+            Err(error) => {
+                let message = error.to_string();
+                on_error_for_response(message.clone());
+                // Re-open with the typed values and an inline error so the user
+                // can correct them without losing what was entered.
+                present_add_folder_dialog(
+                    store_for_response.clone(),
+                    account_id_for_response.clone(),
+                    &parent_for_response,
+                    on_folder_added_for_response.clone(),
+                    on_error_for_response.clone(),
+                    Some((local_root, remote_text)),
+                    Some(message),
+                );
+            }
+        }
+    });
+
+    dialog.present(Some(parent));
 }
 
 /// Present a folder chooser and write the selection into the entry row.
