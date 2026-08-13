@@ -56,7 +56,9 @@ pub struct ConfigError {
 }
 
 impl ConfigError {
-    fn new(message: impl Into<String>) -> Self {
+    /// Build an error with a human-readable message (public for the UI layer,
+    /// which constructs validation errors such as "Account not found.").
+    pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }

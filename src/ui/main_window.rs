@@ -499,20 +499,20 @@ mod tests {
 
     #[test]
     fn main_window_construction_smoke() {
-        if gtk4::init().is_err() {
-            eprintln!("skipped: no display available");
-            return;
-        }
-        let app = libadwaita::Application::builder()
-            .application_id("io.github.gnacho.nextsync")
-            .build();
-        let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
-            crate::core::debounce::FakeTimeoutSource::default(),
-        )));
-        let window = MainWindow::new(&app, Config::default(), manager, None, None, None);
-        assert_eq!(
-            window.window().title().unwrap_or_default().to_string(),
-            "NextSync"
-        );
+        // Must run through the shared GTK test worker: a second `gtk4::init()`
+        // on a separate test thread panics (see `ui::test_helpers`).
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let window = MainWindow::new(&app, Config::default(), manager, None, None, None);
+            assert_eq!(
+                window.window().title().unwrap_or_default().to_string(),
+                "NextSync"
+            );
+        });
     }
 }
