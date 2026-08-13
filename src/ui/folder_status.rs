@@ -17,24 +17,32 @@ use libadwaita::prelude::*;
 use crate::core::account_runtime::FolderRuntime;
 use crate::state::{AppState, StateController, StateSnapshot};
 use crate::storage::config::FolderConfig;
+use crate::util::i18n::t;
 
 /// The `(icon_name, status_label)` pair for a folder state, mirroring the
-/// Python `STATE_PRESENTATION` table.
+/// Python `STATE_PRESENTATION` table. The label is translated through
+/// [`t`]; because every msgid is a `'static` literal the signature keeps
+/// `'static` lifetimes.
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("dialog-question-symbolic", "Not Configured"),
-        AppState::IdleOk => ("emblem-ok-symbolic", "Synchronized"),
-        AppState::IdleManualOnly => ("media-playback-pause-symbolic", "Automatic Sync Is Off"),
-        AppState::SyncQueued => ("appointment-soon-symbolic", "Synchronization Scheduled"),
-        AppState::Syncing => ("emblem-synchronizing-symbolic", "Synchronizing…"),
-        AppState::PausedUser => ("media-playback-pause-symbolic", "Paused"),
-        AppState::PausedBattery => ("battery-symbolic", "Paused on Battery"),
-        AppState::Offline => ("network-offline-symbolic", "Offline"),
-        AppState::Error => ("dialog-error-symbolic", "Synchronization Error"),
-        AppState::AuthRequired => ("dialog-password-symbolic", "Account Needs Attention"),
-        AppState::KeyringLocked => ("changes-prevent-symbolic", "Password Keyring Locked"),
-        AppState::DeleteReview => ("security-high-symbolic", "Review Deletions"),
+        AppState::Unconfigured => ("dialog-question-symbolic", t("Not Configured")),
+        AppState::IdleOk => ("emblem-ok-symbolic", t("Synchronized")),
+        AppState::IdleManualOnly => ("media-playback-pause-symbolic", t("Automatic Sync Is Off")),
+        AppState::SyncQueued => ("appointment-soon-symbolic", t("Synchronization Scheduled")),
+        AppState::Syncing => ("emblem-synchronizing-symbolic", t("Synchronizing…")),
+        AppState::PausedUser => ("media-playback-pause-symbolic", t("Paused")),
+        AppState::PausedBattery => ("battery-symbolic", t("Paused on Battery")),
+        AppState::Offline => ("network-offline-symbolic", t("Offline")),
+        AppState::Error => ("dialog-error-symbolic", t("Synchronization Error")),
+        AppState::AuthRequired => ("dialog-password-symbolic", t("Account Needs Attention")),
+        AppState::KeyringLocked => ("changes-prevent-symbolic", t("Password Keyring Locked")),
+        AppState::DeleteReview => ("security-high-symbolic", t("Review Deletions")),
     }
+}
+
+/// The translated subtitle segment for a remote path ("Remote: {remote}").
+pub fn remote_label(remote_path: &str) -> String {
+    t("Remote: {remote}").replace("{remote}", remote_path)
 }
 
 /// How a last-sync stamp is rendered, mirroring `AccountView._format_sync_stamp`.
@@ -44,7 +52,7 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
 /// subtitle segment (empty when nothing is available).
 pub fn format_sync_stamp(value: Option<&str>) -> String {
     match value {
-        None | Some("") => "Not yet synchronized".to_string(),
+        None | Some("") => t("Not yet synchronized").to_string(),
         Some(raw) => match parse_iso8601(raw) {
             Some((date, time)) => format!("{date} {time}"),
             None => raw.to_string(),
@@ -132,7 +140,7 @@ impl FolderStatusRow {
 
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .tooltip_text("Folder options")
+            .tooltip_text(t("Folder options"))
             .valign(gtk4::Align::Center)
             .css_classes(["flat"])
             .build();
@@ -159,24 +167,29 @@ impl FolderStatusRow {
 
         let menu = gio::Menu::new();
         if actions.contains_key("open") {
-            let item = gio::MenuItem::new(Some("Open local folder"), Some("folder.open"));
+            let item = gio::MenuItem::new(Some(t("Open local folder")), Some("folder.open"));
             item.set_icon(&gio::ThemedIcon::new("folder-open-symbolic"));
             menu.append_item(&item);
         }
         if actions.contains_key("edit-ignored") {
-            let item = gio::MenuItem::new(Some("Edit ignored files"), Some("folder.edit-ignored"));
+            let item =
+                gio::MenuItem::new(Some(t("Edit ignored files")), Some("folder.edit-ignored"));
             item.set_icon(&gio::ThemedIcon::new("text-x-generic-symbolic"));
             menu.append_item(&item);
         }
         if actions.contains_key("force-sync") {
-            let item = gio::MenuItem::new(Some("Force sync now"), Some("folder.force-sync"));
+            let item = gio::MenuItem::new(Some(t("Force sync now")), Some("folder.force-sync"));
             item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
             menu.append_item(&item);
         }
         if actions.contains_key("toggle-pause") {
             let paused = is_paused.as_ref().map(|f| f()).unwrap_or(false);
             let item = gio::MenuItem::new(
-                Some(if paused { "Resume sync" } else { "Pause sync" }),
+                Some(if paused {
+                    t("Resume sync")
+                } else {
+                    t("Pause sync")
+                }),
                 Some("folder.toggle-pause"),
             );
             item.set_icon(&gio::ThemedIcon::new(if paused {
@@ -187,7 +200,7 @@ impl FolderStatusRow {
             menu.append_item(&item);
         }
         if actions.contains_key("remove") {
-            let item = gio::MenuItem::new(Some("Remove synchronization"), Some("folder.remove"));
+            let item = gio::MenuItem::new(Some(t("Remove synchronization")), Some("folder.remove"));
             item.set_icon(&gio::ThemedIcon::new("user-trash-symbolic"));
             menu.append_item(&item);
         }
@@ -261,7 +274,7 @@ fn render(
     }
     let mut parts = vec![status.to_string()];
     if !remote_path.is_empty() {
-        parts.push(format!("Remote: {remote_path}"));
+        parts.push(remote_label(remote_path));
     }
     if let Some(last_sync) = last_sync {
         parts.push(last_sync);
@@ -275,9 +288,11 @@ fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
 
     #[test]
     fn presentation_covers_every_state() {
+        set_locale(Locale::English);
         for state in [
             AppState::Unconfigured,
             AppState::IdleOk,
@@ -296,24 +311,43 @@ mod tests {
             assert!(!icon.is_empty());
             assert!(!label.is_empty());
         }
+        reset_locale();
     }
 
     #[test]
     fn idle_ok_presents_as_synchronized() {
+        set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::IdleOk);
         assert_eq!(icon, "emblem-ok-symbolic");
         assert_eq!(label, "Synchronized");
+        reset_locale();
     }
 
     #[test]
     fn syncing_presents_with_spinner_icon() {
+        set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::Syncing);
         assert_eq!(icon, "emblem-synchronizing-symbolic");
         assert_eq!(label, "Synchronizing…");
+        reset_locale();
+    }
+
+    #[test]
+    fn presentation_translates_to_spanish() {
+        set_locale(Locale::Spanish);
+        let (_, label) = folder_status_presentation(AppState::Syncing);
+        assert_eq!(label, "Sincronizando…");
+        let (_, label) = folder_status_presentation(AppState::IdleOk);
+        assert_eq!(label, "Sincronizado");
+        let (_, label) = folder_status_presentation(AppState::Offline);
+        assert_eq!(label, "Sin conexión");
+        assert_eq!(remote_label("/docs"), "Remoto: /docs");
+        reset_locale();
     }
 
     #[test]
     fn sync_stamp_formats_iso_dates_locally() {
+        set_locale(Locale::English);
         assert_eq!(
             format_sync_stamp(Some("2026-08-13T09:30:00Z")),
             "2026/08/13 09:30"
@@ -322,13 +356,23 @@ mod tests {
             format_sync_stamp(Some("2026-08-13 09:30")),
             "2026/08/13 09:30"
         );
+        reset_locale();
     }
 
     #[test]
     fn sync_stamp_defaults_when_missing() {
+        set_locale(Locale::English);
         assert_eq!(format_sync_stamp(None), "Not yet synchronized");
         assert_eq!(format_sync_stamp(Some("")), "Not yet synchronized");
         assert_eq!(format_sync_stamp(Some("garbage")), "garbage");
+        reset_locale();
+    }
+
+    #[test]
+    fn sync_stamp_defaults_translate_to_spanish() {
+        set_locale(Locale::Spanish);
+        assert_eq!(format_sync_stamp(None), "Aún no sincronizado");
+        reset_locale();
     }
 
     #[test]
@@ -357,8 +401,10 @@ mod tests {
 
     #[test]
     fn row_construction_smoke() {
+        set_locale(Locale::English);
         if gtk4::init().is_err() {
             eprintln!("skipped: no display available");
+            reset_locale();
             return;
         }
         let folder = FolderConfig {
@@ -380,5 +426,6 @@ mod tests {
             row.row.subtitle().as_deref(),
             Some("Synchronized · Remote: /docs")
         );
+        reset_locale();
     }
 }

@@ -13,8 +13,8 @@
 //! components keep appending.
 //!
 //! # Deviations from `ui/log_view.py` (motivated)
-//! - Strings are literal English for now; the i18n catalogs land in Fase 6
-//!   (`util/i18n.rs` is still a placeholder).
+//! - Strings go through [`t`] (Task 6.1); strings the catalog does not carry
+//!   fall back to English.
 //! - The subscription callback only receives the trimmed line; the text view
 //!   joins lines with `\n` (the Python inserts the prefix `\n` when non-empty,
 //!   which is equivalent).
@@ -31,6 +31,7 @@ use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
 use crate::core::log::{LogBuffer, Subscription};
+use crate::util::i18n::t;
 
 /// Hard cap for the text view buffer, in lines.
 pub const MAX_BUFFER_LINES: i32 = 2_000;
@@ -54,7 +55,7 @@ impl LogWindow {
     /// to `logger` for new lines.
     pub fn new(parent: Option<&impl IsA<gtk4::Window>>, logger: &LogBuffer) -> Self {
         let window = libadwaita::Window::new();
-        window.set_title(Some("Synchronization Log"));
+        window.set_title(Some(t("Synchronization Log")));
         window.set_default_size(820, 560);
         window.set_transient_for(parent);
 
@@ -84,13 +85,13 @@ impl LogWindow {
 
         let action_bar = gtk4::ActionBar::new();
         let auto_scroll = Rc::new(Cell::new(true));
-        let auto = gtk4::CheckButton::with_label("Auto-scroll");
+        let auto = gtk4::CheckButton::with_label(t("Auto-scroll"));
         auto.set_active(true);
         let auto_scroll_guard = auto_scroll.clone();
         auto.connect_toggled(move |button| auto_scroll_guard.set(button.is_active()));
         action_bar.pack_start(&auto);
 
-        let copy_button = gtk4::Button::with_label("Copy");
+        let copy_button = gtk4::Button::with_label(t("Copy"));
         let copy_buffer = buffer.clone();
         copy_button.connect_clicked(move |_| {
             let (start, end) = copy_buffer.bounds();
@@ -101,7 +102,7 @@ impl LogWindow {
         });
         action_bar.pack_end(&copy_button);
 
-        let folder_button = gtk4::Button::with_label("Open Log Folder");
+        let folder_button = gtk4::Button::with_label(t("Open Log Folder"));
         let directory = logger.directory();
         folder_button.connect_clicked(move |_| {
             if let Err(error) = std::fs::create_dir_all(&directory) {
@@ -205,10 +206,21 @@ mod tests {
     use super::*;
     use crate::core::log::LogBufferOptions;
     use crate::ui::test_helpers::gtk_smoke;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
+
+    #[test]
+    fn log_window_title_translates_to_spanish() {
+        set_locale(Locale::Spanish);
+        assert_eq!(t("Synchronization Log"), "Registro de sincronización");
+        assert_eq!(t("Auto-scroll"), "Desplazamiento automático");
+        assert_eq!(t("Open Log Folder"), "Abrir carpeta de registros");
+        reset_locale();
+    }
 
     #[test]
     fn log_window_smoke_builds_subscribes_and_appends() {
         gtk_smoke(|| {
+            set_locale(Locale::English);
             let directory = tempfile::tempdir().unwrap();
             let logger = LogBuffer::with_options(LogBufferOptions {
                 directory: directory.path().to_path_buf(),
@@ -222,6 +234,7 @@ mod tests {
             logger.append("hello from smoke");
             log_window.present();
             log_window.unsubscribe();
+            reset_locale();
         });
     }
 }

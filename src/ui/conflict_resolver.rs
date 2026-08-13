@@ -37,9 +37,9 @@
 //! - **The window scans with the folder's [`ExclusionMatcher`]**: consistent
 //!   with the rewrite's `find_conflicts` (the Python resolver passed no
 //!   exclusions).
-//! - **No i18n**: strings are English like the rest of the current UI (Task
-//!   6.1 adds the catalogs). The pure activity parsing lives in
-//!   [`crate::ui::activity`] and is imported here.
+//! - **i18n**: user-visible strings go through [`t`] (Task 6.1); strings the
+//!   catalog does not carry fall back to English. The pure activity parsing
+//!   lives in [`crate::ui::activity`] and is imported here.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -53,9 +53,13 @@ use crate::core::conflict_files::{
 };
 use crate::core::exclusions::ExclusionMatcher;
 use crate::ui::activity::{parse_activity_line, ActivityEntry};
+use crate::util::i18n::t;
 
-/// Window title, mirroring the Python `_("Sync Activity and Conflicts")`.
-pub const WINDOW_TITLE: &str = "Sync Activity and Conflicts";
+/// Translated window title, mirroring the Python
+/// `_("Sync Activity and Conflicts")`.
+pub fn window_title() -> &'static str {
+    t("Sync Activity and Conflicts")
+}
 /// How many recent log lines are kept by the log consumer.
 pub const RECENT_MAX_LINES: usize = 200;
 /// How many recent lines are actually shown in the Recent tab.
@@ -100,7 +104,7 @@ impl ConflictResolverWindow {
         on_close: Option<Rc<dyn Fn()>>,
     ) -> Self {
         let window = libadwaita::Window::builder()
-            .title(WINDOW_TITLE)
+            .title(window_title())
             .default_width(820)
             .default_height(600)
             .build();
@@ -132,7 +136,7 @@ impl ConflictResolverWindow {
         recent_scroller.set_child(Some(&recent_list));
         recent_box.append(&recent_scroller);
         let recent_page = stack.add_named(&recent_box, Some("recent"));
-        recent_page.set_title(Some("Recent"));
+        recent_page.set_title(Some(t("Recent")));
 
         // ---- Conflicts page -------------------------------------------------
         let conflicts_box = gtk4::Box::builder()
@@ -148,8 +152,10 @@ impl ConflictResolverWindow {
             .build();
         let empty_state = libadwaita::StatusPage::builder()
             .icon_name("emblem-ok-symbolic")
-            .title("No Conflicts")
-            .description("No Nextcloud conflicted copies were found in this folder.")
+            .title(t("No Conflicts"))
+            .description(t(
+                "No Nextcloud conflicted copies were found in this folder.",
+            ))
             .vexpand(true)
             .build();
         empty_state.set_visible(false);
@@ -163,7 +169,7 @@ impl ConflictResolverWindow {
         conflicts_box.append(&empty_state);
         conflicts_box.append(&conflict_scroller);
         let conflicts_page = stack.add_named(&conflicts_box, Some("conflicts"));
-        conflicts_page.set_title(Some("Conflicts"));
+        conflicts_page.set_title(Some(t("Conflicts")));
 
         switcher.set_stack(Some(&stack));
         toolbar.set_content(Some(&stack));
@@ -172,12 +178,12 @@ impl ConflictResolverWindow {
 
         // ---- Header actions -------------------------------------------------
         let refresh = gtk4::Button::builder()
-            .label("Refresh")
+            .label(t("Refresh"))
             .icon_name("view-refresh-symbolic")
             .build();
         header.pack_end(&refresh);
         let close = gtk4::Button::builder()
-            .label("Close")
+            .label(t("Close"))
             .css_classes(["suggested-action"])
             .build();
         header.pack_end(&close);
@@ -291,18 +297,18 @@ fn reload_conflicts(
     let conflicts = find_conflicts(local_root, matcher);
     if conflicts.is_empty() {
         empty_state.set_visible(true);
-        summary.set_text(&format!(
-            "No conflicted copies found in {}.",
-            local_root.display()
-        ));
+        summary.set_text(
+            &t("No conflicted copies found in {folder}.")
+                .replace("{folder}", &local_root.display().to_string()),
+        );
         return;
     }
     empty_state.set_visible(false);
-    summary.set_text(&format!(
-        "{} conflicted copy(ies) found in {}.",
-        conflicts.len(),
-        local_root.display()
-    ));
+    summary.set_text(
+        &t("{count} conflicted copy(ies) found in {folder}.")
+            .replace("{count}", &conflicts.len().to_string())
+            .replace("{folder}", &local_root.display().to_string()),
+    );
     for conflict in conflicts {
         let target = ReloadTarget {
             list: list.clone(),
@@ -347,12 +353,12 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
         .build();
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     let subtitle = gtk4::Label::builder()
-        .label(format!(
-            "Original: {} · {} · {} bytes",
-            conflict.original_name,
-            describe_modified(conflict.modified),
-            conflict.size
-        ))
+        .label(
+            t("Original: {name} · {modified} · {size} bytes")
+                .replace("{name}", &conflict.original_name)
+                .replace("{modified}", &describe_modified(conflict.modified))
+                .replace("{size}", &conflict.size.to_string()),
+        )
         .xalign(0.0)
         .css_classes(["dim-label"])
         .wrap(true)
@@ -363,14 +369,15 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
 
     let conflict_local = conflict.clone();
     let target_local = target.clone();
-    let keep_local_button = gtk4::Button::builder().label("Keep Local").build();
-    keep_local_button.set_tooltip_text(Some("Delete the conflicted copy, keep the working file."));
+    let keep_local_button = gtk4::Button::builder().label(t("Keep Local")).build();
+    keep_local_button.set_tooltip_text(Some(t(
+        "Delete the conflicted copy, keep the working file.",
+    )));
     keep_local_button.connect_clicked(move |_| {
         if keep_local(&conflict_local) {
-            target_local.toast(format!(
-                "Kept local version of {}",
-                conflict_local.original_name
-            ));
+            target_local.toast(
+                t("Kept local version of {name}").replace("{name}", &conflict_local.original_name),
+            );
             target_local.reload();
         }
     });
@@ -379,16 +386,18 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
     let conflict_remote = conflict.clone();
     let target_remote = target.clone();
     let keep_remote_button = gtk4::Button::builder()
-        .label("Keep Remote")
+        .label(t("Keep Remote"))
         .css_classes(["suggested-action"])
         .build();
-    keep_remote_button.set_tooltip_text(Some("Replace the working file with the conflicted copy."));
+    keep_remote_button.set_tooltip_text(Some(t(
+        "Replace the working file with the conflicted copy.",
+    )));
     keep_remote_button.connect_clicked(move |_| {
         if keep_remote(&conflict_remote) {
-            target_remote.toast(format!(
-                "Kept remote version of {}",
-                conflict_remote.original_name
-            ));
+            target_remote.toast(
+                t("Kept remote version of {name}")
+                    .replace("{name}", &conflict_remote.original_name),
+            );
             target_remote.reload();
         }
     });
@@ -396,7 +405,7 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
 
     let conflict_open = conflict.clone();
     let open_button = gtk4::Button::builder().icon_name("folder-symbolic").build();
-    open_button.set_tooltip_text(Some("Open in Files"));
+    open_button.set_tooltip_text(Some(t("Open in Files")));
     open_button.connect_clicked(move |_| {
         let file = gio::File::for_path(&conflict_open.path);
         let _ = gio::AppInfo::launch_default_for_uri(&file.uri(), None::<&gio::AppLaunchContext>);
@@ -468,6 +477,7 @@ fn recent_row(entry: &ActivityEntry) -> gtk4::ListBoxRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
 
     struct FakeLog(Vec<String>);
 
@@ -479,14 +489,24 @@ mod tests {
 
     #[test]
     fn window_constants_are_stable() {
-        assert_eq!(WINDOW_TITLE, "Sync Activity and Conflicts");
+        set_locale(Locale::English);
+        assert_eq!(window_title(), "Sync Activity and Conflicts");
         assert_eq!(RECENT_MAX_LINES, 200);
         assert_eq!(RECENT_VISIBLE_LINES, 50);
+        reset_locale();
+    }
+
+    #[test]
+    fn window_title_translates_to_spanish() {
+        set_locale(Locale::Spanish);
+        assert_eq!(window_title(), "Actividad y conflictos de sincronización");
+        reset_locale();
     }
 
     #[test]
     fn window_construction_and_recent_rendering_smoke() {
         crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
             let app = libadwaita::Application::builder()
                 .application_id("io.github.gnacho.nextsync")
                 .build();
@@ -498,12 +518,13 @@ mod tests {
             let window = ConflictResolverWindow::new(&app, dir.path(), matcher, log, None);
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
-                WINDOW_TITLE
+                window_title()
             );
             // The Recent tab already rendered the fake log line.
             assert!(window._recent_list.first_child().is_some());
             // No conflicted copies were found in the empty temp folder.
             assert!(!window._conflict_list.first_child().is_some());
+            reset_locale();
         });
     }
 }

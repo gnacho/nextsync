@@ -6,10 +6,13 @@
 //! display or a DBus session.
 
 use crate::state::AppState;
+use crate::util::i18n::t;
 
 /// Complete tray presentation for an application state.
 ///
-/// Mirrors the `TrayPresentation` dataclass of `tray_state.py`.
+/// Mirrors the `TrayPresentation` dataclass of `tray_state.py`. `label` is
+/// translated by [`presentation_for`]; `icon_key` and `status` are machine
+/// identifiers and stay untranslated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrayPresentation {
     /// Key of the status icon (`ok`, `syncing`, `paused`, `battery`,
@@ -28,7 +31,8 @@ pub struct TrayPresentation {
 /// The exact presentation table of the Python `STATE_PRESENTATIONS`.
 ///
 /// Kept as the single source of truth so both `presentation_for` and the tests
-/// cannot drift apart.
+/// cannot drift apart. The `label` fields are English msgids; they are
+/// translated at read time in [`presentation_for`].
 const STATE_PRESENTATIONS: [(AppState, TrayPresentation); 12] = [
     (
         AppState::Unconfigured,
@@ -142,6 +146,8 @@ const STATE_PRESENTATIONS: [(AppState, TrayPresentation); 12] = [
 
 /// Return the complete tray presentation for an application state.
 ///
+/// The `label` is translated through the active catalog (falling back to the
+/// English msgid); `icon_key` and `status` are identifiers and never change.
 /// The table is exhaustive over [`AppState`]; an unknown state cannot be
 /// requested.
 pub fn presentation_for(state: AppState) -> TrayPresentation {
@@ -149,14 +155,25 @@ pub fn presentation_for(state: AppState) -> TrayPresentation {
         .iter()
         .find_map(|(candidate, presentation)| (*candidate == state).then_some(*presentation))
         .expect("every AppState has a tray presentation")
+        .translated()
+}
+
+/// Translate the label of a presentation in place.
+impl TrayPresentation {
+    fn translated(mut self) -> Self {
+        self.label = t(self.label);
+        self
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
 
     #[test]
     fn presentation_table_covers_every_state_exactly_like_the_python() {
+        set_locale(Locale::English);
         let expected = [
             (
                 AppState::Unconfigured,
@@ -271,10 +288,36 @@ mod tests {
         for (state, presentation) in expected {
             assert_eq!(presentation_for(state), presentation, "state {state:?}");
         }
+        reset_locale();
     }
 
     #[test]
     fn the_table_defines_twelve_presentations() {
         assert_eq!(STATE_PRESENTATIONS.len(), 12);
+    }
+
+    #[test]
+    fn presentation_translates_labels_but_not_identifiers() {
+        set_locale(Locale::Spanish);
+        let presentation = presentation_for(AppState::Syncing);
+        assert_eq!(presentation.label, "Sincronizando…");
+        assert_eq!(presentation.icon_key, "syncing");
+        assert_eq!(presentation.status, "Active");
+        assert_eq!(presentation_for(AppState::Offline).label, "Sin conexión");
+        reset_locale();
+    }
+
+    #[test]
+    fn presentation_falls_back_to_the_english_label() {
+        set_locale(Locale::Spanish);
+        let mut unknown = TrayPresentation {
+            icon_key: "error",
+            status: "Active",
+            label: "not in the catalog",
+            user_paused: false,
+        };
+        unknown = unknown.translated();
+        assert_eq!(unknown.label, "not in the catalog");
+        reset_locale();
     }
 }

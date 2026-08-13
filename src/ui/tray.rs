@@ -40,6 +40,7 @@ use ksni::{Status, ToolTip};
 
 use crate::state::AppState;
 use crate::ui::tray_state::{presentation_for, TrayPresentation};
+use crate::util::i18n::t;
 
 /// Commands requested by the tray, forwarded from the ksni service thread to
 /// the GLib main loop.
@@ -140,7 +141,7 @@ impl TrayItem {
         let quit = self.actions.clone();
         let mut items: Vec<MenuItem<Self>> = vec![
             StandardItem {
-                label: "Open NextSync".into(),
+                label: t("Open NextSync").into(),
                 icon_name: "window-new-symbolic".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = open.try_send(TrayAction::Open);
@@ -149,7 +150,7 @@ impl TrayItem {
             }
             .into(),
             StandardItem {
-                label: "Settings".into(),
+                label: t("Settings").into(),
                 icon_name: "nextsync-tray-settings".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = settings.try_send(TrayAction::Settings);
@@ -162,7 +163,8 @@ impl TrayItem {
             let conflicts = self.actions.clone();
             items.push(
                 StandardItem {
-                    label: "Sync Activity and Conflicts…".into(),
+                    // The catalog carries the ellipsis-less msgid.
+                    label: format!("{}…", t("Sync Activity and Conflicts")),
                     icon_name: "emblem-synchronizing-symbolic".into(),
                     activate: Box::new(move |_this: &mut Self| {
                         let _ = conflicts.try_send(TrayAction::Conflicts);
@@ -174,7 +176,7 @@ impl TrayItem {
         }
         items.push(
             StandardItem {
-                label: "Quit".into(),
+                label: t("Quit").into(),
                 icon_name: "application-exit-symbolic".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = quit.try_send(TrayAction::Quit);
@@ -197,7 +199,7 @@ impl ksni::Tray for TrayItem {
     }
 
     fn title(&self) -> String {
-        format!("NextSync — {}", self.presentation.label)
+        t("NextSync — {state}").replace("{state}", self.presentation.label)
     }
 
     fn status(&self) -> Status {
@@ -294,6 +296,7 @@ async fn dispatch(receiver: async_channel::Receiver<TrayAction>, callbacks: Tray
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
     use ksni::Tray as _;
 
     fn item_with(state: AppState) -> (TrayItem, async_channel::Receiver<TrayAction>) {
@@ -303,6 +306,7 @@ mod tests {
 
     #[test]
     fn menu_has_four_items_when_conflicts_is_wired() {
+        set_locale(Locale::English);
         let (item, _rx) = item_with(AppState::IdleOk);
         let menu = item.build_menu();
         assert_eq!(menu.len(), MENU_ITEM_COUNT);
@@ -322,10 +326,12 @@ mod tests {
                 "Quit"
             ]
         );
+        reset_locale();
     }
 
     #[test]
     fn menu_omits_conflicts_when_not_wired() {
+        set_locale(Locale::English);
         let (tx, _rx) = async_channel::unbounded();
         let item = TrayItem::new(AppState::IdleOk, tx, false);
         let menu = item.build_menu();
@@ -337,6 +343,32 @@ mod tests {
             })
             .collect();
         assert_eq!(labels, vec!["Open NextSync", "Settings", "Quit"]);
+        reset_locale();
+    }
+
+    #[test]
+    fn menu_labels_translate_to_spanish() {
+        set_locale(Locale::Spanish);
+        let (item, _rx) = item_with(AppState::IdleOk);
+        let labels: Vec<String> = item
+            .build_menu()
+            .iter()
+            .map(|entry| match entry {
+                MenuItem::Standard(standard) => standard.label.clone(),
+                _ => panic!("unexpected menu item type"),
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Abrir NextSync",
+                "Configuración",
+                "Actividad y conflictos de sincronización…",
+                // "Quit" is not in the catalog: English fallback.
+                "Quit"
+            ]
+        );
+        reset_locale();
     }
 
     #[test]
@@ -358,11 +390,13 @@ mod tests {
 
     #[test]
     fn apply_state_recomputes_the_presentation() {
+        set_locale(Locale::English);
         let (mut item, _rx) = item_with(AppState::IdleOk);
         assert_eq!(item.presentation.label, "Synchronized");
         item.apply_state(AppState::Error);
         assert_eq!(item.presentation.label, "Synchronization Error");
         assert_eq!(item.status(), Status::NeedsAttention);
+        reset_locale();
     }
 
     #[test]
@@ -379,17 +413,29 @@ mod tests {
 
     #[test]
     fn title_includes_the_state_label() {
+        set_locale(Locale::English);
         let (idle, _rx) = item_with(AppState::IdleOk);
         assert_eq!(idle.title(), "NextSync — Synchronized");
+        reset_locale();
+    }
+
+    #[test]
+    fn title_translates_the_state_label_to_spanish() {
+        set_locale(Locale::Spanish);
+        let (syncing, _rx) = item_with(AppState::Syncing);
+        assert_eq!(syncing.title(), "NextSync — Sincronizando…");
+        reset_locale();
     }
 
     #[test]
     fn tooltip_description_is_the_state_label() {
+        set_locale(Locale::English);
         let (item, _rx) = item_with(AppState::KeyringLocked);
         let tooltip = item.tool_tip();
         assert_eq!(tooltip.description, "Password Keyring Locked");
         assert_eq!(tooltip.title, "NextSync — Password Keyring Locked");
         assert!(tooltip.icon_pixmap.is_empty(), "no rasterized pixmaps");
+        reset_locale();
     }
 
     #[test]

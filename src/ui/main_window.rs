@@ -20,10 +20,17 @@ use crate::state::{AppState, StateSnapshot};
 use crate::storage::config::{Config, ConfigStore};
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{SettingsCallbacks, SettingsWindow};
+use crate::util::i18n::t;
 
-/// Stable machine-readable name used as a window hint (no GTK dependency).
-pub const WINDOW_TITLE: &str = "NextSync";
-pub const WINDOW_SUBTITLE: &str = "Nextcloud file synchronization";
+/// Translated window title (also used as a machine-readable page name).
+pub fn window_title() -> &'static str {
+    t("NextSync")
+}
+
+/// Translated window subtitle.
+pub fn window_subtitle() -> &'static str {
+    t("Nextcloud file synchronization")
+}
 
 /// Callback invoked with the local root of a folder to open it in the file
 /// manager.
@@ -144,8 +151,8 @@ impl AccountView {
         }
         if account.folders.is_empty() {
             let row = libadwaita::ActionRow::builder()
-                .title("No Synchronization Folders")
-                .subtitle("Add folders from Settings")
+                .title(t("No Synchronization Folders"))
+                .subtitle(t("Add folders from Settings"))
                 .build();
             let icon = gtk4::Image::builder()
                 .icon_name("folder-symbolic")
@@ -164,7 +171,7 @@ impl AccountView {
             .build();
 
         let sync_content = libadwaita::ButtonContent::builder()
-            .label("Sync Now")
+            .label(t("Sync Now"))
             .icon_name("emblem-synchronizing-symbolic")
             .build();
         let sync_button = gtk4::Button::builder()
@@ -183,7 +190,7 @@ impl AccountView {
         buttons.append(&sync_button);
 
         let pause_content = libadwaita::ButtonContent::builder()
-            .label("Pause Sync")
+            .label(t("Pause Sync"))
             .icon_name("media-playback-pause-symbolic")
             .build();
         let pause_button = gtk4::Button::builder()
@@ -204,7 +211,11 @@ impl AccountView {
         let pause_content = pause_content.clone();
         let subscription = aggregate.subscribe(move |snapshot: &StateSnapshot| {
             let paused = snapshot.state == AppState::PausedUser;
-            pause_content.set_label(if paused { "Resume Sync" } else { "Pause Sync" });
+            pause_content.set_label(if paused {
+                t("Resume Sync")
+            } else {
+                t("Pause Sync")
+            });
             pause_content.set_icon_name(if paused {
                 "media-playback-start-symbolic"
             } else {
@@ -212,11 +223,11 @@ impl AccountView {
             });
             match snapshot.state {
                 AppState::DeleteReview => {
-                    sync_content.set_label("Review Deletions");
+                    sync_content.set_label(t("Review Deletions"));
                     sync_content.set_icon_name("security-high-symbolic");
                 }
                 AppState::KeyringLocked => {
-                    sync_content.set_label("Unlock Password Keyring");
+                    sync_content.set_label(t("Unlock Password Keyring"));
                     sync_content.set_icon_name("changes-prevent-symbolic");
                 }
                 _ => {
@@ -224,7 +235,7 @@ impl AccountView {
                         snapshot.state,
                         AppState::PausedUser | AppState::PausedBattery
                     );
-                    sync_content.set_label(if once { "Sync Once" } else { "Sync Now" });
+                    sync_content.set_label(if once { t("Sync Once") } else { t("Sync Now") });
                     sync_content.set_icon_name("emblem-synchronizing-symbolic");
                 }
             }
@@ -276,19 +287,19 @@ impl MainWindow {
     ) -> Self {
         let window = libadwaita::ApplicationWindow::builder()
             .application(application)
-            .title(WINDOW_TITLE)
+            .title(window_title())
             .default_width(900)
             .default_height(600)
             .build();
 
         let toolbar = libadwaita::ToolbarView::new();
         let header = gtk4::HeaderBar::new();
-        let title = libadwaita::WindowTitle::new(WINDOW_TITLE, WINDOW_SUBTITLE);
+        let title = libadwaita::WindowTitle::new(window_title(), window_subtitle());
         header.set_title_widget(Some(&title));
 
         let settings_button = gtk4::Button::builder()
             .icon_name("nextsync-settings-2-symbolic")
-            .tooltip_text("Settings")
+            .tooltip_text(t("Settings"))
             .css_classes(["flat"])
             .build();
         // The handler is installed after construction (the window must exist
@@ -304,7 +315,7 @@ impl MainWindow {
 
         let about_button = gtk4::Button::builder()
             .icon_name("nextsync-info-symbolic")
-            .tooltip_text("About")
+            .tooltip_text(t("About"))
             .css_classes(["flat"])
             .build();
         let about_cb = on_show_about.clone();
@@ -324,7 +335,7 @@ impl MainWindow {
         split.set_min_sidebar_width(220.0);
 
         let (sidebar, accounts_list, add_button) = build_sidebar();
-        let sidebar_page = libadwaita::NavigationPage::new(&sidebar, "Accounts");
+        let sidebar_page = libadwaita::NavigationPage::new(&sidebar, t("Accounts"));
         let add_account_handler: AddAccountHandler = Rc::new(RefCell::new(None));
         let handler_for_add = add_account_handler.clone();
         add_button.connect_clicked(move |_button| {
@@ -337,7 +348,7 @@ impl MainWindow {
             .transition_type(gtk4::StackTransitionType::Crossfade)
             .build();
         let empty_label = gtk4::Label::builder()
-            .label("Select an account to see its synchronization")
+            .label(t("Select an account to see its synchronization"))
             .css_classes(["dim-label"])
             .build();
         content_stack.add_named(&empty_label, Some("empty"));
@@ -352,7 +363,7 @@ impl MainWindow {
         clamp.set_child(Some(&content_stack));
         scroller.set_child(Some(&clamp));
         toast_overlay.set_child(Some(&scroller));
-        let content_page = libadwaita::NavigationPage::new(&toast_overlay, WINDOW_TITLE);
+        let content_page = libadwaita::NavigationPage::new(&toast_overlay, window_title());
 
         split.set_sidebar(Some(&sidebar_page));
         split.set_content(Some(&content_page));
@@ -694,7 +705,7 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
         .build();
 
     let label = gtk4::Label::builder()
-        .label("Accounts")
+        .label(t("Accounts"))
         .xalign(0.0)
         .css_classes(["heading"])
         .margin_start(8)
@@ -709,7 +720,7 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
     sidebar.append(&accounts_list);
 
     let add_button = gtk4::Button::builder()
-        .label("Add Account")
+        .label(t("Add Account"))
         .icon_name("list-add-symbolic")
         .halign(gtk4::Align::Fill)
         .css_classes(["flat"])
@@ -721,11 +732,22 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
 
     #[test]
     fn window_constants_are_stable() {
-        assert_eq!(WINDOW_TITLE, "NextSync");
-        assert_eq!(WINDOW_SUBTITLE, "Nextcloud file synchronization");
+        set_locale(Locale::English);
+        assert_eq!(window_title(), "NextSync");
+        assert_eq!(window_subtitle(), "Nextcloud file synchronization");
+        reset_locale();
+    }
+
+    #[test]
+    fn window_subtitle_translates_to_spanish() {
+        set_locale(Locale::Spanish);
+        assert_eq!(window_title(), "NextSync");
+        assert_eq!(window_subtitle(), "Sincronización de archivos de Nextcloud");
+        reset_locale();
     }
 
     #[test]
@@ -733,6 +755,7 @@ mod tests {
         // Must run through the shared GTK test worker: a second `gtk4::init()`
         // on a separate test thread panics (see `ui::test_helpers`).
         crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
             let app = libadwaita::Application::builder()
                 .application_id("io.github.gnacho.nextsync")
                 .build();
@@ -752,6 +775,7 @@ mod tests {
                 window.window().title().unwrap_or_default().to_string(),
                 "NextSync"
             );
+            reset_locale();
         });
     }
 }
