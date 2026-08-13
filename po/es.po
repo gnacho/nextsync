@@ -1,0 +1,1960 @@
+#: src/nextsync/ui/settings.py:366
+msgid ""
+msgstr ""
+"Project-Id-Version: NextSync 0.1.19\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-13 09:35+0200\n"
+"PO-Revision-Date: 2026-08-07 23:20-0300\n"
+"Last-Translator: gnacho\n"
+"Language-Team: Spanish\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/nextsync/application.py:172
+msgid "Checking for Updates"
+msgstr "Buscando actualizaciones"
+
+#: src/nextsync/application.py:173
+msgid "Contacting the GitHub version service…"
+msgstr "Consultando el servicio de versiones de GitHub…"
+
+#: src/nextsync/application.py:183
+msgid "Could Not Check for Updates"
+msgstr "No se pudieron buscar actualizaciones"
+
+#: src/nextsync/application.py:185
+msgid ""
+"The version information could not be obtained. Check your connection and try "
+"again later."
+msgstr ""
+"No se pudo obtener la información de versión. Compruebe su conexión e "
+"inténtelo de nuevo más tarde."
+
+#: src/nextsync/application.py:198
+msgid "NextSync Is Up to Date"
+msgstr "NextSync está actualizado"
+
+#: src/nextsync/application.py:199
+msgid "You are already using the latest available version."
+msgstr "Ya está usando la versión más reciente disponible."
+
+#: src/nextsync/application.py:215 src/nextsync/ui/conflict_resolver.py:74
+msgid "Close"
+msgstr "Cerrar"
+
+#: src/nextsync/application.py:582
+msgid "Nextcloud account needs attention"
+msgstr "La cuenta de Nextcloud necesita atención"
+
+#: src/nextsync/application.py:584
+#, python-brace-format
+msgid "{account}: open NextSync to check the account credential."
+msgstr "{account}: abre NextSync para comprobar la credencial de la cuenta."
+
+#: src/nextsync/application.py:591
+msgid "Synchronization failed"
+msgstr "Error de sincronización"
+
+#: src/nextsync/application.py:594
+#, python-brace-format
+msgid ""
+"{account}: synchronization failed after {retries} retries. Open the log for "
+"details."
+msgstr ""
+
+#: src/nextsync/application.py:602
+msgid "Many local files disappeared"
+msgstr ""
+
+#: src/nextsync/application.py:606
+#, python-brace-format
+msgid ""
+"{account}: {count} local files disappeared. Synchronization was blocked "
+"before Nextcloud could be changed."
+msgstr ""
+
+#: src/nextsync/application.py:611
+#, python-brace-format
+msgid ""
+"{account}: the local synchronization folder changed unexpectedly. "
+"Synchronization was blocked."
+msgstr ""
+
+#: src/nextsync/application.py:627
+msgid "Synchronization blocked"
+msgstr "Sincronización bloqueada"
+
+#: src/nextsync/application.py:630
+msgid "Keep Paused"
+msgstr ""
+
+#: src/nextsync/application.py:632
+msgid "Restore from Nextcloud"
+msgstr ""
+
+#: src/nextsync/application.py:634
+msgid "Approve These Deletions Once"
+msgstr ""
+
+#: src/nextsync/application.py:656
+msgid "Finishing synchronization"
+msgstr "Terminando la sincronización"
+
+#: src/nextsync/application.py:658
+msgid "NextSync will quit when the current synchronization finishes."
+msgstr "NextSync se cerrará cuando termine la sincronización actual."
+
+#: src/nextsync/ui/about_content.py:10
+msgid ""
+"NextSync is an independent, unofficial third-party project. It is not "
+"affiliated with, sponsored by, endorsed by, maintained by, or otherwise "
+"connected to Nextcloud GmbH. Nextcloud is a registered trademark of "
+"Nextcloud GmbH.\n"
+"\n"
+"Bidirectional synchronization can upload, download, replace, conflict, or "
+"delete files on both the computer and the configured server. Use this "
+"software entirely at your own risk, test it with non-critical data, and "
+"maintain independent, restorable backups. The authors and contributors are "
+"not responsible for lost, corrupted, deleted, or otherwise damaged data.\n"
+"\n"
+"The application delegates file reconciliation and conflict handling to "
+"nextcloudcmd. Availability of notify_push and other server features depends "
+"on the Nextcloud installation. This release was tested with Nextcloud Hub 26 "
+"Spring (34.0.1) on Nextcloud AIO. Compatibility with other or future "
+"Nextcloud versions is not guaranteed.\n"
+"\n"
+"No telemetry, advertising, or usage tracking is included. Credentials are "
+"stored through the desktop Secret Service. Use of this software is also "
+"subject to the GNU General Public License version 3 or later and its "
+"warranty disclaimer."
+msgstr ""
+"NextSync es un proyecto independiente, no oficial y desarrollado por "
+"terceros. No está afiliado, patrocinado, respaldado, mantenido ni vinculado "
+"de ninguna otra forma con Nextcloud GmbH. Nextcloud es una marca registrada "
+"de Nextcloud GmbH.\n"
+"\n"
+"La sincronización bidireccional puede subir, descargar, reemplazar, crear "
+"conflictos o eliminar archivos tanto en el equipo como en el servidor "
+"configurado. Use este software bajo su propia responsabilidad, pruébelo con "
+"datos no críticos y mantenga copias de seguridad independientes y "
+"restaurables. Los autores y colaboradores no se responsabilizan de datos "
+"perdidos, dañados, eliminados o corrompidos.\n"
+"\n"
+"La aplicación delega la reconciliación de archivos y el tratamiento de "
+"conflictos a nextcloudcmd. La disponibilidad de notify_push y de otras "
+"funciones del servidor depende de la instalación de Nextcloud. Esta versión "
+"se probó con Nextcloud Hub 26 Spring (34.0.1) en Nextcloud AIO. No se "
+"garantiza la compatibilidad con otras versiones ni con versiones futuras de "
+"Nextcloud.\n"
+"\n"
+"No se incluye telemetría, publicidad ni seguimiento de uso. Las credenciales "
+"se almacenan mediante el Secret Service del escritorio. El uso de este "
+"software también está sujeto a la Licencia Pública General de GNU versión 3 "
+"o posterior y a su exención de garantías."
+
+#: src/nextsync/ui/about_content.py:34
+msgid "Version 0.2.0"
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:36
+msgid ""
+"Each account can now hold several sync folders instead of one: every folder "
+"maps a local root to an optional remote path and runs its own "
+"synchronization, filesystem watch, deletion guard, exclusions, and "
+"nextcloudcmd invocation."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:37
+msgid ""
+"The setup wizard lets you finish the login without choosing any folder, and "
+"folders can be added or removed later from Settings."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:38
+msgid "The account view lists every sync folder of the active account."
+msgstr ""
+"La vista de la cuenta muestra todas las carpetas de sincronización de la "
+"cuenta activa."
+
+#: src/nextsync/ui/about_content.py:42 src/nextsync/ui/about_content.py:226
+msgid "Version 0.1.0"
+msgstr "Versión 0.1.0"
+
+#: src/nextsync/ui/about_content.py:44
+msgid ""
+"NextSync is a fork of PyNextCloud-Sync by ehstbr, renamed and versioned "
+"independently from 0.1.0 (each release adds +0.1)."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:45
+msgid ""
+"Thin-wrapper redesign: the bootstrap staging, safety baseline, run markers, "
+"and deletion guard are removed. nextcloudcmd now owns synchronization, "
+"conflict resolution, and safety."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:46
+msgid ""
+"The config schema bumps from v4 to v5 and drops the safety fields "
+"automatically; leftover staging trees are removed and legacy safety "
+"manifests are archived on first run after upgrade."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:47
+msgid ""
+"A first-sync confirmation dialog appears before the initial run when the "
+"local folder, the remote folder, or both are empty, probing the remote side "
+"with a shallow WebDAV PROPFIND."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:48
+msgid ""
+"A new view with Recent activity and conflicted copies lists the files "
+"nextcloudcmd preserves as '* (Nextcloud conflicted copy <date>).*' with Keep "
+"Local, Keep Remote, and Open in Files actions."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:49
+msgid ""
+"A lightweight deletion guard blocks synchronization before nextcloudcmd "
+"starts when a large share of previously known local files disappears, with "
+"Keep Paused, Restore from Nextcloud, or Approve These Deletions Once."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:50
+msgid ""
+"The account view and tray tooltip now show the current file and processed "
+"count during a sync, falling back to the state label when the engine emits "
+"no per-file output."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:54
+msgid "Version 2.1.0"
+msgstr "Versión 2.1.0"
+
+#: src/nextsync/ui/about_content.py:56
+msgid ""
+"Added an optional Remote Folder field to the setup wizard so an account can "
+"mirror a specific Nextcloud folder instead of the entire account root."
+msgstr ""
+"Se añadió un campo opcional Carpeta remota al asistente de configuración "
+"para que cada cuenta pueda reflejar una carpeta específica de Nextcloud en "
+"lugar de la raíz de la cuenta."
+
+#: src/nextsync/ui/about_content.py:57
+msgid ""
+"When a remote folder is configured, the --path argument is passed to "
+"nextcloudcmd; leaving the field as / keeps the previous root-to-root "
+"behaviour."
+msgstr ""
+"Cuando se configura una carpeta remota, se pasa el argumento --path a "
+"nextcloudcmd; dejar el campo como / mantiene el comportamiento anterior de "
+"raíz a raíz."
+
+#: src/nextsync/ui/about_content.py:58
+msgid ""
+"Existing configurations migrate transparently to schema version 4 with the "
+"remote path defaulting to the account root."
+msgstr ""
+"Las configuraciones existentes migran de forma transparente a la versión 4 "
+"del esquema con la ruta remota por defecto apuntando a la raíz de la cuenta."
+
+#: src/nextsync/ui/about_content.py:59
+msgid ""
+"Two accounts against the same server, user, and local folder but different "
+"remote folders are now treated as distinct accounts."
+msgstr ""
+"Dos cuentas contra el mismo servidor, usuario y carpeta local pero con "
+"carpetas remotas distintas ahora se consideran cuentas diferentes."
+
+#: src/nextsync/ui/about_content.py:63
+msgid "Version 2.0.0"
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:65
+msgid ""
+"Added support for multiple Nextcloud accounts, each with its own "
+"synchronization, safety, and runtime settings."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:66
+msgid ""
+"Existing single-account configurations are migrated automatically on first "
+"launch."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:67
+msgid ""
+"The main window now has an accounts sidebar and a per-account status and "
+"activity panel."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:68
+msgid ""
+"The tray shows an aggregated state and per-account actions for syncing, "
+"opening, and pausing."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:69
+msgid ""
+"Synchronizations are serialized across accounts so concurrent "
+"reconciliations do not saturate the network."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:73
+msgid "Version 0.1.19"
+msgstr "Versión 0.1.19"
+
+#: src/nextsync/ui/about_content.py:75
+msgid ""
+"Relicensed NextSync under the GNU General Public License version 3 or later."
+msgstr ""
+"Se cambió la licencia de NextSync a la Licencia Pública General de GNU "
+"versión 3 o posterior."
+
+#: src/nextsync/ui/about_content.py:76
+msgid ""
+"About now identifies and displays the GPLv3 license using GTK's native "
+"license presentation."
+msgstr ""
+"Acerca de ahora identifica y muestra la licencia GPLv3 mediante la "
+"presentación nativa de licencias de GTK."
+
+#: src/nextsync/ui/about_content.py:77
+msgid ""
+"Updated project, Debian, AppStream, documentation, terms, and translation "
+"metadata to consistently identify the new license."
+msgstr ""
+"Se actualizaron los metadatos del proyecto, Debian, AppStream, la "
+"documentación, los términos y las traducciones para identificar de forma "
+"coherente la nueva licencia."
+
+#: src/nextsync/ui/about_content.py:81
+msgid "Version 0.1.18"
+msgstr "Versión 0.1.18"
+
+#: src/nextsync/ui/about_content.py:83
+msgid ""
+"Recovered explicitly from Linux inotify queue overflow by rebuilding "
+"filesystem monitoring and requesting a protected nextcloudcmd reconciliation."
+msgstr ""
+"Recuperación explícita del desbordamiento de la cola de inotify en Linux, "
+"reconstruyendo la supervisión del sistema de archivos y solicitando una "
+"reconciliación protegida mediante nextcloudcmd."
+
+#: src/nextsync/ui/about_content.py:84
+msgid ""
+"Added a durable marker around nextcloudcmd that is cleared only after a "
+"successful safety baseline commit."
+msgstr ""
+"Se añadió un marcador duradero alrededor de nextcloudcmd que se elimina solo "
+"después de guardar correctamente una nueva base de seguridad."
+
+#: src/nextsync/ui/about_content.py:85
+msgid ""
+"Retained the previous last-known-good safety baseline after interrupted runs."
+msgstr ""
+"Se conservó la última base de seguridad válida tras ejecuciones "
+"interrumpidas."
+
+#: src/nextsync/ui/about_content.py:89
+msgid "Version 0.1.17"
+msgstr "Versión 0.1.17"
+
+#: src/nextsync/ui/about_content.py:91
+msgid ""
+"Automatic update notices now wait until the main window is fully mapped "
+"before they are created."
+msgstr ""
+"Los avisos automáticos de actualización ahora esperan hasta que la ventana "
+"principal esté completamente mapeada antes de crearse."
+
+#: src/nextsync/ui/about_content.py:92
+msgid ""
+"Update windows are no longer reassociated after becoming visible, preventing "
+"placement on another monitor at the desktop origin."
+msgstr ""
+"Las ventanas de actualización ya no se reasocian después de hacerse "
+"visibles, lo que evita que aparezcan en otro monitor en el origen del "
+"escritorio."
+
+#: src/nextsync/ui/about_content.py:93
+msgid ""
+"Mandatory updates now show only Download New Version and Close Application."
+msgstr ""
+"Las actualizaciones obligatorias ahora muestran solo Descargar nueva versión "
+"y Cerrar aplicación."
+
+#: src/nextsync/ui/about_content.py:97
+msgid "Version 0.1.16"
+msgstr "Versión 0.1.16"
+
+#: src/nextsync/ui/about_content.py:99
+msgid ""
+"The update notice now remains above the main window when the application is "
+"opened from its launcher."
+msgstr ""
+"El aviso de actualización ahora permanece sobre la ventana principal cuando "
+"la aplicación se abre desde su lanzador."
+
+#: src/nextsync/ui/about_content.py:100
+msgid ""
+"Download and dismissal actions remain visible above the scrollable release "
+"details."
+msgstr ""
+"Las acciones para descargar y descartar permanecen visibles sobre los "
+"detalles desplazables de la release."
+
+#: src/nextsync/ui/about_content.py:101
+msgid "Download New Version now opens the latest GitHub release directly."
+msgstr ""
+"Descargar nueva versión ahora abre directamente la release más reciente de "
+"GitHub."
+
+#: src/nextsync/ui/about_content.py:102
+msgid ""
+"Mandatory updates use an urgent warning presentation and keep Not Now "
+"disabled."
+msgstr ""
+"Las actualizaciones obligatorias usan un aviso urgente y mantienen Ahora no "
+"desactivado."
+
+#: src/nextsync/ui/about_content.py:106
+msgid "Version 0.1.15"
+msgstr "Versión 0.1.15"
+
+#: src/nextsync/ui/about_content.py:108
+msgid ""
+"Added automatic startup update checks through a validated GitHub version "
+"manifest."
+msgstr ""
+"Se añadieron comprobaciones automáticas de actualización al iniciar mediante "
+"un manifiesto de versión validado en GitHub."
+
+#: src/nextsync/ui/about_content.py:109
+msgid ""
+"Optional updates remain non-blocking, while mandatory updates prevent the "
+"synchronization runtime from starting."
+msgstr ""
+"Las actualizaciones opcionales no bloquean el uso, mientras que las "
+"obligatorias impiden iniciar el motor de sincronización."
+
+#: src/nextsync/ui/about_content.py:110
+msgid ""
+"Added a manual update check in About, semantic version comparison, safe "
+"failure handling, and UTC release dates."
+msgstr ""
+"Se añadió la comprobación manual de actualizaciones en Acerca de, la "
+"comparación semántica de versiones, el manejo seguro de fallos y las fechas "
+"UTC."
+
+#: src/nextsync/ui/about_content.py:111
+msgid ""
+"The update window now shows a short summary and an expandable full changelog."
+msgstr ""
+"La ventana de actualización ahora muestra un resumen breve y un historial "
+"completo de cambios desplegable."
+
+#: src/nextsync/ui/about_content.py:115
+msgid "Version 0.1.14"
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:117
+msgid ""
+"Added a protected first synchronization with a fresh isolated server "
+"snapshot and an explicit merge review."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:118
+msgid ""
+"Existing synchronization databases are archived and never silently reused "
+"during initialization."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:119
+msgid ""
+"Added a persistent safety baseline that blocks missing, replaced, empty, "
+"unreadable, or abnormally reduced local folders before nextcloudcmd starts."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:120
+msgid ""
+"Added safe recovery, one-time deletion approval, preserved conflict copies, "
+"and configurable review thresholds."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:124
+msgid "Version 0.1.13"
+msgstr "Versión 0.1.13"
+
+#: src/nextsync/ui/about_content.py:126
+msgid ""
+"The default GNOME password collection is now unlocked before searching for "
+"the Nextcloud credential after biometric login."
+msgstr ""
+"La colección de contraseñas predeterminada de GNOME ahora se desbloquea "
+"antes de buscar la credencial de Nextcloud después del inicio de sesión "
+"biométrico."
+
+#: src/nextsync/ui/about_content.py:127
+msgid ""
+"A locked Login collection is no longer misreported as a missing stored "
+"credential during desktop autostart."
+msgstr ""
+"Una colección de inicio de sesión bloqueada ya no se informa incorrectamente "
+"como una credencial almacenada ausente durante el inicio automático del "
+"escritorio."
+
+#: src/nextsync/ui/about_content.py:128
+msgid ""
+"Added diagnostic logging and a regression test for credentials hidden while "
+"the keyring is locked."
+msgstr ""
+"Se añadieron registros de diagnóstico y una prueba de regresión para las "
+"credenciales ocultas mientras el llavero está bloqueado."
+
+#: src/nextsync/ui/about_content.py:132
+msgid "Version 0.1.12"
+msgstr "Versión 0.1.12"
+
+#: src/nextsync/ui/about_content.py:134
+msgid ""
+"Fixed Debian upgrade detection by querying the live D-Bus owner instead of "
+"treating list-apps as a process list."
+msgstr ""
+"Se corrigió la detección de actualizaciones de Debian consultando el "
+"propietario D-Bus activo, en lugar de tratar list-apps como una lista de "
+"procesos."
+
+#: src/nextsync/ui/about_content.py:135
+msgid ""
+"The package now confirms that the old instance has exited before replacing "
+"application files."
+msgstr ""
+"Ahora el paquete confirma que la instancia anterior finalizó antes de "
+"reemplazar los archivos de la aplicación."
+
+#: src/nextsync/ui/about_content.py:136
+msgid ""
+"Replaced the inaccurate package-upgrade fixture with a regression test that "
+"matches the real GLib behavior."
+msgstr ""
+"Se reemplazó el escenario impreciso de actualización del paquete por una "
+"prueba de regresión que reproduce el comportamiento real de GLib."
+
+#: src/nextsync/ui/about_content.py:140
+msgid "Version 0.1.11"
+msgstr "Versión 0.1.11"
+
+#: src/nextsync/ui/about_content.py:142
+msgid ""
+"Fixed detection of running application instances during Debian upgrades when "
+"APT/dpkg does not preserve SUDO_UID."
+msgstr ""
+"Se corrigió la detección de instancias en ejecución durante actualizaciones "
+"de Debian cuando APT/dpkg no conserva SUDO_UID."
+
+#: src/nextsync/ui/about_content.py:143
+msgid ""
+"Upgrades now stop and restart the application through its real per-user D-"
+"Bus session."
+msgstr ""
+"Las actualizaciones ahora cierran y reinician la aplicación mediante su "
+"sesión D-Bus real de usuario."
+
+#: src/nextsync/ui/about_content.py:144
+msgid ""
+"Added an executable regression test for graceful package-upgrade shutdown "
+"and restart."
+msgstr ""
+"Se añadió una prueba de regresión ejecutable para el cierre y reinicio "
+"seguros durante la actualización del paquete."
+
+#: src/nextsync/ui/about_content.py:148
+msgid "Version 0.1.10"
+msgstr "Versión 0.1.10"
+
+#: src/nextsync/ui/about_content.py:150
+msgid ""
+"Added the native GNOME Keyring unlock prompt required after biometric "
+"desktop login."
+msgstr ""
+"Se añadió el diálogo nativo de GNOME Keyring necesario para desbloquear el "
+"llavero tras iniciar sesión en el escritorio con biometría."
+
+#: src/nextsync/ui/about_content.py:151
+msgid ""
+"Canceled unlocks now remain separate from invalid Nextcloud credentials "
+"without repeated automatic prompts."
+msgstr ""
+"Las cancelaciones del desbloqueo ahora se distinguen de credenciales "
+"inválidas de Nextcloud, sin diálogos automáticos repetidos."
+
+#: src/nextsync/ui/about_content.py:152
+msgid ""
+"File synchronization and notify_push resume together after the keyring is "
+"unlocked."
+msgstr ""
+"La sincronización de archivos y notify_push se reanudan conjuntamente "
+"después de desbloquear el llavero."
+
+#: src/nextsync/ui/about_content.py:153
+msgid ""
+"Interactive Debian upgrades now gracefully stop and restart a running "
+"application."
+msgstr ""
+"Las actualizaciones interactivas mediante Debian ahora detienen de forma "
+"segura y reinician la aplicación si estaba en ejecución."
+
+#: src/nextsync/ui/about_content.py:157
+msgid "Version 0.1.9"
+msgstr "Versión 0.1.9"
+
+#: src/nextsync/ui/about_content.py:159
+msgid ""
+"Published the corrected website, source, issue, and changelog links under "
+"the canonical repository."
+msgstr ""
+"Se publicaron los enlaces corregidos del sitio web, código fuente, problemas "
+"e historial de cambios en el repositorio canónico."
+
+#: src/nextsync/ui/about_content.py:163
+msgid "Version 0.1.8"
+msgstr "Versión 0.1.8"
+
+#: src/nextsync/ui/about_content.py:165
+msgid ""
+"Added native Files sidebar and desktop shortcuts for the synchronized folder."
+msgstr ""
+"Se añadieron accesos nativos a la carpeta sincronizada en la barra lateral "
+"de Archivos y en el escritorio."
+
+#: src/nextsync/ui/about_content.py:166
+msgid ""
+"Added a branded folder icon and settings for all three desktop integrations."
+msgstr ""
+"Se añadieron un icono propio para la carpeta y ajustes para las tres "
+"integraciones con el escritorio."
+
+#: src/nextsync/ui/about_content.py:167
+msgid ""
+"Removing the Files bookmark outside the application now updates Settings "
+"without recreating it."
+msgstr ""
+"Al quitar el marcador desde Archivos, ahora se actualizan los Ajustes sin "
+"volver a crearlo."
+
+#: src/nextsync/ui/about_content.py:171
+msgid "Version 0.1.7"
+msgstr "Versión 0.1.7"
+
+#: src/nextsync/ui/about_content.py:173
+msgid ""
+"Settings now opens independently from the tray without opening the main "
+"window."
+msgstr ""
+"La Configuración ahora se abre de forma independiente desde la bandeja, sin "
+"abrir la ventana principal."
+
+#: src/nextsync/ui/about_content.py:174
+msgid ""
+"The independent Settings window is released after closing to preserve the "
+"low-memory interface lifecycle."
+msgstr ""
+"La ventana independiente de Configuración se libera al cerrarla para "
+"conservar el ciclo de vida de la interfaz con bajo consumo de memoria."
+
+#: src/nextsync/ui/about_content.py:178
+msgid "Version 0.1.6"
+msgstr "Versión 0.1.6"
+
+#: src/nextsync/ui/about_content.py:180
+msgid "Fixed opening Settings from the tray while the main window is closed."
+msgstr ""
+"Se corrigió la apertura de Configuración desde la bandeja cuando la ventana "
+"principal está cerrada."
+
+#: src/nextsync/ui/about_content.py:181
+msgid ""
+"Reduced background memory by creating the main interface only when needed "
+"and releasing it when closed."
+msgstr ""
+"Se redujo la memoria en segundo plano creando la interfaz principal solo "
+"cuando es necesaria y liberándola al cerrarla."
+
+#: src/nextsync/ui/about_content.py:182
+msgid ""
+"Bounded command output, log display, activity history, and browser login "
+"polling."
+msgstr ""
+"Se limitaron la salida del comando, la vista del registro, el historial de "
+"actividad y las consultas de inicio de sesión en el navegador."
+
+#: src/nextsync/ui/about_content.py:183
+msgid ""
+"Avoided unnecessary filesystem watcher and push connection reconfiguration."
+msgstr ""
+"Se evitó reconfigurar innecesariamente el monitor de archivos y la conexión "
+"push."
+
+#: src/nextsync/ui/about_content.py:187
+msgid "Version 0.1.5"
+msgstr "Versión 0.1.5"
+
+#: src/nextsync/ui/about_content.py:189
+msgid ""
+"Activity messages can now be expanded with one click and copied from a right-"
+"click menu."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:190
+msgid ""
+"Fixed Spanish loading and completed the application translation catalog."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:194
+msgid "Version 0.1.4"
+msgstr "Versión 0.1.4"
+
+#: src/nextsync/ui/about_content.py:196
+msgid ""
+"Made the tray icon and details follow synchronization state changes live."
+msgstr ""
+"El icono y los detalles de la bandeja ahora siguen en tiempo real los "
+"cambios del estado de sincronización."
+
+#: src/nextsync/ui/about_content.py:197
+msgid ""
+"Added compatible StatusNotifierItem and D-Bus property change notifications."
+msgstr ""
+"Se añadieron notificaciones compatibles de cambios de propiedades de "
+"StatusNotifierItem y D-Bus."
+
+#: src/nextsync/ui/about_content.py:201
+msgid "Version 0.1.3"
+msgstr "Versión 0.1.3"
+
+#: src/nextsync/ui/about_content.py:203
+msgid "Fixed the application icon displayed by GNOME tray hosts."
+msgstr ""
+"Se corrigió el icono de la aplicación mostrado por la bandeja de GNOME."
+
+#: src/nextsync/ui/about_content.py:204
+msgid "Added icon theme, absolute SVG, and pixel fallback support."
+msgstr ""
+"Se añadió soporte para tema de iconos, SVG absoluto y alternativa en píxeles."
+
+#: src/nextsync/ui/about_content.py:208
+msgid "Version 0.1.2"
+msgstr "Versión 0.1.2"
+
+#: src/nextsync/ui/about_content.py:210
+msgid "A more compact, responsive main window with a stable status header."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:211
+msgid ""
+"Collapsible recent activity with severity icons and single-line messages."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:212
+msgid "A working one-click tray menu and more reliable window presentation."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:213
+msgid "Optional daily log files with configurable retention."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:214
+msgid ""
+"Expanded About, legal terms, license, credits, and changelog information."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:215
+msgid ""
+"Fixed D-Bus menu variants, literal log rendering, and numeric log formatting."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:219
+msgid "Version 0.1.1"
+msgstr "Versión 0.1.1"
+
+#: src/nextsync/ui/about_content.py:221
+msgid ""
+"Fixed GNOME Keyring compatibility for saving, reading, and removing "
+"credentials."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:222
+msgid "Moved Keyring operations away from the GTK main thread."
+msgstr ""
+
+#: src/nextsync/ui/about_content.py:228
+msgid ""
+"Initial development release with browser login, nextcloudcmd "
+"synchronization, inotify, timers, notify_push, exclusions, logs, and GNOME "
+"integration."
+msgstr ""
+
+#: src/nextsync/ui/about.py:36
+msgid "A lightweight Nextcloud synchronization client for Linux."
+msgstr "Un cliente de sincronización de Nextcloud ligero para Linux."
+
+#: src/nextsync/ui/about.py:46
+msgid "Source code on GitHub"
+msgstr "Código fuente en GitHub"
+
+#: src/nextsync/ui/about.py:48
+msgid "Check for Updates"
+msgstr "Buscar actualización"
+
+#: src/nextsync/ui/about.py:58
+msgid "Report a problem"
+msgstr "Informar de un problema"
+
+#: src/nextsync/ui/about.py:59
+msgid "Complete changelog"
+msgstr "Historial completo de cambios"
+
+#: src/nextsync/ui/about.py:60 src/nextsync/ui/about.py:72
+msgid "Terms of Use"
+msgstr "Términos de uso"
+
+#: src/nextsync/ui/about.py:61
+msgid "Third-party projects and licenses"
+msgstr "Proyectos de terceros y licencias"
+
+#: src/nextsync/ui/about.py:63
+msgid "Synchronization Engine"
+msgstr "Motor de sincronización"
+
+#: src/nextsync/ui/about.py:66
+msgid "Desktop Technologies"
+msgstr "Tecnologías de escritorio"
+
+#: src/nextsync/ui/about.py:69
+msgid "Languages"
+msgstr "Idiomas"
+
+#: src/nextsync/ui/conflict_resolver.py:41
+msgid "Sync Activity and Conflicts"
+msgstr "Actividad y conflictos de sincronización"
+
+#: src/nextsync/ui/conflict_resolver.py:71
+msgid "Refresh"
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:88
+msgid "Recent"
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:102
+msgid "Conflicts"
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:110
+msgid "No Conflicts"
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:111
+msgid "No Nextcloud conflicted copies were found in this folder."
+msgstr "No se encontraron copias en conflicto de Nextcloud en esta carpeta."
+
+#: src/nextsync/ui/conflict_resolver.py:195
+#, python-brace-format
+msgid "No conflicted copies found in {folder}."
+msgstr "No se encontraron copias en conflicto en {folder}."
+
+#: src/nextsync/ui/conflict_resolver.py:199
+#, python-brace-format
+msgid "{count} conflicted copy(ies) found in {folder}."
+msgstr "Se encontraron {count} copia(s) en conflicto en {folder}."
+
+#: src/nextsync/ui/conflict_resolver.py:225
+#, python-brace-format
+msgid "Original: {original} · {date} · {size} bytes"
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:238
+msgid "Keep Local"
+msgstr "Conservar la local"
+
+#: src/nextsync/ui/conflict_resolver.py:239
+msgid "Delete the conflicted copy, keep the working file."
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:243
+msgid "Keep Remote"
+msgstr "Conservar la remota"
+
+#: src/nextsync/ui/conflict_resolver.py:244
+msgid "Replace the working file with the conflicted copy."
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:249
+msgid "Open in Files"
+msgstr ""
+
+#: src/nextsync/ui/conflict_resolver.py:258
+#, python-brace-format
+msgid "Kept local version of {name}"
+msgstr "Se conservó la versión local de {name}"
+
+#: src/nextsync/ui/conflict_resolver.py:263
+#, python-brace-format
+msgid "Kept remote version of {name}"
+msgstr "Se conservó la versión remota de {name}"
+
+#: src/nextsync/ui/folder_status.py:18
+msgid "Not Configured"
+msgstr "No configurado"
+
+#: src/nextsync/ui/folder_status.py:19
+msgid "Synchronized"
+msgstr "Sincronizado"
+
+#: src/nextsync/ui/folder_status.py:20
+msgid "Automatic Sync Is Off"
+msgstr "Sincronización automática desactivada"
+
+#: src/nextsync/ui/folder_status.py:21
+msgid "Synchronization Scheduled"
+msgstr "Sincronización programada"
+
+#: src/nextsync/ui/folder_status.py:22
+msgid "Synchronizing…"
+msgstr "Sincronizando…"
+
+#: src/nextsync/ui/folder_status.py:23
+msgid "Paused"
+msgstr "En pausa"
+
+#: src/nextsync/ui/folder_status.py:24
+msgid "Paused on Battery"
+msgstr "En pausa con batería"
+
+#: src/nextsync/ui/folder_status.py:25
+msgid "Offline"
+msgstr "Sin conexión"
+
+#: src/nextsync/ui/folder_status.py:26
+msgid "Synchronization Error"
+msgstr "Error de sincronización"
+
+#: src/nextsync/ui/folder_status.py:27
+msgid "Account Needs Attention"
+msgstr "La cuenta necesita atención"
+
+#: src/nextsync/ui/folder_status.py:28
+msgid "Password Keyring Locked"
+msgstr "Llavero de contraseñas bloqueado"
+
+#: src/nextsync/ui/folder_status.py:29 src/nextsync/ui/main_window.py:148
+msgid "Review Deletions"
+msgstr "Revisar eliminaciones"
+
+#: src/nextsync/ui/folder_status.py:97
+msgid "Folder options"
+msgstr "Opciones de carpeta"
+
+#: src/nextsync/ui/folder_status.py:138
+msgid "Open local folder"
+msgstr "Abrir carpeta local"
+
+#: src/nextsync/ui/folder_status.py:140
+msgid "Edit ignored files"
+msgstr "Editar archivos ignorados"
+
+#: src/nextsync/ui/folder_status.py:142
+msgid "Force sync now"
+msgstr "Forzar sincronización ahora"
+
+#: src/nextsync/ui/folder_status.py:146
+msgid "Resume sync"
+msgstr "Reanudar sincronización"
+
+#: src/nextsync/ui/folder_status.py:146
+msgid "Pause sync"
+msgstr "Pausar sincronización"
+
+#: src/nextsync/ui/folder_status.py:153
+msgid "Remove synchronization"
+msgstr "Eliminar sincronización"
+
+#: src/nextsync/ui/folder_status.py:173
+#, python-brace-format
+msgid "Remote: {path}"
+msgstr ""
+
+#: src/nextsync/ui/log_view.py:17
+msgid "Synchronization Log"
+msgstr "Registro de sincronización"
+
+#: src/nextsync/ui/log_view.py:46
+msgid "Auto-scroll"
+msgstr "Desplazamiento automático"
+
+#: src/nextsync/ui/log_view.py:49
+msgid "Copy"
+msgstr "Copiar"
+
+#: src/nextsync/ui/log_view.py:52
+msgid "Open Log Folder"
+msgstr "Abrir carpeta de registros"
+
+#: src/nextsync/ui/main_window.py:109
+msgid "No Synchronization Folders"
+msgstr "Sin carpetas de sincronización"
+
+#: src/nextsync/ui/main_window.py:110
+msgid "Add folders from Settings"
+msgstr "Añade carpetas desde Ajustes"
+
+#: src/nextsync/ui/main_window.py:118 src/nextsync/ui/main_window.py:157
+msgid "Sync Now"
+msgstr "Sincronizar ahora"
+
+#: src/nextsync/ui/main_window.py:124 src/nextsync/ui/main_window.py:143
+msgid "Pause Sync"
+msgstr "Pausar sincronización"
+
+#: src/nextsync/ui/main_window.py:143
+msgid "Resume Sync"
+msgstr "Reanudar sincronización"
+
+#: src/nextsync/ui/main_window.py:151
+msgid "Unlock Password Keyring"
+msgstr "Desbloquear llavero de contraseñas"
+
+#: src/nextsync/ui/main_window.py:155 src/nextsync/ui/main_window.py:237
+msgid "Sync Once"
+msgstr "Sincronizar una vez"
+
+#: src/nextsync/ui/main_window.py:164
+msgid "Not yet synchronized"
+msgstr "Aún no sincronizado"
+
+#: src/nextsync/ui/main_window.py:197
+msgid "Remove this folder from synchronization?"
+msgstr "¿Eliminar esta carpeta de la sincronización?"
+
+#: src/nextsync/ui/main_window.py:198
+msgid "The local folder and all files inside it will remain untouched."
+msgstr "La carpeta local y todos los archivos que contiene permanecerán intactos."
+
+#: src/nextsync/ui/main_window.py:200 src/nextsync/ui/main_window.py:236
+#: src/nextsync/ui/settings.py:263 src/nextsync/ui/settings.py:711
+#: src/nextsync/ui/settings.py:731 src/nextsync/ui/setup.py:162
+#: src/nextsync/ui/setup.py:331
+msgid "Cancel"
+msgstr "Cancelar"
+
+#: src/nextsync/ui/main_window.py:201
+msgid "Remove Synchronization"
+msgstr ""
+
+#: src/nextsync/ui/main_window.py:214
+msgid "Could not remove the folder"
+msgstr "No se pudo eliminar la carpeta"
+
+#: src/nextsync/ui/main_window.py:233
+msgid "Synchronization is paused on battery"
+msgstr "La sincronización está en pausa por batería"
+
+#: src/nextsync/ui/main_window.py:234
+msgid "Run one synchronization without changing the power preference?"
+msgstr "¿Ejecutar una sincronización sin cambiar la preferencia de energía?"
+
+#: src/nextsync/ui/main_window.py:310
+msgid "Nextcloud file synchronization"
+msgstr "Sincronización de archivos de Nextcloud"
+
+#: src/nextsync/ui/main_window.py:312 src/nextsync/ui/settings.py:123
+#: src/nextsync/ui/tray.py:346
+msgid "Settings"
+msgstr "Configuración"
+
+#: src/nextsync/ui/main_window.py:317
+msgid "About"
+msgstr "Acerca de"
+
+#: src/nextsync/ui/main_window.py:337 src/nextsync/ui/main_window.py:351
+msgid "Accounts"
+msgstr "Cuentas"
+
+#: src/nextsync/ui/main_window.py:363
+msgid "Add Account"
+msgstr "Añadir cuenta"
+
+#: src/nextsync/ui/settings.py:26 src/nextsync/ui/settings.py:476
+msgid "Excluded Files"
+msgstr "Archivos excluidos"
+
+#: src/nextsync/ui/settings.py:32
+msgid "Done"
+msgstr "Listo"
+
+#: src/nextsync/ui/settings.py:42
+msgid ""
+"Only file names, extensions, and wildcard patterns are allowed. Folders and "
+"paths cannot be excluded."
+msgstr ""
+"Solo se permiten nombres de archivo, extensiones y patrones comodín. No se "
+"pueden excluir carpetas ni rutas."
+
+#: src/nextsync/ui/settings.py:51
+msgid "Example: *.swp"
+msgstr "Ejemplo: *.swp"
+
+#: src/nextsync/ui/settings.py:54
+msgid "Add Pattern"
+msgstr "Añadir patrón"
+
+#: src/nextsync/ui/settings.py:60
+msgid "Restore Defaults"
+msgstr "Restaurar valores predeterminados"
+
+#: src/nextsync/ui/settings.py:78
+msgid "Remove pattern"
+msgstr "Quitar patrón"
+
+#: src/nextsync/ui/settings.py:143
+msgid "General"
+msgstr "General"
+
+#: src/nextsync/ui/settings.py:144
+msgid "Startup"
+msgstr "Inicio"
+
+#: src/nextsync/ui/settings.py:146
+msgid "Start NextSync when I sign in"
+msgstr "Iniciar NextSync al iniciar sesión"
+
+#: src/nextsync/ui/settings.py:152
+msgid "Power"
+msgstr "Energía"
+
+#: src/nextsync/ui/settings.py:154
+msgid "Pause synchronization while on battery"
+msgstr "Pausar la sincronización al usar la batería"
+
+#: src/nextsync/ui/settings.py:155
+msgid "A running synchronization is allowed to finish."
+msgstr "Se permite terminar la sincronización en curso."
+
+#: src/nextsync/ui/settings.py:161 src/nextsync/ui/setup.py:188
+msgid "Synchronization Folders"
+msgstr "Carpetas de sincronización"
+
+#: src/nextsync/ui/settings.py:166 src/nextsync/ui/settings.py:237
+#: src/nextsync/ui/setup.py:203 src/nextsync/ui/setup.py:315
+msgid "Add Folder"
+msgstr "Añadir carpeta"
+
+#: src/nextsync/ui/settings.py:167 src/nextsync/ui/setup.py:204
+msgid "Mirror another local folder from this account"
+msgstr "Sincronizar otra carpeta local de esta cuenta"
+
+#: src/nextsync/ui/settings.py:183
+msgid "Show in Files sidebar"
+msgstr "Mostrar en la barra lateral de Archivos"
+
+#: src/nextsync/ui/settings.py:184
+msgid "Adds the synchronized folder to the file manager sidebar."
+msgstr ""
+"Añade la carpeta sincronizada a la barra lateral del gestor de archivos."
+
+#: src/nextsync/ui/settings.py:192
+msgid "Show on Desktop"
+msgstr "Mostrar en el escritorio"
+
+#: src/nextsync/ui/settings.py:193
+msgid "Creates a link to the synchronized folder on the desktop."
+msgstr "Crea un acceso a la carpeta sincronizada en el escritorio."
+
+#: src/nextsync/ui/settings.py:201
+msgid "Use special folder icon"
+msgstr "Usar un icono especial para la carpeta"
+
+#: src/nextsync/ui/settings.py:202
+msgid "Identifies the synchronized folder and its shortcuts in Files."
+msgstr "Identifica la carpeta sincronizada y sus accesos en Archivos."
+
+#: src/nextsync/ui/settings.py:218 src/nextsync/ui/setup.py:362
+#, python-brace-format
+msgid "Remote: {remote}"
+msgstr "Remoto: {remote}"
+
+#: src/nextsync/ui/settings.py:224
+msgid "Remove folder"
+msgstr "Quitar carpeta"
+
+#: src/nextsync/ui/settings.py:238 src/nextsync/ui/setup.py:316
+msgid ""
+"Choose a local folder and an optional remote folder to mirror from this "
+"account."
+msgstr ""
+"Elige una carpeta local y una carpeta remota opcional para sincronizarla "
+"desde esta cuenta."
+
+#: src/nextsync/ui/settings.py:242 src/nextsync/ui/setup.py:320
+msgid "Local folder"
+msgstr "Carpeta local"
+
+#: src/nextsync/ui/settings.py:252
+msgid "Remote folder (empty: use the local folder name)"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:258
+msgid "Choose an existing remote folder"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:264 src/nextsync/ui/setup.py:332
+msgid "Add"
+msgstr "Añadir"
+
+#: src/nextsync/ui/settings.py:273 src/nextsync/ui/setup.py:344
+msgid "Choose an absolute local folder."
+msgstr "Elige una carpeta local absoluta."
+
+#: src/nextsync/ui/settings.py:334 src/nextsync/ui/setup.py:377
+msgid "Choose NextCloud Folder"
+msgstr "Elegir carpeta de NextCloud"
+
+#: src/nextsync/ui/settings.py:419
+msgid "Synchronization"
+msgstr "Sincronización"
+
+#: src/nextsync/ui/settings.py:422
+msgid "Automatic synchronization is off. Files synchronize only with Sync Now."
+msgstr ""
+"La sincronización automática está desactivada. Los archivos se sincronizan "
+"solo con Sincronizar ahora."
+
+#: src/nextsync/ui/settings.py:428
+msgid "Local Changes"
+msgstr "Cambios locales"
+
+#: src/nextsync/ui/settings.py:430
+msgid "Monitor filesystem changes"
+msgstr "Supervisar cambios del sistema de archivos"
+
+#: src/nextsync/ui/settings.py:431
+msgid "Synchronizes shortly after a local file changes."
+msgstr "Sincroniza poco después de que un archivo local cambie."
+
+#: src/nextsync/ui/settings.py:435
+msgid "Run a local interval"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:438
+msgid "Local interval (minutes)"
+msgstr "Intervalo local (minutos)"
+
+#: src/nextsync/ui/settings.py:449
+msgid "Remote Changes"
+msgstr "Cambios remotos"
+
+#: src/nextsync/ui/settings.py:451
+msgid "Use server push notifications"
+msgstr "Usar notificaciones push del servidor"
+
+#: src/nextsync/ui/settings.py:452
+msgid "Near-real-time detection when notify_push is supported."
+msgstr ""
+
+#: src/nextsync/ui/settings.py:456
+msgid "Run a remote interval"
+msgstr "Ejecutar un intervalo remoto"
+
+#: src/nextsync/ui/settings.py:457
+msgid "Recommended because push delivery is best effort."
+msgstr ""
+
+#: src/nextsync/ui/settings.py:461
+msgid "Remote interval (minutes)"
+msgstr "Intervalo remoto (minutos)"
+
+#: src/nextsync/ui/settings.py:471
+msgid "Push connection"
+msgstr "Conexión push"
+
+#: src/nextsync/ui/settings.py:471
+msgid "Not connected"
+msgstr "Sin conexión"
+
+#: src/nextsync/ui/settings.py:478
+msgid "Exclude disposable files"
+msgstr "Excluir archivos desechables"
+
+#: src/nextsync/ui/settings.py:479
+msgid "Hidden files remain synchronized unless a rule matches."
+msgstr ""
+"Los archivos ocultos se siguen sincronizando salvo que una regla coincida."
+
+#: src/nextsync/ui/settings.py:485
+msgid "File patterns"
+msgstr "Patrones de archivos"
+
+#: src/nextsync/ui/settings.py:486
+msgid "Names, extensions, and wildcard patterns"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:494
+msgid "Reliability"
+msgstr "Fiabilidad"
+
+#: src/nextsync/ui/settings.py:495
+msgid "Maximum sync retries"
+msgstr "Máximo de reintentos de sincronización"
+
+#: src/nextsync/ui/settings.py:502
+msgid "Network"
+msgstr "Red"
+
+#: src/nextsync/ui/settings.py:503 src/nextsync/ui/setup.py:398
+msgid "Server"
+msgstr "Servidor"
+
+#: src/nextsync/ui/settings.py:507
+msgid "Proxy"
+msgstr "Proxy"
+
+#: src/nextsync/ui/settings.py:508 src/nextsync/ui/settings.py:695
+msgid "Custom HTTP proxy"
+msgstr "Proxy HTTP personalizado"
+
+#: src/nextsync/ui/settings.py:514
+msgid "TLS"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:516 src/nextsync/ui/setup.py:122
+msgid "Allow invalid or self-signed certificates"
+msgstr "Permitir certificados no válidos o autofirmados"
+
+#: src/nextsync/ui/settings.py:517 src/nextsync/ui/setup.py:123
+msgid "This weakens connection security. Enable only for a server you trust."
+msgstr ""
+"Esto debilita la seguridad de la conexión. Actívalo solo con un servidor en "
+"el que confíes."
+
+#: src/nextsync/ui/settings.py:526
+msgid "Advanced"
+msgstr "Avanzado"
+
+#: src/nextsync/ui/settings.py:527
+msgid "Logging"
+msgstr "Registro"
+
+#: src/nextsync/ui/settings.py:530
+msgid "Save log files"
+msgstr "Guardar archivos de registro"
+
+#: src/nextsync/ui/settings.py:531
+msgid "Live activity remains available when file logging is off."
+msgstr ""
+"La actividad en vivo sigue disponible cuando el registro en archivos está "
+"desactivado."
+
+#: src/nextsync/ui/settings.py:537
+msgid "Keep daily logs (days)"
+msgstr "Conservar registros diarios (días)"
+
+#: src/nextsync/ui/settings.py:543
+msgid "Log folder"
+msgstr "Carpeta de registros"
+
+#: src/nextsync/ui/settings.py:553
+msgid "Daily file naming"
+msgstr "Nombre de archivos diarios"
+
+#: src/nextsync/ui/settings.py:559
+msgid "Detailed synchronization output"
+msgstr "Salida detallada de sincronización"
+
+#: src/nextsync/ui/settings.py:567
+msgid "Deletion Guard"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:569
+msgid ""
+"Blocks synchronization before nextcloudcmd starts when too many previously "
+"synchronized local files disappear."
+msgstr ""
+
+#: src/nextsync/ui/settings.py:573
+msgid "Protect against mass local deletion"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:574
+msgid "Recommended. Stops sync when the local folder loses many files at once."
+msgstr ""
+"Recomendado. Detiene la sincronización cuando la carpeta local pierde muchos "
+"archivos de golpe."
+
+#: src/nextsync/ui/settings.py:580
+msgid "Review after this many missing files"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:586
+msgid "Review after this percentage is missing"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:596
+msgid "Diagnostics"
+msgstr "Diagnóstico"
+
+#: src/nextsync/ui/settings.py:599
+msgid "inotify watches"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:603
+msgid "notify_push"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:607
+msgid "Last exit code"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:607
+msgid "None"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:611 src/nextsync/ui/setup.py:399
+msgid "Account"
+msgstr "Cuenta"
+
+#: src/nextsync/ui/settings.py:613
+msgid ""
+"Removing the account only removes the connection; your local folders and "
+"files are never touched."
+msgstr ""
+"Eliminar la cuenta solo quita la conexión; tus carpetas y archivos locales "
+"nunca se ven afectados."
+
+#: src/nextsync/ui/settings.py:617 src/nextsync/ui/settings.py:732
+msgid "Remove Account"
+msgstr "Eliminar cuenta"
+
+#: src/nextsync/ui/settings.py:618
+msgid "Rarely needed. Keeps all local files."
+msgstr "Rara vez necesario. Conserva todos los archivos locales."
+
+#: src/nextsync/ui/settings.py:699
+msgid "Invalid HTTP proxy URL"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:708
+msgid "Remove Nextcloud Account?"
+msgstr "¿Eliminar la cuenta de Nextcloud?"
+
+#: src/nextsync/ui/settings.py:709
+msgid ""
+"The account credential will be removed from the password keyring. Your local "
+"NextCloud folder and all files inside it will remain untouched."
+msgstr ""
+
+#: src/nextsync/ui/settings.py:712 src/nextsync/ui/setup.py:133
+msgid "Continue"
+msgstr "Continuar"
+
+#: src/nextsync/ui/settings.py:722
+#, python-brace-format
+msgid "Remove {name}?"
+msgstr ""
+
+#: src/nextsync/ui/settings.py:725
+msgid ""
+"Type “remove” to confirm. This cannot be undone and stops synchronization "
+"immediately."
+msgstr ""
+"Escribe «remove» para confirmar. Esta acción no se puede deshacer y detiene "
+"la sincronización de inmediato."
+
+#: src/nextsync/ui/settings.py:727
+msgid "Type “remove”"
+msgstr "Escribe «remove»"
+
+#: src/nextsync/ui/settings.py:746
+msgid "Type “remove” to confirm account removal."
+msgstr "Escribe «remove» para confirmar la eliminación de la cuenta."
+
+#: src/nextsync/ui/setup.py:34
+msgid "Set Up NextSync"
+msgstr "Configurar NextSync"
+
+#: src/nextsync/ui/setup.py:84
+msgid "A lightweight desktop synchronizer for Nextcloud."
+msgstr "Un sincronizador de escritorio ligero para Nextcloud."
+
+#: src/nextsync/ui/setup.py:89
+msgid ""
+"Your complete Nextcloud file tree will be stored physically on this computer "
+"and synchronized in both directions."
+msgstr ""
+"Tu árbol de archivos completo de Nextcloud se almacenará en este equipo y se "
+"sincronizará en ambos sentidos."
+
+#: src/nextsync/ui/setup.py:97
+msgid ""
+"nextcloudcmd is missing. Install the nextcloud-desktop-cmd package before "
+"the first synchronization."
+msgstr ""
+"Falta nextcloudcmd. Instala el paquete nextcloud-desktop-cmd antes de la "
+"primera sincronización."
+
+#: src/nextsync/ui/setup.py:101
+msgid "Get Started"
+msgstr "Comenzar"
+
+#: src/nextsync/ui/setup.py:108
+msgid "Connect to Nextcloud"
+msgstr "Conectar con Nextcloud"
+
+#: src/nextsync/ui/setup.py:111
+msgid "Enter the address you normally use to open Nextcloud in a browser."
+msgstr ""
+"Introduce la dirección que usas normalmente para abrir Nextcloud en el "
+"navegador."
+
+#: src/nextsync/ui/setup.py:118
+msgid "Nextcloud server URL"
+msgstr "URL del servidor Nextcloud"
+
+#: src/nextsync/ui/setup.py:130 src/nextsync/ui/setup.py:177
+#: src/nextsync/ui/setup.py:213 src/nextsync/ui/setup.py:235
+msgid "Back"
+msgstr "Atrás"
+
+#: src/nextsync/ui/setup.py:141
+msgid "Sign In"
+msgstr "Iniciar sesión"
+
+#: src/nextsync/ui/setup.py:144
+msgid "Sign in with browser"
+msgstr "Iniciar sesión con el navegador"
+
+#: src/nextsync/ui/setup.py:145
+msgid "Recommended. Supports two-factor authentication."
+msgstr "Recomendado. Admite autenticación de dos factores."
+
+#: src/nextsync/ui/setup.py:156
+msgid "Waiting for authorization in your browser…"
+msgstr "Esperando autorización en el navegador…"
+
+#: src/nextsync/ui/setup.py:159
+msgid "Open Browser Again"
+msgstr "Abrir el navegador de nuevo"
+
+#: src/nextsync/ui/setup.py:168
+msgid "Manual Sign In"
+msgstr "Inicio de sesión manual"
+
+#: src/nextsync/ui/setup.py:169
+msgid "Username"
+msgstr "Usuario"
+
+#: src/nextsync/ui/setup.py:170
+msgid "Password or app password"
+msgstr "Contraseña o contraseña de aplicación"
+
+#: src/nextsync/ui/setup.py:180
+msgid "Sign In Manually"
+msgstr "Iniciar sesión manualmente"
+
+#: src/nextsync/ui/setup.py:191
+msgid ""
+"Choose the local folders to mirror from this account. You can add several, "
+"or finish now and add folders later from Settings."
+msgstr ""
+"Elige las carpetas locales que quieres sincronizar desde esta cuenta. Puedes "
+"añadir varias, o terminar ahora y añadir carpetas más tarde desde Ajustes."
+
+#: src/nextsync/ui/setup.py:216
+msgid "Review Setup"
+msgstr "Revisar configuración"
+
+#: src/nextsync/ui/setup.py:224
+msgid "Ready to Synchronize"
+msgstr "Listo para sincronizar"
+
+#: src/nextsync/ui/setup.py:228 src/nextsync/ui/setup.py:415
+msgid ""
+"The chosen folders will be mirrored in both directions using the Nextcloud "
+"synchronization engine."
+msgstr ""
+"Las carpetas elegidas se sincronizarán en ambos sentidos con el motor de "
+"sincronización de Nextcloud."
+
+#: src/nextsync/ui/setup.py:238 src/nextsync/ui/setup.py:413
+msgid "Start Synchronizing"
+msgstr "Iniciar sincronización"
+
+#: src/nextsync/ui/setup.py:268
+msgid "Browser sign-in was cancelled."
+msgstr ""
+
+#: src/nextsync/ui/setup.py:283
+msgid "Enter a username and password or app password."
+msgstr ""
+"Introduce un nombre de usuario y una contraseña o contraseña de aplicación."
+
+#: src/nextsync/ui/setup.py:286
+msgid "Checking account…"
+msgstr "Comprobando la cuenta…"
+
+#: src/nextsync/ui/setup.py:291
+msgid "Could not sign in."
+msgstr "No se pudo iniciar sesión."
+
+#: src/nextsync/ui/setup.py:300
+msgid "Saving account securely…"
+msgstr "Guardando la cuenta de forma segura…"
+
+#: src/nextsync/ui/setup.py:304
+msgid "Could not store the account password."
+msgstr "No se pudo guardar la contraseña de la cuenta."
+
+#: src/nextsync/ui/setup.py:327
+msgid "Remote folder (optional, default /)"
+msgstr "Carpeta remota (opcional, por defecto /)"
+
+#: src/nextsync/ui/setup.py:353
+msgid "This local folder is already added."
+msgstr "Esta carpeta local ya está añadida."
+
+#: src/nextsync/ui/setup.py:403
+msgid "No Folders"
+msgstr "Sin carpetas"
+
+#: src/nextsync/ui/setup.py:404
+msgid ""
+"Connected without synchronization folders. Add them later from Settings."
+msgstr ""
+"Conectado sin carpetas de sincronización. Añádelas más tarde desde Ajustes."
+
+#: src/nextsync/ui/setup.py:408
+msgid "Finish Setup"
+msgstr "Finalizar configuración"
+
+#: src/nextsync/ui/setup.py:410
+msgid ""
+"The account will be connected without synchronizing any folder. You can add "
+"folders later from Settings."
+msgstr ""
+"La cuenta se conectará sin sincronizar ninguna carpeta. Puedes añadir "
+"carpetas más tarde desde Ajustes."
+
+#: src/nextsync/ui/setup.py:421
+msgid "Local Folder"
+msgstr "Carpeta local"
+
+#: src/nextsync/ui/setup.py:428
+msgid "Remote Folder"
+msgstr "Carpeta remota"
+
+#: src/nextsync/ui/setup.py:433
+msgid "Local Detection"
+msgstr "Detección local"
+
+#: src/nextsync/ui/setup.py:433
+msgid "Filesystem monitor"
+msgstr "Monitor del sistema de archivos"
+
+#: src/nextsync/ui/setup.py:434
+msgid "Remote Detection"
+msgstr "Detección remota"
+
+#: src/nextsync/ui/setup.py:434
+msgid "Server push + every 10 minutes"
+msgstr "Push del servidor + cada 10 minutos"
+
+#: src/nextsync/ui/setup.py:476
+#, python-brace-format
+msgid ""
+"Connect {account} and start syncing {count} folder(s) ({folders}) now? Both "
+"sides are empty; synchronization will keep them in sync as empty mirrors."
+msgstr ""
+"¿Conectar {account} y empezar a sincronizar {count} carpeta(s) ({folders})? "
+"Ambos lados están vacíos; la sincronización los mantendrá como espejos "
+"vacíos."
+
+#: src/nextsync/ui/setup.py:481
+#, python-brace-format
+msgid ""
+"Connect {account} and start syncing {count} folder(s) ({folders}) now? The "
+"remote folders already contain files; they will be downloaded."
+msgstr ""
+"¿Conectar {account} y empezar a sincronizar {count} carpeta(s) ({folders})? "
+"Las carpetas remotas ya contienen archivos; se descargarán."
+
+#: src/nextsync/ui/setup.py:486
+#, python-brace-format
+msgid ""
+"Connect {account} and start syncing {count} folder(s) ({folders}) now? The "
+"local folders already contain files; they will be uploaded."
+msgstr ""
+"¿Conectar {account} y empezar a sincronizar {count} carpeta(s) ({folders})? "
+"Las carpetas locales ya contienen archivos; se subirán."
+
+#: src/nextsync/ui/setup.py:491
+#, python-brace-format
+msgid ""
+"Connect {account} and start syncing {count} folder(s) ({folders}) now? Files "
+"that changed on both sides will be preserved as {conflict} (Nextcloud "
+"conflicted copy <date>).<ext>."
+msgstr ""
+"¿Conectar {account} y empezar a sincronizar {count} carpeta(s) ({folders})? "
+"Los archivos que cambiaron en ambos lados se conservarán como {conflict} "
+"(Nextcloud conflicted copy <date>).<ext>."
+
+#: src/nextsync/ui/setup.py:495
+msgid "Start Synchronizing?"
+msgstr "¿Empezar a sincronizar?"
+
+#: src/nextsync/ui/setup.py:496
+msgid "Back to setup"
+msgstr "Volver a la configuración"
+
+#: src/nextsync/ui/setup.py:497
+msgid "Start"
+msgstr "Empezar"
+
+#: src/nextsync/ui/tray.py:266
+#, python-brace-format
+msgid "NextSync — {state}"
+msgstr "NextSync — {state}"
+
+#: src/nextsync/ui/tray.py:270
+msgid "Syncing"
+msgstr "Sincronizando"
+
+#: src/nextsync/ui/tray.py:345
+msgid "Open NextSync"
+msgstr "Abrir NextSync"
+
+#: src/nextsync/ui/tray.py:347
+msgid "Quit"
+msgstr ""
+
+#: src/nextsync/ui/update_window.py:29
+msgid "Required Update"
+msgstr "Actualización obligatoria"
+
+#: src/nextsync/ui/update_window.py:29
+msgid "Update Available"
+msgstr "Actualización disponible"
+
+#: src/nextsync/ui/update_window.py:73
+msgid "Mandatory update available"
+msgstr "Actualización obligatoria disponible"
+
+#: src/nextsync/ui/update_window.py:75
+msgid "A new version is available"
+msgstr "Hay una nueva versión disponible"
+
+#: src/nextsync/ui/update_window.py:85
+msgid ""
+"This update is mandatory. NextSync will not start synchronization or allow "
+"use of the current version."
+msgstr ""
+"Esta actualización es obligatoria. NextSync no iniciará la sincronización ni "
+"permitirá usar la versión actual."
+
+#: src/nextsync/ui/update_window.py:90
+msgid ""
+"This update is optional. NextSync can continue running while you decide when "
+"to install it."
+msgstr ""
+"Esta actualización es opcional. NextSync puede seguir funcionando mientras "
+"decide cuándo instalarla."
+
+#: src/nextsync/ui/update_window.py:106
+msgid "Download New Version"
+msgstr "Descargar nueva versión"
+
+#: src/nextsync/ui/update_window.py:112
+msgid "Close Application"
+msgstr "Cerrar la aplicación"
+
+#: src/nextsync/ui/update_window.py:117
+msgid "Not Now"
+msgstr "Ahora no"
+
+#: src/nextsync/ui/update_window.py:138
+msgid "Version Information"
+msgstr "Información de la versión"
+
+#: src/nextsync/ui/update_window.py:140
+msgid "Installed version"
+msgstr "Versión instalada"
+
+#: src/nextsync/ui/update_window.py:144
+msgid "Available version"
+msgstr "Versión disponible"
+
+#: src/nextsync/ui/update_window.py:149
+msgid "Released at"
+msgstr "Publicada el"
+
+#: src/nextsync/ui/update_window.py:154
+msgid "What's New"
+msgstr "Novedades"
+
+#: src/nextsync/ui/update_window.py:163
+msgid "Full Changelog"
+msgstr "Historial completo de cambios"
+
+#: src/nextsync/ui/update_window.py:164
+#, python-brace-format
+msgid "{count} changes in this release"
+msgstr "{count} cambios en esta versión"
+
+#~ msgid "Connected. Add folders from Settings."
+#~ msgstr "Conectado. Añade carpetas desde Ajustes."
+
+#~ msgid "The local synchronization folder is missing or unavailable."
+#~ msgstr "La carpeta de sincronización local no existe o no está disponible."
+
+#~ msgid "A previously populated synchronization folder is now empty."
+#~ msgstr "Una carpeta de sincronización antes con contenido está ahora vacía."
+
+#~ msgid "Synchronization scheduled"
+#~ msgstr "Sincronización programada"
+
+#~ msgid "Waiting for a network connection"
+#~ msgstr "Esperando una conexión de red"
+
+#~ msgid "Checking the local folder…"
+#~ msgstr "Comprobando la carpeta local…"
+
+#~ msgid "Synchronizing files…"
+#~ msgstr "Sincronizando archivos…"
+
+#~ msgid "Could not read the account credential"
+#~ msgstr "No se pudo leer la credencial de la cuenta"
+
+#~ msgid "Waiting for another account to finish…"
+#~ msgstr "Esperando a que otra cuenta termine…"
+
+#~ msgid "Synchronized with conflicts — review the log"
+#~ msgstr "Sincronizado con conflictos: revisa el registro"
+
+#~ msgid "Your Nextcloud account needs attention"
+#~ msgstr "Tu cuenta de Nextcloud necesita atención"
+
+#~ msgid "Synchronization failed — view the log"
+#~ msgstr "La sincronización ha fallado: consulta el registro"
+
+#~ msgid "Synchronization is paused"
+#~ msgstr "La sincronización está en pausa"
+
+#~ msgid "Paused on battery"
+#~ msgstr "En pausa por batería"
+
+#~ msgid "Will pause after the current synchronization"
+#~ msgstr "Se pausará al terminar la sincronización actual"
+
+#~ msgid "Automatic synchronization is off"
+#~ msgstr "La sincronización automática está desactivada"
+
+#~ msgid "Last Successful Sync"
+#~ msgstr "Última sincronización correcta"
+
+#~ msgid "Recent Activity"
+#~ msgstr "Actividad reciente"
+
+#~ msgid "No activity in this session"
+#~ msgstr "Sin actividad en esta sesión"
+
+#~ msgid "View Synchronization Log"
+#~ msgstr "Ver registro de sincronización"
+
+#~ msgid "Resolve Conflicts"
+#~ msgstr "Resolver conflictos"
+
+#~ msgid "Your files are ready."
+#~ msgstr "Tus archivos están listos."
+
+#~ msgid "Downloading"
+#~ msgstr "Descargando"
+
+#~ msgid "Uploading"
+#~ msgstr "Subiendo"
+
+#~ msgid "Deleting"
+#~ msgstr "Eliminando"
+
+#~ msgid "Conflict"
+#~ msgstr "Conflicto"
+
+#~ msgid "Skipped"
+#~ msgstr "Omitido"
+
+#~ msgid "Synchronizing"
+#~ msgstr "Sincronizando"
+
+#~ msgid "Information"
+#~ msgstr "Información"
+
+#~ msgid "Copy Message"
+#~ msgstr "Copiar mensaje"
+
+#~ msgid "Message copied"
+#~ msgstr "Mensaje copiado"
+
+#~ msgid "1 event in this session"
+#~ msgstr "1 evento en esta sesión"
+
+#, python-brace-format
+#~ msgid "{count} events in this session"
+#~ msgstr "{count} eventos en esta sesión"
+
+#~ msgid "Local files will not be deleted."
+#~ msgstr "Los archivos locales no se eliminarán."
+
+#~ msgid "Open NextCloud Folder"
+#~ msgstr "Abrir carpeta de Nextcloud"
+
+#~ msgid "View Sync Log"
+#~ msgstr "Ver registro de sincronización"
+
+#~ msgid "Open Folder"
+#~ msgstr "Abrir carpeta"
+
+#~ msgid "Remote folder"
+#~ msgstr "Carpeta remota"
+
+#~ msgid "Run a local safety interval"
+#~ msgstr "Ejecutar un intervalo local de seguridad"
+
+#~ msgid "Run a remote safety interval"
+#~ msgstr "Ejecutar un intervalo remoto de seguridad"
+
+#~ msgid "Choose Local Folder"
+#~ msgstr "Elegir carpeta local"
+
+#~ msgid ""
+#~ "The file tree from the selected remote folder will be mirrored into this "
+#~ "local folder."
+#~ msgstr ""
+#~ "El árbol de archivos de la carpeta remota seleccionada se reflejará en "
+#~ "esta carpeta local."
+
+#~ msgid "Local NextCloud folder"
+#~ msgstr "Carpeta local de NextCloud"
+
+#~ msgid "Open Releases Page"
+#~ msgstr "Abrir la página de versiones"
+
+#~ msgid "This version must be updated"
+#~ msgstr "Esta versión debe actualizarse"
+
+#~ msgid "This folder is not empty"
+#~ msgstr "Esta carpeta no está vacía"
+
+#~ msgid "Use This Folder"
+#~ msgstr "Usar esta carpeta"
