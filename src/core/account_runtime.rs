@@ -20,12 +20,128 @@ use std::rc::Rc;
 
 use crate::core::debounce::TimeoutSource;
 use crate::core::delete_guard::DeleteGuard;
+use crate::core::network::NetworkWatcher;
+use crate::core::power::PowerWatcher;
 use crate::core::scheduler::{DeleteAlert, Scheduler, SyncRunner};
+use crate::core::suspend::SuspendWatcher;
 use crate::core::sync_permit::SyncPermit;
+use crate::core::triggers::Trigger;
+use crate::nextcloud::push::{remote_push_supported, NotifyPushClient};
 use crate::nextcloud::sync_engine::{SyncEngine, SyncProgress};
-use crate::state::{AggregateStateController, AppState, StateController};
+use crate::state::{AggregateStateController, AppState, PushState, StateController};
 use crate::storage::config::{AccountConfig, Config, FolderConfig, NetworkConfig};
 use crate::util::i18n::t;
+
+/// One set of system watchers built together by a factory.
+///
+/// The default factory wires the production GLib/sysfs/login1 backends; tests
+/// install a factory that returns inert, fake-backed watchers so the runtimes
+/// stay deterministic without a main loop or real hardware.
+pub(crate) struct WatcherBundle {
+    network: NetworkWatcher,
+    power: PowerWatcher,
+    suspend: SuspendWatcher,
+}
+
+/// Builds a fresh [`WatcherBundle`] on demand.
+pub(crate) type WatcherFactory = Rc<dyn Fn() -> WatcherBundle>;
+
+/// The default factory: GLib network monitor, ACPI sysfs power supply and the
+/// login1 suspend signal — the same backends `network.py`/`power.py`/
+/// `suspend.py` use.
+fn default_watcher_factory() -> WatcherFactory {
+    Rc::new(|| WatcherBundle {
+        network: NetworkWatcher::gio(),
+        power: PowerWatcher::sysfs(),
+        suspend: SuspendWatcher::login1(),
+    })
+}
+
+/// Live scheduler/push handles the system watchers fan out to.
+///
+/// Watcher callbacks arrive asynchronously (from the GLib main loop or the
+/// probe backends) and must reflect the *current* folder set, which changes as
+/// folders are added or removed. They therefore capture an
+/// `Rc<RefCell<WatcherTargets>>` that [`AccountRuntime`] keeps in sync, instead
+/// of a snapshot taken at start time.
+#[derive(Default)]
+struct WatcherTargets {
+    schedulers: Vec<Scheduler>,
+    push: Option<NotifyPushClient>,
+    /// Global "pause on battery" preference (honored in addition to the live
+    /// `on_battery` reading, like `application.py`'s `_power_changed`).
+    pause_on_battery: bool,
+    /// Last battery reading reported by the power watcher.
+    on_battery: bool,
+    /// Last notify_push state/message reported by the push client.
+    push_state: Option<(PushState, String)>,
+}
+
+impl WatcherTargets {
+    /// Network availability reaches every folder scheduler and the push client
+    /// (mirrors `_network_changed`: `scheduler.set_online` + `push.set_online`).
+    fn apply_online(targets: &Rc<RefCell<WatcherTargets>>, online: bool) {
+        // Clone the handles and release the borrow before calling out: the
+        // push client emits state synchronously through `on_state`, which
+        // borrows `targets` again.
+        let (schedulers, push) = {
+            let current = targets.borrow();
+            (current.schedulers.clone(), current.push.clone())
+        };
+        for scheduler in &schedulers {
+            scheduler.set_online(online);
+        }
+        if let Some(push) = &push {
+            push.set_online(online);
+        }
+    }
+
+    /// Battery state gates sync only when the global preference is on, exactly
+    /// like `_power_changed`'s `pause = general.pause_on_battery and on_battery`.
+    fn apply_on_battery(targets: &Rc<RefCell<WatcherTargets>>, on_battery: bool) {
+        let pause = {
+            let mut current = targets.borrow_mut();
+            current.on_battery = on_battery;
+            current.pause_on_battery && on_battery
+        };
+        let schedulers = targets.borrow().schedulers.clone();
+        for scheduler in &schedulers {
+            scheduler.set_battery_paused(pause);
+        }
+    }
+
+    /// On wake: drop the push socket so it reconnects and request a resume sync
+    /// (mirrors `_resumed`). Push credentials are re-supplied by the app layer
+    /// through [`NotifyPushClient::configure`].
+    fn apply_resume(targets: &Rc<RefCell<WatcherTargets>>) {
+        let (schedulers, push) = {
+            let current = targets.borrow();
+            (current.schedulers.clone(), current.push.clone())
+        };
+        if let Some(push) = &push {
+            push.disconnect(true);
+        }
+        for scheduler in &schedulers {
+            scheduler.request(Trigger::Resume);
+        }
+    }
+
+    /// A remote file hint triggers a remote-push sync on every folder, like the
+    /// Python `NotifyPushClient` callback `scheduler.request(REMOTE_PUSH)`.
+    fn apply_remote_push(targets: &Rc<RefCell<WatcherTargets>>) {
+        let schedulers = targets.borrow().schedulers.clone();
+        for scheduler in &schedulers {
+            scheduler.request(Trigger::RemotePush);
+        }
+    }
+
+    /// Record the latest push state reported by the client (used for the UI).
+    fn store_push_state(targets: &Rc<RefCell<WatcherTargets>>, state: PushState, message: String) {
+        if let Ok(mut current) = targets.try_borrow_mut() {
+            current.push_state = Some((state, message));
+        }
+    }
+}
 
 /// One running synchronization runtime for a single folder pair.
 pub struct FolderRuntime {
@@ -253,17 +369,39 @@ pub struct AccountRuntime {
     source: Rc<RefCell<dyn TimeoutSource>>,
     sync_permit: Option<SyncPermit>,
     network: NetworkConfig,
+    /// System-wide watchers (network/power/suspend), owned per account like the
+    /// Python `RuntimeController`. Started in [`Self::start`], stopped in
+    /// [`Self::stop`].
+    network_watcher: Option<NetworkWatcher>,
+    power_watcher: Option<PowerWatcher>,
+    suspend_watcher: Option<SuspendWatcher>,
+    /// notify_push client; `None` for OpenCloud or when remote push is disabled.
+    push: Option<NotifyPushClient>,
+    /// Live handles the watcher callbacks fan out to (shared with the closures).
+    targets: Rc<RefCell<WatcherTargets>>,
+    /// Builds the production watchers on `start`; tests swap in fakes.
+    watcher_factory: WatcherFactory,
 }
 
 impl AccountRuntime {
     /// Create a runtime for one account. No folders are started yet; call
     /// [`start`](Self::start) or [`sync_folders`](Self::sync_folders).
+    ///
+    /// `pause_on_battery` applies the global `general.pause_on_battery`
+    /// preference at construction time (the Python applies it live in
+    /// `_power_changed`; the runtime also exposes
+    /// [`set_pause_on_battery`](Self::set_pause_on_battery) for changes).
     pub fn new(
         account: AccountConfig,
         network: NetworkConfig,
         source: Rc<RefCell<dyn TimeoutSource>>,
         sync_permit: Option<SyncPermit>,
+        pause_on_battery: bool,
     ) -> Self {
+        let targets = WatcherTargets {
+            pause_on_battery,
+            ..WatcherTargets::default()
+        };
         Self {
             account,
             folders: HashMap::new(),
@@ -272,6 +410,12 @@ impl AccountRuntime {
             source,
             sync_permit,
             network,
+            network_watcher: None,
+            power_watcher: None,
+            suspend_watcher: None,
+            push: None,
+            targets: Rc::new(RefCell::new(targets)),
+            watcher_factory: default_watcher_factory(),
         }
     }
 
@@ -314,8 +458,46 @@ impl AccountRuntime {
         self.account.runtime.last_successful_sync.as_deref()
     }
 
-    /// Start runtimes for every configured folder of this account.
+    /// The notify_push client for this account, if one was mounted.
+    ///
+    /// The app layer holds the account credentials and calls
+    /// [`NotifyPushClient::configure`] with them (the Python does this in
+    /// `_configure_push` once the keyring resolves the password). The runtime
+    /// owns the client lifecycle (construction, online/offline and resume
+    /// wiring) but not the credential handshake.
+    pub fn push_client(&self) -> Option<NotifyPushClient> {
+        self.push.clone()
+    }
+
+    /// The latest notify_push state and message reported by the client.
+    pub fn push_state(&self) -> Option<(PushState, String)> {
+        self.targets.borrow().push_state.clone()
+    }
+
+    /// Apply a change of the global `pause_on_battery` preference at runtime,
+    /// re-evaluating the current battery state.
+    pub fn set_pause_on_battery(&mut self, enabled: bool) {
+        let pause = {
+            let mut current = self.targets.borrow_mut();
+            current.pause_on_battery = enabled;
+            current.pause_on_battery && current.on_battery
+        };
+        let schedulers = self.targets.borrow().schedulers.clone();
+        for scheduler in &schedulers {
+            scheduler.set_battery_paused(pause);
+        }
+    }
+
+    /// Start runtimes for every configured folder and wire the system watchers
+    /// (network/power/suspend) and the notify_push client.
     pub fn start(&mut self) {
+        self.prime();
+        self.mount_watchers();
+    }
+
+    /// Bring the folder runtimes up without the system watchers (used by
+    /// [`start`](Self::start) and by tests that drive the watchers themselves).
+    fn prime(&mut self) {
         self.sync_folders();
         if self.folders.is_empty() && self.idle.is_none() {
             let idle = StateController::new(AppState::IdleOk);
@@ -323,6 +505,78 @@ impl AccountRuntime {
             self.aggregate.add(idle.clone());
             self.idle = Some(idle);
         }
+    }
+
+    /// Build the production watchers through [`Self::watcher_factory`] and the
+    /// push client, then mount them.
+    fn mount_watchers(&mut self) {
+        let WatcherBundle {
+            network,
+            power,
+            suspend,
+        } = (self.watcher_factory)();
+        let push = self.default_push();
+        self.mount(network, power, suspend, push);
+    }
+
+    /// Wire callbacks to the given watchers, start them and keep them for
+    /// [`Self::stop`]. Injecting the watchers keeps tests deterministic.
+    fn mount(
+        &mut self,
+        mut network: NetworkWatcher,
+        mut power: PowerWatcher,
+        mut suspend: SuspendWatcher,
+        push: Option<NotifyPushClient>,
+    ) {
+        {
+            let mut targets = self.targets.borrow_mut();
+            targets.push = push.clone();
+        }
+        let network_targets = Rc::clone(&self.targets);
+        network.set_callback(move |online| WatcherTargets::apply_online(&network_targets, online));
+        let power_targets = Rc::clone(&self.targets);
+        power.set_callback(move |on_battery| {
+            WatcherTargets::apply_on_battery(&power_targets, on_battery)
+        });
+        let suspend_targets = Rc::clone(&self.targets);
+        suspend.set_on_resume(move || WatcherTargets::apply_resume(&suspend_targets));
+
+        // `start` reports the current network/battery state synchronously, which
+        // fans out to the schedulers through the callbacks above.
+        network.start();
+        power.start();
+        suspend.start();
+
+        self.network_watcher = Some(network);
+        self.power_watcher = Some(power);
+        self.suspend_watcher = Some(suspend);
+        self.push = push;
+    }
+
+    /// Build the notify_push client for this account, or `None` when the
+    /// provider has no push channel or the account disabled it.
+    fn default_push(&self) -> Option<NotifyPushClient> {
+        if !remote_push_supported(self.account.provider) || !self.account.sync.remote_push_enabled {
+            return None;
+        }
+        let file_targets = Rc::clone(&self.targets);
+        let state_targets = Rc::clone(&self.targets);
+        Some(NotifyPushClient::new(
+            self.account.provider,
+            move || WatcherTargets::apply_remote_push(&file_targets),
+            move |state, message| WatcherTargets::store_push_state(&state_targets, state, message),
+        ))
+    }
+
+    /// Refresh the shared scheduler list watched by the system callbacks from
+    /// the current folder runtimes (folders can be added or removed at runtime).
+    fn sync_targets(&self) {
+        let schedulers: Vec<Scheduler> = self
+            .folders
+            .values()
+            .map(|folder| folder.scheduler())
+            .collect();
+        self.targets.borrow_mut().schedulers = schedulers;
     }
 
     /// Reconcile the folder runtimes with the account's current folders.
@@ -341,6 +595,7 @@ impl AccountRuntime {
         for folder in desired {
             self.ensure_folder(folder);
         }
+        self.sync_targets();
     }
 
     fn ensure_folder(&mut self, folder: FolderConfig) {
@@ -363,7 +618,8 @@ impl AccountRuntime {
         self.folders.insert(runtime.folder.id.clone(), runtime);
     }
 
-    /// Stop every folder runtime and reset the aggregate.
+    /// Stop every folder runtime, the system watchers, the push client and
+    /// reset the aggregate.
     pub fn stop(&mut self) {
         for (_, mut runtime) in self.folders.drain() {
             runtime.stop();
@@ -372,6 +628,19 @@ impl AccountRuntime {
             self.aggregate.remove(&idle);
         }
         self.aggregate.clear();
+        if let Some(mut network) = self.network_watcher.take() {
+            network.stop();
+        }
+        if let Some(mut power) = self.power_watcher.take() {
+            power.stop();
+        }
+        if let Some(mut suspend) = self.suspend_watcher.take() {
+            suspend.stop();
+        }
+        if let Some(push) = self.push.take() {
+            push.disconnect(false);
+        }
+        self.targets.borrow_mut().push = None;
     }
 }
 
@@ -385,6 +654,10 @@ pub struct AccountManager {
     aggregate_sources: HashMap<String, Vec<StateController>>,
     source: Rc<RefCell<dyn TimeoutSource>>,
     sync_permit: SyncPermit,
+    /// Global `general.pause_on_battery` preference, applied to new runtimes.
+    pause_on_battery: bool,
+    /// Builds the production watchers; tests swap in fakes.
+    watcher_factory: WatcherFactory,
 }
 
 impl AccountManager {
@@ -396,11 +669,15 @@ impl AccountManager {
             aggregate_sources: HashMap::new(),
             source,
             sync_permit: SyncPermit::try_new(1).expect("permit max 1"),
+            pause_on_battery: false,
+            watcher_factory: default_watcher_factory(),
         }
     }
 
-    /// Start a runtime for every account in the configuration.
+    /// Start a runtime for every account in the configuration. The global
+    /// `general.pause_on_battery` preference is captured for the runtimes.
     pub fn start(&mut self, config: &Config) {
+        self.pause_on_battery = config.general.pause_on_battery;
         for account in config.accounts.clone() {
             self.ensure_runtime(account);
         }
@@ -463,7 +740,9 @@ impl AccountManager {
             NetworkConfig::default(),
             self.source.clone(),
             Some(self.sync_permit.clone()),
+            self.pause_on_battery,
         );
+        runtime.watcher_factory = self.watcher_factory.clone();
         runtime.start();
         let sources = runtime.state_sources();
         for source in &sources {
@@ -485,9 +764,53 @@ impl AccountManager {
 }
 
 #[cfg(test)]
+impl AccountRuntime {
+    /// Bring the folder runtimes up without the production system watchers, so
+    /// the existing tests stay deterministic without GLib/sysfs/login1.
+    pub(crate) fn start_without_watchers(&mut self) {
+        self.prime();
+    }
+
+    /// Mount specific (fake-backed) watchers and an optional push client.
+    pub(crate) fn mount_test(
+        &mut self,
+        network: NetworkWatcher,
+        power: PowerWatcher,
+        suspend: SuspendWatcher,
+        push: Option<NotifyPushClient>,
+    ) {
+        self.mount(network, power, suspend, push);
+    }
+
+    /// Drive the notify_push file-notification fan-out (what the client's
+    /// `on_file_notification` callback runs in production).
+    pub(crate) fn simulate_remote_push(&self) {
+        WatcherTargets::apply_remote_push(&self.targets);
+    }
+
+    /// Build the push client for the current account (test mirror of
+    /// `default_push`).
+    pub(crate) fn default_push_for_test(&self) -> Option<NotifyPushClient> {
+        self.default_push()
+    }
+}
+
+#[cfg(test)]
+impl AccountManager {
+    /// Install a watcher factory before [`Self::start`] (tests pass inerts).
+    pub(crate) fn set_watcher_factory(&mut self, factory: WatcherFactory) {
+        self.watcher_factory = factory;
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::debounce::{fire_timer, FakeTimeoutSource};
+    use crate::core::network::NetworkProbe;
+    use crate::core::power::PowerProbe;
+    use crate::core::suspend::SuspendProbe;
+    use crate::nextcloud::driver::Provider;
     use crate::state::StateSnapshot;
 
     fn fake_source() -> Rc<RefCell<FakeTimeoutSource>> {
@@ -519,6 +842,117 @@ mod tests {
         account
     }
 
+    // ---- fake system probes (deterministic, no GLib/sysfs/D-Bus) -----------
+
+    #[derive(Clone, Default)]
+    struct FakeNetProbe {
+        inner: Rc<RefCell<FakeNetInner>>,
+    }
+    #[derive(Default)]
+    struct FakeNetInner {
+        available: bool,
+        callback: Option<Rc<dyn Fn(bool)>>,
+    }
+    impl FakeNetProbe {
+        fn set(&self, available: bool) {
+            let callback = self.inner.borrow().callback.clone();
+            if let Some(callback) = callback {
+                callback(available);
+            }
+        }
+    }
+    impl NetworkProbe for FakeNetProbe {
+        fn is_available(&self) -> bool {
+            self.inner.borrow().available
+        }
+        fn subscribe(&self, callback: Rc<dyn Fn(bool)>) -> u64 {
+            self.inner.borrow_mut().callback = Some(callback);
+            1
+        }
+        fn unsubscribe(&self, _id: u64) {
+            self.inner.borrow_mut().callback = None;
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct FakePowerProbe {
+        inner: Rc<RefCell<FakePowerInner>>,
+    }
+    #[derive(Default)]
+    struct FakePowerInner {
+        on_battery: bool,
+        callback: Option<Rc<dyn Fn(bool)>>,
+    }
+    impl FakePowerProbe {
+        fn set(&self, on_battery: bool) {
+            let callback = self.inner.borrow().callback.clone();
+            if let Some(callback) = callback {
+                callback(on_battery);
+            }
+        }
+    }
+    impl PowerProbe for FakePowerProbe {
+        fn on_battery(&self) -> bool {
+            self.inner.borrow().on_battery
+        }
+        fn subscribe(&self, callback: Rc<dyn Fn(bool)>) -> u64 {
+            self.inner.borrow_mut().callback = Some(callback);
+            1
+        }
+        fn unsubscribe(&self, _id: u64) {
+            self.inner.borrow_mut().callback = None;
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct FakeSuspendProbe {
+        inner: Rc<RefCell<FakeSuspendInner>>,
+    }
+    #[derive(Default)]
+    struct FakeSuspendInner {
+        on_resume: Option<Rc<dyn Fn()>>,
+    }
+    impl FakeSuspendProbe {
+        fn fire_resume(&self) {
+            let callback = self.inner.borrow().on_resume.clone();
+            if let Some(callback) = callback {
+                callback();
+            }
+        }
+    }
+    impl SuspendProbe for FakeSuspendProbe {
+        fn subscribe(&self, on_resume: Rc<dyn Fn()>) -> u64 {
+            self.inner.borrow_mut().on_resume = Some(on_resume);
+            1
+        }
+        fn unsubscribe(&self, _id: u64) {
+            self.inner.borrow_mut().on_resume = None;
+        }
+    }
+
+    /// A factory whose watchers start online/on-mains and never push changes.
+    fn inert_watcher_factory() -> WatcherFactory {
+        Rc::new(|| {
+            let net = FakeNetProbe::default();
+            net.inner.borrow_mut().available = true;
+            WatcherBundle {
+                network: NetworkWatcher::new(Box::new(net)),
+                power: PowerWatcher::new(Box::new(FakePowerProbe::default())),
+                suspend: SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            }
+        })
+    }
+
+    /// A network watcher that reports "online" on start and never changes, for
+    /// tests focused on power/suspend/push.
+    fn online_network_watcher() -> NetworkWatcher {
+        let net = FakeNetProbe::default();
+        net.inner.borrow_mut().available = true;
+        NetworkWatcher::new(Box::new(net))
+    }
+
+    // ---- existing runtime/manager tests (watchers kept inert) --------------
+
     #[test]
     fn account_without_folders_aggregates_to_idle_ok() {
         let source = fake_source();
@@ -527,8 +961,9 @@ mod tests {
             NetworkConfig::default(),
             source,
             None,
+            false,
         );
-        runtime.start();
+        runtime.start_without_watchers();
         assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
         let scheduler = runtime.scheduler();
         assert!(!scheduler.user_paused());
@@ -543,8 +978,9 @@ mod tests {
             NetworkConfig::default(),
             source.clone(),
             None,
+            false,
         );
-        runtime.start();
+        runtime.start_without_watchers();
         assert_eq!(runtime.folders().len(), 1);
         let folder = runtime.folders().values().next().unwrap().clone();
         assert_eq!(folder.folder.id, "folder-1");
@@ -561,9 +997,14 @@ mod tests {
     #[test]
     fn set_paused_propagates_to_the_first_folder_scheduler() {
         let source = fake_source();
-        let mut runtime =
-            AccountRuntime::new(sample_account(true), NetworkConfig::default(), source, None);
-        runtime.start();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
         runtime.scheduler().set_paused(true);
         assert!(runtime.scheduler().user_paused());
         assert_eq!(runtime.state().snapshot().state, AppState::PausedUser);
@@ -572,9 +1013,14 @@ mod tests {
     #[test]
     fn sync_folders_starts_and_removes_runtimes() {
         let source = fake_source();
-        let mut runtime =
-            AccountRuntime::new(sample_account(true), NetworkConfig::default(), source, None);
-        runtime.start();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
         assert_eq!(runtime.folders().len(), 1);
 
         let mut account = sample_account(true);
@@ -600,6 +1046,7 @@ mod tests {
     fn manager_starts_every_account_and_removes_one() {
         let source = fake_source();
         let mut manager = AccountManager::new(source);
+        manager.set_watcher_factory(inert_watcher_factory());
         let mut config = Config {
             accounts: vec![sample_account(true), sample_account(false)],
             ..Config::default()
@@ -618,9 +1065,14 @@ mod tests {
     #[test]
     fn state_subscription_forwarded_through_the_aggregate() {
         let source = fake_source();
-        let mut runtime =
-            AccountRuntime::new(sample_account(true), NetworkConfig::default(), source, None);
-        runtime.start();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
         let seen = Rc::new(RefCell::new(Vec::new()));
         let collect = {
             let seen = Rc::clone(&seen);
@@ -636,6 +1088,7 @@ mod tests {
     fn manager_aggregate_tracks_removed_accounts() {
         let source = fake_source();
         let mut manager = AccountManager::new(source);
+        manager.set_watcher_factory(inert_watcher_factory());
         let mut config = Config {
             accounts: vec![sample_account(false)],
             ..Config::default()
@@ -660,5 +1113,273 @@ mod tests {
         facade.set_paused(true);
         facade.approve_delete_once();
         facade.restore_from_server();
+    }
+
+    // ---- network watcher wiring -------------------------------------------
+
+    #[test]
+    fn network_offline_then_online_drives_the_scheduler_state() {
+        let source = fake_source();
+        let net = FakeNetProbe::default();
+        net.inner.borrow_mut().available = true;
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source.clone(),
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            NetworkWatcher::new(Box::new(net.clone())),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            None,
+        );
+        // mount reports the initial online state, so the folder stays IdleOk.
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+
+        net.set(false);
+        assert_eq!(runtime.state().snapshot().state, AppState::Offline);
+
+        // Reconnecting requests a NetworkRestored sync because the default
+        // account has inotify watching on (manual_only() is false), mirroring
+        // the Python reconnect behaviour.
+        net.set(true);
+        assert_eq!(runtime.state().snapshot().state, AppState::SyncQueued);
+    }
+
+    #[test]
+    fn network_reconnect_stays_idle_for_manual_only_accounts() {
+        let source = fake_source();
+        let net = FakeNetProbe::default();
+        net.inner.borrow_mut().available = true;
+        let mut account = sample_account(true);
+        account.sync.local_inotify_enabled = false;
+        account.sync.remote_push_enabled = false;
+        let mut runtime =
+            AccountRuntime::new(account, NetworkConfig::default(), source, None, false);
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            NetworkWatcher::new(Box::new(net.clone())),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            None,
+        );
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+
+        net.set(false);
+        assert_eq!(runtime.state().snapshot().state, AppState::Offline);
+
+        // With every automatic trigger off the queue stays empty, so the
+        // scheduler returns to the manual-only idle instead of queueing a
+        // reconnect sync.
+        net.set(true);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleManualOnly);
+    }
+
+    #[test]
+    fn repeated_network_state_does_not_reemit() {
+        let source = fake_source();
+        let net = FakeNetProbe::default();
+        net.inner.borrow_mut().available = true;
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            NetworkWatcher::new(Box::new(net.clone())),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            None,
+        );
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        net.set(true);
+        // Still online: no transition, no Offline state.
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+    }
+
+    // ---- power watcher wiring ---------------------------------------------
+
+    #[test]
+    fn battery_pauses_only_when_the_preference_is_on() {
+        let source = fake_source();
+        let power = FakePowerProbe::default(); // starts on mains
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            true, // pause_on_battery enabled
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(power.clone())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            None,
+        );
+
+        power.set(true);
+        assert_eq!(runtime.state().snapshot().state, AppState::PausedBattery);
+
+        power.set(false);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+    }
+
+    #[test]
+    fn battery_is_ignored_when_the_preference_is_off() {
+        let source = fake_source();
+        let power = FakePowerProbe::default();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            false, // pause_on_battery disabled
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(power.clone())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            None,
+        );
+
+        power.set(true);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+    }
+
+    #[test]
+    fn set_pause_on_battery_re_evaluates_the_current_state() {
+        let source = fake_source();
+        let power = FakePowerProbe::default();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source,
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(power.clone())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            None,
+        );
+
+        // On battery, but preference off: not paused.
+        power.set(true);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+
+        // Flip the preference while still on battery: now paused.
+        runtime.set_pause_on_battery(true);
+        assert_eq!(runtime.state().snapshot().state, AppState::PausedBattery);
+    }
+
+    // ---- suspend watcher wiring -------------------------------------------
+
+    #[test]
+    fn resume_requests_a_sync_trigger() {
+        let source = fake_source();
+        let suspend = FakeSuspendProbe::default();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source.clone(),
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(suspend.clone())),
+            None,
+        );
+        assert_eq!(source.borrow().pending(), 0);
+
+        suspend.fire_resume();
+        // The resume trigger schedules a start through the shared backend.
+        assert!(source.borrow().pending() >= 1);
+    }
+
+    // ---- push wiring ------------------------------------------------------
+
+    #[test]
+    fn nextcloud_account_with_push_enabled_gets_a_client() {
+        let source = fake_source();
+        let mut account = sample_account(true);
+        account.provider = Provider::Nextcloud;
+        account.sync.remote_push_enabled = true;
+        let mut runtime =
+            AccountRuntime::new(account, NetworkConfig::default(), source, None, false);
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            runtime.default_push_for_test(),
+        );
+        assert!(runtime.push_client().is_some());
+    }
+
+    #[test]
+    fn opencloud_account_never_gets_a_push_client() {
+        let source = fake_source();
+        let mut account = sample_account(true);
+        account.provider = Provider::OpenCloud;
+        account.sync.remote_push_enabled = true;
+        let mut runtime =
+            AccountRuntime::new(account, NetworkConfig::default(), source, None, false);
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            runtime.default_push_for_test(),
+        );
+        assert!(runtime.push_client().is_none());
+    }
+
+    #[test]
+    fn disabled_push_yields_no_client() {
+        let source = fake_source();
+        let mut account = sample_account(true);
+        account.sync.remote_push_enabled = false;
+        let mut runtime =
+            AccountRuntime::new(account, NetworkConfig::default(), source, None, false);
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            runtime.default_push_for_test(),
+        );
+        assert!(runtime.push_client().is_none());
+    }
+
+    #[test]
+    fn incoming_push_message_requests_a_remote_sync() {
+        let source = fake_source();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source.clone(),
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        assert_eq!(source.borrow().pending(), 0);
+
+        // `simulate_remote_push` runs exactly what the NotifyPushClient
+        // `on_file_notification` callback runs in production.
+        runtime.simulate_remote_push();
+        assert!(source.borrow().pending() >= 1);
     }
 }
