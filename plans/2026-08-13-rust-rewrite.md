@@ -23,6 +23,28 @@
 - **Multi-cuenta + multi-folder**: cada folder = runtime propio (watcher, guard, exclusions, invocación), settings compartidas por cuenta. (REFACTOR-NOTES §2)
 - **Versión actual a replicar**: v0.2.4+ (0.2.5 en ramas sin mergear). Empezar el rewrite desde `origin/main`.
 
+## Proveedor dual Nextcloud / OpenCloud (decisión 13-Ago-2026, A FUEGO)
+
+La siguiente release soporta **ambos proveedores** seleccionables por cuenta. Investigación verificada (auth de `opencloudcmd` en código real, docs oficiales):
+
+**Abstracción (Task nueva 0.4, antes que cualquier UI)**: trait `SyncDriver` que encapsula el motor CLI:
+- `NextcloudDriver`: binario `nextcloudcmd`, args `[--trust] [--httpproxy] [--max-sync-retries N] [--exclude fichero] [--path /remoto] <local_root> <server_url>`, credenciales por env `NC_USER`/`NC_PASSWORD`.
+- `OpenCloudDriver`: binario `opencloudcmd`, args `<server_url> <space_id> <source_dir> --user U --token T [--remote-folder] [--exclude] [--max-sync-retries]`, credenciales por flag (app password persistente).
+- El **parser de progreso es compartido** (ambos CLI son forks de la misma base Qt, mismo formato de salida) — `nextcloudcmd_progress.rs` vale para los dos.
+- `sync_engine.rs` ya recibe el binario/config vía `CommandSpec` → parametrizar por `Provider`, no duplicar el engine.
+
+**Config (Task 1.1 actualizada)**: campo `provider: "nextcloud" | "opencloud"` por cuenta (default `nextcloud`). `FolderConfig` gana `space_id` (OpenCloud) junto a `remote_path` (Nextcloud); ambos opcionales según proveedor.
+
+**Auth por proveedor**:
+- Nextcloud → login flow v2 (OAuth browser) + credenciales en keyring (como hoy).
+- OpenCloud → **app password persistente** (creada en web del servidor o `opencloud auth-app create --expiration 72h`), guardada en keyring, reutilizable indefinidamente; 401 → pedir otra. Sin OAuth ni device flow (el CLI no lo soporta; lico no ofrece device flow).
+
+**Push**: solo Nextcloud (notify_push). OpenCloud no tiene notify_push → ese trigger queda deshabilitado y se usa `remote_interval` polling.
+
+**Setup wizard (Task 5.3 actualizada)**: selector de proveedor al crear cuenta → flujo Nextcloud (browser OAuth) o flujo OpenCloud (server_url + user + app password; `space_id` autodescubierto con `opencloudcmd <url>`).
+
+**Empaquetado (Task 6.2)**: depender de `nextcloud-client` (nextcloudcmd) y opcionalmente `opencloud-desktop-git`/build del desktop oficial (opencloudcmd). La app detecta binarios presentes; si el proveedor elegido no tiene binario, aviso en setup.
+
 ## Inventario de features (de la v0.2.x, para paridad)
 
 **Core/estado**: AccountManager (multi-cuenta), AccountRuntime (fachada RuntimeController — fix #20), FolderRuntime por folder, StateController/AggregateStateController, SyncPermit (semáforo 1-a-la-vez), scheduler (4 triggers), debounce, sync_engine (spawn nextcloudcmd + progreso).
@@ -67,12 +89,20 @@ Verificado contra origin/main v0.3.0 el 13-Ago-2026:
 - `.github/workflows/ci.yml`: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo build --release`.
 - Commit: `ci: add Rust CI`
 
+**Task 0.4: Abstracción de proveedor (SyncDriver)**
+- `src/nextcloud/driver.rs`: enum `Provider { Nextcloud, OpenCloud }` + trait `SyncDriver` con `build_command(account, folder, network, credentials) -> CommandSpec` y `binary_name()`.
+- `NextcloudDriver` y `OpenCloudDriver` (args y credenciales según §Proveedor dual).
+- Refactor: `command.rs`/`sync_engine.rs` parametrizados por `Provider` (el parser de progreso es compartido).
+- Tests: `build_command` por proveedor (args exactos), binarios detectados.
+- Commit: `feat(driver): provider abstraction for Nextcloud and OpenCloud`
+
 ### Fase 1 — Config + credenciales (sin UI)
 
-**Task 1.1: Modelo de config (schema v6)**
-- `src/storage/config.rs`: structs serde `Config { general, accounts: Vec<AccountConfig> }`, `AccountConfig { id, server, login, folders: Vec<FolderConfig>, ... }`, `FolderConfig { local_root, remote_path, ... }`. Guardado en `~/.config/nextsync/` (o mismo path que Python: `~/.local/share/nextsync/` — verificar `util/paths.py`).
-- Tests: serializar/deserializar, cuenta con folders vacíos, migración de schema v5→v6.
-- Commit: `feat(config): Rust config model with schema v6`
+**Task 1.1: Modelo de config (schema v7, doble proveedor)**
+- `src/storage/config.rs`: structs serde `Config { general, accounts: Vec<AccountConfig> }`, `AccountConfig { id, server, login, provider, folders: Vec<FolderConfig>, ... }`, `FolderConfig { local_root, remote_path, space_id, ... }`. `provider: "nextcloud" | "opencloud"` (default `nextcloud`). Guardado en `~/.config/nextsync/` (o mismo path que Python: `~/.local/share/nextsync/` — verificar `util/paths.py`).
+- Leer el schema v6 Python como entrada y migrar a v7 (añade `provider`, opcional en lectura).
+- Tests: serializar/deserializar, cuenta con folders vacíos, migración v5→v6→v7, provider por defecto.
+- Commit: `feat(config): Rust config model with schema v7 and provider`
 
 **Task 1.2: Credenciales en Secret Service**
 - `src/nextcloud/credentials.rs`: guardar/leer/borrar credencial por cuenta usando `secret-service` blocking (collection default, atributos por account_id). API validada en spike: `connect(EncryptionType::Dh)`, `create_item`, `Item::delete`.
@@ -131,8 +161,10 @@ Verificado contra origin/main v0.3.0 el 13-Ago-2026:
 - Commit: `feat(ui): settings window with remote folder picker`
 
 **Task 5.3: Setup wizard**
-- `src/ui/setup.rs`: login flow v2 (browser), first-sync confirmation dialog (issue #8, PROPFIND Depth 1).
-- Commit: `feat(ui): account setup wizard`
+- `src/ui/setup.rs`: **selector de proveedor** (Nextcloud / OpenCloud) al crear cuenta.
+  - Nextcloud → login flow v2 (browser OAuth), first-sync confirmation dialog (issue #8, PROPFIND Depth 1).
+  - OpenCloud → server_url + user + **app password** (campo de contraseña), `space_id` autodescubierto con `opencloudcmd <url>` (lista de spaces). Aviso si el binario `opencloudcmd` no está presente.
+- Commit: `feat(ui): account setup wizard with provider selection`
 
 **Task 5.4: Conflict resolver + activity + log**
 - `src/ui/conflict_resolver.rs` (issue #7: keep local/remote/open), `src/ui/activity.rs` (recent), `src/ui/log_view.rs`.
