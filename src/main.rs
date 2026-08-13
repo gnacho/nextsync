@@ -1,8 +1,9 @@
 //! NextSync - Nextcloud desktop client for GNOME, rewritten in Rust.
 //!
 //! Thin binary launcher: builds the libadwaita application, loads the
-//! configuration, starts the account runtimes and presents the main window.
-//! All logic lives in the `nextsync` library.
+//! configuration, starts the account runtimes, presents the main window and
+//! registers the StatusNotifier tray. All logic lives in the `nextsync`
+//! library.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,8 +12,10 @@ use libadwaita::prelude::*;
 
 use nextsync::core::account_runtime::AccountManager;
 use nextsync::core::debounce::GlibTimeoutSource;
+use nextsync::state::StateSnapshot;
 use nextsync::storage::config::ConfigStore;
 use nextsync::ui::main_window::MainWindow;
+use nextsync::ui::tray::{Tray, TrayCallbacks};
 
 const APPLICATION_ID: &str = "io.github.gnacho.nextsync";
 
@@ -20,15 +23,25 @@ const APPLICATION_ID: &str = "io.github.gnacho.nextsync";
 /// on every `activate` (the canonical GTK flow).
 type WindowSlot = Rc<RefCell<Option<Rc<RefCell<MainWindow>>>>>;
 
+/// Shared holder for the tray, kept alive for the whole session.
+type TraySlot = Rc<RefCell<Option<Tray>>>;
+
+/// Shared holder for the tray's state subscription.
+type TraySubscriptionSlot = Rc<RefCell<Option<nextsync::state::Subscription>>>;
+
 fn main() {
     let application = libadwaita::Application::builder()
         .application_id(APPLICATION_ID)
         .build();
 
     let window_slot: WindowSlot = Rc::new(RefCell::new(None));
+    let tray_slot: TraySlot = Rc::new(RefCell::new(None));
+    let tray_subscription: TraySubscriptionSlot = Rc::new(RefCell::new(None));
 
     {
         let window_slot = window_slot.clone();
+        let tray_slot = tray_slot.clone();
+        let tray_subscription = tray_subscription.clone();
         application.connect_startup(move |application| {
             let app = application
                 .downcast_ref::<libadwaita::Application>()
@@ -52,6 +65,7 @@ fn main() {
                 Rc::new(RefCell::new(GlibTimeoutSource::new()));
             let mut account_manager = AccountManager::new(source);
             account_manager.start(&config);
+            let aggregate = account_manager.aggregate_state();
 
             let main_window = Rc::new(RefCell::new(MainWindow::new(
                 app,
@@ -61,11 +75,57 @@ fn main() {
                 None,
             )));
             let weak = Rc::downgrade(&main_window);
-            main_window.borrow_mut().install_settings_handler(weak);
+            main_window
+                .borrow_mut()
+                .install_settings_handler(weak.clone());
             main_window
                 .borrow_mut()
                 .install_add_account_handler(Rc::downgrade(&main_window));
-            *window_slot.borrow_mut() = Some(main_window);
+            *window_slot.borrow_mut() = Some(main_window.clone());
+
+            // Register the tray (best effort; the app works without one).
+            let tray_callbacks = TrayCallbacks {
+                open_window: Rc::new({
+                    let weak = weak.clone();
+                    move || {
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow().window().present();
+                        }
+                    }
+                }),
+                open_settings: Rc::new({
+                    let weak = weak.clone();
+                    move || {
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow_mut().show_settings();
+                        }
+                    }
+                }),
+                quit: Rc::new({
+                    let app = app.clone();
+                    move || app.quit()
+                }),
+            };
+            let initial = aggregate.snapshot().state;
+            match Tray::new(initial, tray_callbacks) {
+                Ok(tray) => {
+                    let aggregate = aggregate.clone();
+                    let tray_slot_for_sub = tray_slot.clone();
+                    let subscription = aggregate.subscribe(move |snapshot: &StateSnapshot| {
+                        if let Some(tray) = tray_slot_for_sub.borrow_mut().as_mut() {
+                            tray.update_state(snapshot.state);
+                        }
+                    });
+                    // Keep the tray and its state subscription alive.
+                    *tray_slot.borrow_mut() = Some(tray);
+                    tray_subscription.borrow_mut().replace(subscription);
+                }
+                Err(_) => {
+                    // No DBus session bus or StatusNotifierHost: keep running
+                    // without a tray.
+                    eprintln!("nextsync: tray unavailable, continuing without it");
+                }
+            }
         });
     }
 
