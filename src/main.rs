@@ -6,7 +6,7 @@
 //! library.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use libadwaita::prelude::*;
 
@@ -68,14 +68,29 @@ fn main() {
             let aggregate = account_manager.aggregate_state();
 
             let logger = nextsync::core::log::LogBuffer::new();
-            let main_window = Rc::new(RefCell::new(MainWindow::new(
-                app,
-                config,
-                config_store,
-                account_manager,
-                logger,
-                None,
-            )));
+            // `show_about` lives on `MainWindow`, so it needs the shared cell
+            // that does not exist until the `Rc` is built. `new_cyclic` hands
+            // us a `Weak` during construction so the header-button callback can
+            // be wired up front (the button fires long after construction).
+            let main_window: Rc<RefCell<MainWindow>> =
+                Rc::new_cyclic(|weak: &Weak<RefCell<MainWindow>>| {
+                    let on_show_about: Option<Rc<dyn Fn()>> = Some(Rc::new({
+                        let weak = weak.clone();
+                        move || {
+                            if let Some(main) = weak.upgrade() {
+                                main.borrow_mut().show_about();
+                            }
+                        }
+                    }));
+                    RefCell::new(MainWindow::new(
+                        app,
+                        config,
+                        config_store,
+                        account_manager,
+                        logger,
+                        on_show_about,
+                    ))
+                });
             let weak = Rc::downgrade(&main_window);
             main_window
                 .borrow_mut()
