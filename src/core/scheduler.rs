@@ -22,6 +22,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use crate::core::debounce::{DebounceGate, TimeoutSource};
+use crate::core::delete_guard::GuardCheck;
 use crate::core::sync_permit::SyncPermit;
 use crate::core::triggers::{manual_only, CoalescingQueue, Trigger, TriggerSettings};
 use crate::state::{AppState, StateController};
@@ -59,10 +60,20 @@ pub trait SyncRunner {
 }
 
 /// A deletion-guard alert that blocks synchronization until reviewed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DeleteAlert {
+    /// Stable reason: `folder_missing`, `folder_emptied` or `mass_local_deletion`.
     pub reason: String,
+    /// Human-readable message surfaced in the review state.
     pub message: String,
+    /// Relative paths that disappeared from the local tree.
+    pub missing_paths: Vec<String>,
+    /// Number of files in the last manifest.
+    pub previous_count: usize,
+    /// Number of files found now.
+    pub current_count: usize,
+    /// Whether a one-time approval is allowed (only explicit deletions;
+    /// structural failures like a missing folder never are).
     pub can_approve_once: bool,
 }
 
@@ -84,6 +95,7 @@ struct SchedulerInner {
     source: Rc<RefCell<dyn TimeoutSource>>,
     debounce: Option<DebounceGate>,
     runner: Box<dyn SyncRunner>,
+    guard: Option<Box<dyn GuardCheck>>,
     on_completed: Option<CompletedCallback>,
     settings: TriggerSettings,
     self_ref: Weak<RefCell<SchedulerInner>>,
@@ -121,6 +133,7 @@ impl Scheduler {
             source: source.clone(),
             debounce: None,
             runner,
+            guard: None,
             on_completed,
             settings,
             self_ref: Weak::new(),
@@ -181,6 +194,12 @@ impl Scheduler {
     /// Block the scheduler with a deletion-guard alert.
     pub fn set_delete_alert(&self, alert: DeleteAlert) {
         self.inner.borrow_mut().set_delete_alert(alert);
+    }
+
+    /// Install (or remove) the deletion guard checked before every run. The
+    /// guard is a filesystem walk, so it runs inline on the main loop.
+    pub fn set_guard(&self, guard: Option<Box<dyn GuardCheck>>) {
+        self.inner.borrow_mut().guard = guard;
     }
 
     /// Approve one synchronization despite a deletion alert.
@@ -355,6 +374,15 @@ impl SchedulerInner {
             }
         }
         self.delete_bypass_once = false;
+        // Fase 3: the deletion guard runs before every reconciliation. When it
+        // finds a mass deletion the run is blocked and the app must review it.
+        if let Some(guard) = &mut self.guard {
+            if let Some(alert) = guard.check() {
+                self.queue.extend(reasons.iter().copied());
+                self.set_delete_alert(alert);
+                return;
+            }
+        }
         self.prepare_sync(reasons);
     }
 
@@ -442,6 +470,16 @@ impl SchedulerInner {
                 true
             }
         };
+        // Fase 3: after a successful run the guard baseline is refreshed so
+        // it reflects what nextcloudcmd just reconciled (Python: only for
+        // `result.successful`, which covers conflicts too).
+        if matches!(outcome, SyncOutcome::Success | SyncOutcome::Conflict)
+            && self.delete_alert.is_none()
+        {
+            if let Some(guard) = &mut self.guard {
+                let _ = guard.record_current();
+            }
+        }
         if let Some(callback) = &self.on_completed {
             callback(&outcome);
         }
@@ -588,7 +626,12 @@ impl SchedulerInner {
             return;
         }
         // Fase 3: remove the local sync journals and record a fresh deletion
-        // guard baseline so the guard stops blocking (delete_guard.rs).
+        // guard baseline so the guard stops blocking. With the journal gone
+        // nextcloudcmd treats the server as authoritative and re-downloads
+        // the folder (delete_guard.rs).
+        if let Some(guard) = &mut self.guard {
+            let _ = guard.restore_from_server();
+        }
         self.delete_alert = None;
         self.delete_bypass_once = false;
         self.request(Trigger::Manual);
@@ -936,6 +979,7 @@ mod tests {
             reason: "mass_local_deletion".to_string(),
             message: "Many files were removed".to_string(),
             can_approve_once: true,
+            ..DeleteAlert::default()
         });
         assert_eq!(scheduler.state().snapshot().state, AppState::DeleteReview);
         scheduler.request(Trigger::RemotePush);
@@ -1054,5 +1098,139 @@ mod tests {
         timers.configure(&settings);
         assert!(timers.local_interval().is_some());
         timers.stop();
+    }
+
+    // ---- deletion guard integration -----------------------------------------
+
+    #[derive(Clone, Default)]
+    struct FakeGuard(Rc<RefCell<FakeGuardState>>);
+
+    #[derive(Default)]
+    struct FakeGuardState {
+        alert: Option<DeleteAlert>,
+        check_calls: usize,
+        record_calls: usize,
+        restore_calls: usize,
+    }
+
+    impl GuardCheck for FakeGuard {
+        fn check(&mut self) -> Option<DeleteAlert> {
+            self.0.borrow_mut().check_calls += 1;
+            self.0.borrow().alert.clone()
+        }
+
+        fn record_current(&mut self) -> bool {
+            self.0.borrow_mut().record_calls += 1;
+            true
+        }
+
+        fn restore_from_server(&mut self) -> usize {
+            self.0.borrow_mut().restore_calls += 1;
+            2
+        }
+    }
+
+    #[test]
+    fn guard_blocks_a_mass_deletion_and_approve_once_bypasses() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        guard.0.borrow_mut().alert = Some(DeleteAlert {
+            reason: "mass_local_deletion".to_string(),
+            message: "An unusual number of local files disappeared".to_string(),
+            missing_paths: vec!["a.txt".to_string(), "b.txt".to_string()],
+            previous_count: 4,
+            current_count: 2,
+            can_approve_once: true,
+        });
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 0);
+        assert_eq!(scheduler.state().snapshot().state, AppState::DeleteReview);
+        assert_eq!(scheduler.queue_len(), 1);
+        assert_eq!(guard.0.borrow().check_calls, 1);
+
+        // The deletion is over; approve once and the run goes through.
+        guard.0.borrow_mut().alert = None;
+        scheduler.approve_delete_once();
+        assert!(source.borrow().pending() >= 1);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn guard_never_runs_while_an_alert_is_already_active() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+        scheduler.set_delete_alert(DeleteAlert {
+            reason: "folder_emptied".to_string(),
+            message: "The folder is empty".to_string(),
+            can_approve_once: true,
+            ..DeleteAlert::default()
+        });
+        scheduler.request(Trigger::RemotePush);
+        // The request is queued and blocked; nothing is scheduled to start.
+        assert_eq!(source.borrow().pending(), 0);
+        assert_eq!(runner.0.borrow().start_calls, 0);
+        assert_eq!(guard.0.borrow().check_calls, 0);
+        assert_eq!(scheduler.queue_len(), 1);
+    }
+
+    #[test]
+    fn restore_from_server_delegates_to_the_guard_and_resumes() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+        scheduler.set_delete_alert(DeleteAlert {
+            reason: "folder_missing".to_string(),
+            message: "The local folder is missing".to_string(),
+            can_approve_once: false,
+            ..DeleteAlert::default()
+        });
+
+        scheduler.restore_from_server();
+        assert_eq!(guard.0.borrow().restore_calls, 1);
+        assert_eq!(scheduler.state().snapshot().state, AppState::SyncQueued);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn successful_run_records_the_guard_baseline() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        assert_eq!(guard.0.borrow().record_calls, 0);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(guard.0.borrow().record_calls, 1);
+    }
+
+    #[test]
+    fn failed_run_does_not_touch_the_baseline() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Failed);
+        assert_eq!(guard.0.borrow().record_calls, 0);
+    }
+
+    #[test]
+    fn conflict_run_records_the_baseline_like_the_python_successful_result() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Conflict);
+        assert_eq!(guard.0.borrow().record_calls, 1);
     }
 }
