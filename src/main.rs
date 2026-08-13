@@ -22,7 +22,9 @@ fn main() {
         .build();
 
     application.connect_startup(|application| {
-        let app = application.downcast_ref::<libadwaita::Application>().unwrap();
+        let app = application
+            .downcast_ref::<libadwaita::Application>()
+            .unwrap();
         let config = match ConfigStore::new().and_then(|store| store.load()) {
             Ok(config) => config,
             Err(error) => {
@@ -36,14 +38,7 @@ fn main() {
         let mut account_manager = AccountManager::new(source);
         account_manager.start(&config);
 
-        let window = MainWindow::new(
-            app,
-            config,
-            account_manager,
-            None,
-            None,
-            None,
-        );
+        let window = MainWindow::new(app, config, account_manager, None, None, None);
         window.window().present();
     });
 

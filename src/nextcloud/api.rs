@@ -1,0 +1,869 @@
+//! Nextcloud HTTP/WebDAV API client.
+//!
+//! Port of `src/nextsync/nextcloud/api.py` (v0.4.0): a synchronous client used
+//! by the remote folder picker (#25) and the setup wizard. Three operations:
+//!
+//! - [`NextcloudApi::validate_credentials`]: OCS user lookup
+//!   (`GET /ocs/v2.php/cloud/user?format=json`) to check a server/user/password
+//!   triple and fetch the account display name.
+//! - [`NextcloudApi::probe_remote`]: shallow WebDAV PROPFIND (Depth 1, no file
+//!   bodies) to check a folder exists and holds at least one entry.
+//! - [`NextcloudApi::list_remote_folders`]: PROPFIND against the account root
+//!   to list existing top-level folders as normalized paths (`/Documents`).
+//!
+//! # HTTP client choice (verified)
+//!
+//! The crate had no HTTP client before this module (Cargo.toml checked).
+//! [`ureq`] 3.2.0 was chosen over `reqwest` blocking because it is:
+//! - synchronous/blocking and pure Rust with a `rustls` TLS backend, matching
+//!   the crate's existing TLS stack (`rustls` 0.23 + `rustls-native-certs`,
+//!   already used by the `tungstenite` push client) — verified in the official
+//!   docs (docs.rs/ureq/3.2.0) and in ureq's `Cargo.toml` (feature `rustls`,
+//!   dependency `rustls ^0.23.22`),
+//! - MSRV 1.71.1 (verified in `Cargo.toml` of the `3.2.0` tag), below the
+//!   crate's declared `rust-version = "1.83"`. ureq 3.3+/3.4 raised the MSRV to
+//!   1.85, so the dependency is pinned with `~3.2` to avoid silently breaking
+//!   the project's declared MSRV on a future `cargo update`.
+//! - able to issue arbitrary HTTP methods (WebDAV PROPFIND): ureq routes any
+//!   `http::Request` through `Agent::run`, and non-standard methods are allowed
+//!   with `allow_non_standard_methods(true)` — the same pattern as ureq's own
+//!   `propfind_with_body` test (`src/lib.rs`, issue #1034).
+//! - status codes are *not* turned into errors (`http_status_as_error(false)`),
+//!   so the API layer maps 401/403 to `ApiError::AuthRejected` and other
+//!   non-2xx codes itself, exactly like the Python.
+//!
+//! The concrete library stays an implementation detail: the module's public
+//! surface only exposes the injectable [`HttpClient`] trait (the Rust analogue
+//! of the Python `HttpClient`), so tests can use a fake backend or a local
+//! server without touching the network or the real HTTP library.
+//!
+//! XML is parsed with [`roxmltree`] (0.21, MSRV 1.60, namespace-aware), the
+//! Rust counterpart of Python's `xml.etree.ElementTree`: the `{DAV:}` expanded
+//! names map to `("DAV:", name)` tuples.
+//!
+//! # Deviations from `api.py` (motivated)
+//!
+//! - The Python API is callback-asynchronous; this port is synchronous and
+//!   returns `Result`, per the crate's module contract.
+//! - `revoke_app_password` is not ported: the Rust rewrite does not manage app
+//!   passwords yet (the wizard uses the user's regular password in the Secret
+//!   Service). Port it when app-password lifecycle lands.
+//! - `validate_credentials` returns `Ok(None)` when the payload has no
+//!   `display-name`, matching the Python (which passes `None` to its callback).
+
+use std::error::Error;
+use std::fmt;
+use std::time::Duration;
+
+use data_encoding::BASE64;
+use roxmltree::{Document, Node};
+
+/// PROPFIND body requesting only `resourcetype` (no file bodies downloaded).
+const PROPFIND_BODY: &[u8] = b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>";
+
+/// Request timeout in seconds, mirroring the Python `HttpClient(timeout=30)`.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// WebDAV namespace URI (the `{DAV:}` of the Python `xml.etree`).
+const DAV_NS: &str = "DAV:";
+
+/// Error returned by the Nextcloud API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiError {
+    /// The server rejected the credentials (HTTP 401/403).
+    AuthRejected,
+    /// The server answered with an unexpected HTTP status.
+    Http { status: u16 },
+    /// The response body was not valid XML or JSON.
+    InvalidResponse,
+    /// Transport-level failure (connection, DNS, TLS, timeout).
+    Transport,
+}
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AuthRejected => f.write_str("The server rejected these credentials."),
+            Self::Http { status } => write!(f, "Nextcloud returned HTTP {status}."),
+            Self::InvalidResponse => f.write_str("Invalid Nextcloud response."),
+            Self::Transport => f.write_str("Network error."),
+        }
+    }
+}
+
+impl Error for ApiError {}
+
+/// A raw HTTP response: status code plus body bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpResponse {
+    /// HTTP status code, including non-2xx (4xx/5xx are not errors).
+    pub status: u16,
+    /// Raw response body.
+    pub body: Vec<u8>,
+}
+
+/// Minimal HTTP transport abstraction, mirror of the Python `HttpClient`.
+///
+/// `request` returns transport failures as `Err(ApiError::Transport)`; every
+/// HTTP status — including 401/403 and 5xx — is delivered as `Ok` in
+/// [`HttpResponse`] so callers can map it themselves (like the Python
+/// `done(status, body, error)` callback).
+pub trait HttpClient {
+    /// Perform an HTTP request and return the status plus the raw body.
+    fn request(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Option<&[u8]>,
+    ) -> Result<HttpResponse, ApiError>;
+}
+
+/// One `<d:response>` of a PROPFIND multistatus, pre-normalized.
+struct PropfindEntry {
+    /// `urlsplit(href).path` with the trailing slash stripped.
+    href_path: String,
+    /// Whether the resource is a collection (`<d:collection/>`).
+    is_collection: bool,
+}
+
+/// Nextcloud HTTP API client (remote folder picker + setup wizard).
+pub struct NextcloudApi {
+    http: Box<dyn HttpClient>,
+}
+
+impl NextcloudApi {
+    /// Create a client with the production HTTP backend (ureq + rustls).
+    pub fn new() -> Self {
+        Self::with_http(Box::new(UreqHttpClient::new()))
+    }
+
+    /// Create a client with a custom transport (tests inject a fake here).
+    pub fn with_http(http: Box<dyn HttpClient>) -> Self {
+        Self { http }
+    }
+
+    /// Validate credentials against the OCS user endpoint.
+    ///
+    /// Returns the account's `display-name`, or `Ok(None)` when the payload
+    /// does not carry one. HTTP 401/403 map to [`ApiError::AuthRejected`].
+    pub fn validate_credentials(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let url = format!(
+            "{}/ocs/v2.php/cloud/user?format=json",
+            server.trim_end_matches('/')
+        );
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Accept", "application/json"),
+            ("OCS-APIREQUEST", "true"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self.http.request("GET", &url, &headers, None)?;
+        map_status(response.status)?;
+        let payload: serde_json::Value =
+            serde_json::from_slice(&response.body).map_err(|_| ApiError::InvalidResponse)?;
+        let display_name = payload
+            .get("ocs")
+            .and_then(|ocs| ocs.get("data"))
+            .and_then(|data| data.get("display-name"))
+            .and_then(|name| name.as_str())
+            .map(str::to_owned);
+        Ok(display_name)
+    }
+
+    /// Probe whether a remote folder exists and holds at least one entry,
+    /// using a shallow PROPFIND (Depth 1, no file bodies).
+    ///
+    /// `remote_path` uses the normalized config form (`""` for the account
+    /// root, otherwise `/Documents`). A `true` result means the folder exists
+    /// and has at least one child.
+    pub fn probe_remote(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+        remote_path: &str,
+    ) -> Result<bool, ApiError> {
+        let base = dav_base(server, username);
+        let folder = format!("{base}{}/", remote_path.trim_end_matches('/'));
+        let folder_path = href_path_of(&folder).to_owned();
+        let entries = self.propfind(&folder, username, password)?;
+        let children = entries
+            .iter()
+            .filter(|entry| entry.href_path != folder_path)
+            .count();
+        Ok(children > 0)
+    }
+
+    /// List the top-level folders that already exist for the account.
+    ///
+    /// Files and special collections (hidden, trash, versions) are excluded; a
+    /// root without subfolders yields an empty list. Paths are normalized
+    /// (`/Documents`, `/Photos`) and sorted.
+    pub fn list_remote_folders(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Vec<String>, ApiError> {
+        let base = dav_base(server, username);
+        let url = format!("{base}/");
+        let root_path = href_path_of(&url).to_owned();
+        let entries = self.propfind(&url, username, password)?;
+        let mut folders = Vec::new();
+        for entry in entries {
+            if entry.href_path == root_path {
+                continue;
+            }
+            if !entry.is_collection {
+                continue;
+            }
+            let segments: Vec<&str> = entry.href_path.split('/').collect();
+            if segments.iter().any(|segment| {
+                segment.starts_with('.')
+                    || segment.contains("trashbin")
+                    || segment.contains("trash")
+                    || segment.contains("versions")
+            }) {
+                continue;
+            }
+            let name = entry.href_path.rsplit('/').next().unwrap_or_default();
+            folders.push(format!("/{name}"));
+        }
+        folders.sort();
+        Ok(folders)
+    }
+
+    /// Run a Depth-1 PROPFIND and parse the multistatus response.
+    fn propfind(
+        &self,
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Vec<PropfindEntry>, ApiError> {
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Depth", "1"),
+            ("Content-Type", "application/xml; charset=utf-8"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self
+            .http
+            .request("PROPFIND", url, &headers, Some(PROPFIND_BODY))?;
+        map_status(response.status)?;
+        parse_multistatus(&response.body)
+    }
+}
+
+impl Default for NextcloudApi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Base URL of the per-user WebDAV root.
+fn dav_base(server: &str, username: &str) -> String {
+    format!(
+        "{}/remote.php/dav/files/{username}",
+        server.trim_end_matches('/')
+    )
+}
+
+/// `Basic base64(user:pass)` header value (same as the Python
+/// `basic_authorization`).
+fn basic_authorization(username: &str, password: &str) -> String {
+    let encoded = BASE64.encode(format!("{username}:{password}").as_bytes());
+    format!("Basic {encoded}")
+}
+
+/// Map a status code to an error, replicating the Python `done` mapping.
+fn map_status(status: u16) -> Result<(), ApiError> {
+    if status == 401 || status == 403 {
+        return Err(ApiError::AuthRejected);
+    }
+    if !(200..300).contains(&status) {
+        return Err(ApiError::Http { status });
+    }
+    Ok(())
+}
+
+/// `urlsplit(value).path` with the trailing slash stripped (Python semantics).
+///
+/// Drops the scheme and authority when the href is an absolute URL, keeping
+/// only the path component (e.g. `/remote.php/dav/files/alice/Documents`).
+fn href_path_of(value: &str) -> &str {
+    let without_scheme = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+        .unwrap_or(value);
+    let path = match without_scheme.find('/') {
+        Some(index) => &without_scheme[index..],
+        None => "",
+    };
+    path.trim_end_matches('/')
+}
+
+/// Parse a PROPFIND multistatus body into normalized entries.
+fn parse_multistatus(body: &[u8]) -> Result<Vec<PropfindEntry>, ApiError> {
+    let text = std::str::from_utf8(body).map_err(|_| ApiError::InvalidResponse)?;
+    let doc = Document::parse(text).map_err(|_| ApiError::InvalidResponse)?;
+    let mut entries = Vec::new();
+    for response in doc
+        .descendants()
+        .filter(|node| node.has_tag_name((DAV_NS, "response")))
+    {
+        let href = response
+            .descendants()
+            .find(|node| node.has_tag_name((DAV_NS, "href")))
+            .and_then(|node| node.text())
+            .unwrap_or("");
+        let href_path = href_path_of(href).to_owned();
+        let is_collection = find_resource_type(response)
+            .map(|resource_type| {
+                resource_type
+                    .descendants()
+                    .any(|node| node.has_tag_name((DAV_NS, "collection")))
+            })
+            .unwrap_or(false);
+        entries.push(PropfindEntry {
+            href_path,
+            is_collection,
+        });
+    }
+    Ok(entries)
+}
+
+/// Find the `<d:propstat>/<d:prop>/<d:resourcetype>` node of a response.
+fn find_resource_type<'a, 'input>(response: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+    response
+        .descendants()
+        .find(|node| node.has_tag_name((DAV_NS, "propstat")))
+        .and_then(|propstat| {
+            propstat
+                .descendants()
+                .find(|node| node.has_tag_name((DAV_NS, "prop")))
+        })
+        .and_then(|prop| {
+            prop.descendants()
+                .find(|node| node.has_tag_name((DAV_NS, "resourcetype")))
+        })
+}
+
+/// Production HTTP transport backed by ureq 3.2 + rustls with system roots.
+struct UreqHttpClient {
+    agent: ureq::Agent,
+}
+
+impl UreqHttpClient {
+    /// Build the ureq agent:
+    /// - status codes delivered as responses, not errors (the API maps them),
+    /// - non-standard methods allowed (WebDAV PROPFIND),
+    /// - 30 s global timeout (mirrors the Python),
+    /// - system trust store via `rustls-native-certs` (same as the push client),
+    /// - explicit `aws-lc-rs` CryptoProvider: ureq is built with
+    ///   `rustls-no-provider` so its default `ring` provider never clashes with
+    ///   the crate's `aws-lc-rs` (the process must expose exactly one provider).
+    fn new() -> Self {
+        let native = rustls_native_certs::load_native_certs();
+        let certs: Vec<ureq::tls::Certificate<'static>> = native
+            .certs
+            .iter()
+            .map(|cert| ureq::tls::Certificate::from_der(cert.as_ref()).to_owned())
+            .collect();
+        let crypto = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let tls = ureq::tls::TlsConfig::builder()
+            .provider(ureq::tls::TlsProvider::Rustls)
+            .unversioned_rustls_crypto_provider(crypto)
+            .root_certs(ureq::tls::RootCerts::new_with_certs(&certs))
+            .build();
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .allow_non_standard_methods(true)
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .tls_config(tls)
+            .build()
+            .new_agent();
+        Self { agent }
+    }
+}
+
+impl HttpClient for UreqHttpClient {
+    fn request(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Option<&[u8]>,
+    ) -> Result<HttpResponse, ApiError> {
+        let method =
+            ureq::http::Method::from_bytes(method.as_bytes()).map_err(|_| ApiError::Transport)?;
+        let mut builder = ureq::http::Request::builder().method(method).uri(url);
+        for (key, value) in headers {
+            builder = builder.header(*key, *value);
+        }
+        let mut response = match body {
+            Some(bytes) => {
+                let request = builder
+                    .body(bytes.to_vec())
+                    .map_err(|_| ApiError::Transport)?;
+                self.agent.run(request)
+            }
+            None => {
+                let request = builder.body(()).map_err(|_| ApiError::Transport)?;
+                self.agent.run(request)
+            }
+        }
+        .map_err(|_| ApiError::Transport)?;
+        let status = response.status().as_u16();
+        let body = response
+            .body_mut()
+            .read_to_vec()
+            .map_err(|_| ApiError::Transport)?;
+        Ok(HttpResponse { status, body })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    const EMPTY_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const POPULATED_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/</d:href>
+    <d:propstat><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Documents/</d:href>
+    <d:propstat><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/report.pdf</d:href>
+    <d:propstat><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const COLLECTIONS_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Documents/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Photos/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/report.pdf</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const SPECIAL_COLLECTIONS_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/.hidden/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/files_trashbin/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Documents/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const USER_JSON: &[u8] = br#"{"ocs":{"data":{"id":"alice","display-name":"Alice Example"}}}"#;
+
+    /// Deterministic fake transport, mirroring the Python `_FakeHttp`.
+    #[derive(Default)]
+    struct FakeHttp {
+        status: u16,
+        body: Vec<u8>,
+        requests: Rc<RefCell<Vec<RecordedRequest>>>,
+    }
+
+    impl FakeHttp {
+        fn new(status: u16, body: &[u8]) -> Self {
+            Self {
+                status,
+                body: body.to_vec(),
+                requests: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct RecordedRequest {
+        method: String,
+        url: String,
+        headers: Vec<(String, String)>,
+        body: Option<Vec<u8>>,
+    }
+
+    impl HttpClient for FakeHttp {
+        fn request(
+            &self,
+            method: &str,
+            url: &str,
+            headers: &[(&str, &str)],
+            body: Option<&[u8]>,
+        ) -> Result<HttpResponse, ApiError> {
+            self.requests.borrow_mut().push(RecordedRequest {
+                method: method.to_owned(),
+                url: url.to_owned(),
+                headers: headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                body: body.map(<[u8]>::to_vec),
+            });
+            Ok(HttpResponse {
+                status: self.status,
+                body: self.body.clone(),
+            })
+        }
+    }
+
+    fn header_value<'a>(request: &'a RecordedRequest, name: &str) -> Option<&'a str> {
+        request
+            .headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    // ---- probe_remote -------------------------------------------------------
+
+    #[test]
+    fn probe_empty_folder_returns_false() {
+        let http = FakeHttp::new(207, EMPTY_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(!api
+            .probe_remote("https://cloud.example.com", "alice", "secret", "")
+            .unwrap());
+    }
+
+    #[test]
+    fn probe_populated_folder_returns_true() {
+        let http = FakeHttp::new(207, POPULATED_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(api
+            .probe_remote("https://cloud.example.com", "alice", "secret", "")
+            .unwrap());
+    }
+
+    #[test]
+    fn probe_uses_depth_one_with_auth_header() {
+        let http = FakeHttp::new(207, EMPTY_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.probe_remote("https://cloud.example.com", "alice", "secret", "")
+            .unwrap();
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "PROPFIND");
+        assert_eq!(header_value(request, "Depth"), Some("1"));
+        assert!(header_value(request, "Authorization")
+            .unwrap()
+            .starts_with("Basic "));
+        assert!(request.url.ends_with("/remote.php/dav/files/alice/"));
+        assert!(request.body.is_some());
+    }
+
+    #[test]
+    fn probe_appends_remote_path_to_the_folder() {
+        let http = FakeHttp::new(207, EMPTY_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.probe_remote("https://cloud.example.com", "alice", "secret", "/Documents")
+            .unwrap();
+        let request = &requests.borrow()[0];
+        assert!(request.url.ends_with("/Documents/"));
+    }
+
+    #[test]
+    fn probe_http_error_surfaces() {
+        let http = FakeHttp::new(500, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.probe_remote("https://cloud.example.com", "alice", "secret", ""),
+            Err(ApiError::Http { status: 500 })
+        );
+    }
+
+    #[test]
+    fn probe_auth_rejection_surfaces() {
+        let http = FakeHttp::new(401, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.probe_remote("https://cloud.example.com", "alice", "secret", ""),
+            Err(ApiError::AuthRejected)
+        );
+    }
+
+    #[test]
+    fn probe_malformed_xml_surfaces() {
+        let http = FakeHttp::new(207, b"not xml");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.probe_remote("https://cloud.example.com", "alice", "secret", ""),
+            Err(ApiError::InvalidResponse)
+        );
+    }
+
+    // ---- list_remote_folders ----------------------------------------------
+
+    #[test]
+    fn list_returns_existing_top_level_folders_only() {
+        let http = FakeHttp::new(207, COLLECTIONS_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let folders = api
+            .list_remote_folders("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert_eq!(folders, ["/Documents", "/Photos"]);
+    }
+
+    #[test]
+    fn list_ignores_hidden_and_trash_collections() {
+        let http = FakeHttp::new(207, SPECIAL_COLLECTIONS_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let folders = api
+            .list_remote_folders("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert_eq!(folders, ["/Documents"]);
+    }
+
+    #[test]
+    fn list_empty_root_returns_no_folders() {
+        let http = FakeHttp::new(207, EMPTY_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let folders = api
+            .list_remote_folders("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert!(folders.is_empty());
+    }
+
+    #[test]
+    fn list_auth_rejection_surfaces() {
+        let http = FakeHttp::new(403, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.list_remote_folders("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::AuthRejected)
+        );
+    }
+
+    #[test]
+    fn list_malformed_xml_surfaces() {
+        let http = FakeHttp::new(207, b"not xml");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.list_remote_folders("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn list_probes_the_account_root_with_depth_one() {
+        let http = FakeHttp::new(207, COLLECTIONS_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.list_remote_folders("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "PROPFIND");
+        assert_eq!(header_value(request, "Depth"), Some("1"));
+        assert!(request.url.ends_with("/remote.php/dav/files/alice/"));
+    }
+
+    // ---- validate_credentials ----------------------------------------------
+
+    #[test]
+    fn validate_returns_display_name() {
+        let http = FakeHttp::new(200, USER_JSON);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let display = api
+            .validate_credentials("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert_eq!(display.as_deref(), Some("Alice Example"));
+    }
+
+    #[test]
+    fn validate_missing_display_name_returns_none() {
+        let http = FakeHttp::new(200, br#"{"ocs":{"data":{"id":"alice"}}}"#);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let display = api
+            .validate_credentials("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert_eq!(display, None);
+    }
+
+    #[test]
+    fn validate_sends_ocs_headers() {
+        let http = FakeHttp::new(200, USER_JSON);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.validate_credentials("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "GET");
+        assert_eq!(header_value(request, "Accept"), Some("application/json"));
+        assert_eq!(header_value(request, "OCS-APIREQUEST"), Some("true"));
+        assert!(header_value(request, "Authorization")
+            .unwrap()
+            .starts_with("Basic "));
+        assert!(request.url.ends_with("/ocs/v2.php/cloud/user?format=json"));
+    }
+
+    #[test]
+    fn validate_auth_rejection_surfaces() {
+        for status in [401, 403] {
+            let http = FakeHttp::new(status, b"");
+            let api = NextcloudApi::with_http(Box::new(http));
+            assert_eq!(
+                api.validate_credentials("https://cloud.example.com", "alice", "secret"),
+                Err(ApiError::AuthRejected)
+            );
+        }
+    }
+
+    #[test]
+    fn validate_http_error_surfaces() {
+        let http = FakeHttp::new(503, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.validate_credentials("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::Http { status: 503 })
+        );
+    }
+
+    #[test]
+    fn validate_invalid_json_surfaces() {
+        let http = FakeHttp::new(200, b"not json");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.validate_credentials("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn transport_error_surfaces() {
+        struct Failing;
+        impl HttpClient for Failing {
+            fn request(
+                &self,
+                _method: &str,
+                _url: &str,
+                _headers: &[(&str, &str)],
+                _body: Option<&[u8]>,
+            ) -> Result<HttpResponse, ApiError> {
+                Err(ApiError::Transport)
+            }
+        }
+        let api = NextcloudApi::with_http(Box::new(Failing));
+        assert_eq!(
+            api.validate_credentials("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::Transport)
+        );
+    }
+
+    // ---- integration with a real local server ------------------------------
+
+    /// Runs a one-shot tiny_http server that answers a PROPFIND with a fixture,
+    /// exercising the real ureq transport end to end (localhost only, no net).
+    #[test]
+    fn integration_list_against_local_server() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let base = format!("http://{addr}");
+        let handle = std::thread::spawn(move || {
+            let request = server.recv().unwrap();
+            assert_eq!(request.method().as_str(), "PROPFIND");
+            request
+                .respond(
+                    tiny_http::Response::from_string(
+                        String::from_utf8_lossy(COLLECTIONS_PROPFIND).into_owned(),
+                    )
+                    .with_status_code(207),
+                )
+                .unwrap();
+        });
+
+        let api = NextcloudApi::new();
+        let folders = api.list_remote_folders(&base, "alice", "secret").unwrap();
+        assert_eq!(folders, ["/Documents", "/Photos"]);
+        handle.join().unwrap();
+    }
+
+    /// The real transport maps a local 401 to `AuthRejected`.
+    #[test]
+    fn integration_auth_rejection_against_local_server() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let base = format!("http://{addr}");
+        let handle = std::thread::spawn(move || {
+            let request = server.recv().unwrap();
+            request
+                .respond(tiny_http::Response::from_string("denied").with_status_code(401))
+                .unwrap();
+        });
+
+        let api = NextcloudApi::new();
+        let result = api.list_remote_folders(&base, "alice", "secret");
+        assert_eq!(result, Err(ApiError::AuthRejected));
+        handle.join().unwrap();
+    }
+}
