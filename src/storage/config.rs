@@ -333,6 +333,25 @@ pub fn folder_fingerprint(
     sha256_hex(identity.as_bytes())
 }
 
+/// Choose the remote folder path for the Add Folder dialog.
+///
+/// A literally empty remote field (whitespace only) maps to a remote folder
+/// named after the local folder, e.g. `/home/user/NextCloud` becomes
+/// `/NextCloud`. An explicit `/` keeps the account-root mapping (`""`); any
+/// other value is normalized as typed.
+pub fn remote_path_for(local_root: &str, remote_text: &str) -> Result<String, ConfigError> {
+    let text = remote_text.trim();
+    if text.is_empty() {
+        let expanded = expanduser(local_root);
+        let name = expanded
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        return normalize_remote_path(&format!("/{name}"));
+    }
+    normalize_remote_path(text)
+}
+
 /// Validate an exclusion pattern (mirror of `exclusions.validate_pattern`).
 pub fn validate_pattern(pattern: &str) -> Result<String, ConfigError> {
     let candidate = pattern.trim();
@@ -515,6 +534,131 @@ impl ConfigStore {
                 error
             )));
         }
+        Ok(())
+    }
+
+    /// Add a validated account, persisting immediately. The account is
+    /// re-validated and normalized (server URL, login name, folder
+    /// fingerprints) exactly like a freshly loaded file, mirroring the Python
+    /// `add_account` which runs `_validate_account`. Returns the account id.
+    pub fn add_account(&self, account: &AccountConfig) -> Result<String, ConfigError> {
+        let value = serde_json::to_value(account)
+            .map_err(|error| ConfigError::new(format!("Could not serialize account: {error}")))?;
+        let validated = validate_account(&value)?;
+        let mut config = self.load()?;
+        if config.accounts.iter().any(|item| item.id == validated.id) {
+            return Err(ConfigError::new(
+                "An account with the same server and username already exists.",
+            ));
+        }
+        let id = validated.id.clone();
+        config.accounts.push(validated);
+        self.save(&config)?;
+        Ok(id)
+    }
+
+    /// Remove an account by id, returning `false` when it did not exist.
+    pub fn remove_account(&self, account_id: &str) -> Result<bool, ConfigError> {
+        let mut config = self.load()?;
+        let before = config.accounts.len();
+        config.accounts.retain(|item| item.id != account_id);
+        if config.accounts.len() == before {
+            return Ok(false);
+        }
+        self.save(&config)?;
+        Ok(true)
+    }
+
+    /// Fetch one account by id.
+    pub fn account(&self, account_id: &str) -> Result<Option<AccountConfig>, ConfigError> {
+        let config = self.load()?;
+        Ok(config
+            .accounts
+            .into_iter()
+            .find(|item| item.id == account_id))
+    }
+
+    /// Add a folder to an account, recomputing the fingerprint over the
+    /// normalized local root and remote path (mirrors the Python `add_folder`).
+    pub fn add_folder(
+        &self,
+        account_id: &str,
+        folder: &FolderConfig,
+    ) -> Result<String, ConfigError> {
+        let mut config = self.load()?;
+        let account = config
+            .accounts
+            .iter_mut()
+            .find(|item| item.id == account_id)
+            .ok_or_else(|| ConfigError::new("Account not found."))?;
+        let root = expanduser(&folder.local_root);
+        if !root.is_absolute() {
+            return Err(ConfigError::new(
+                "The local synchronization folder must be absolute.",
+            ));
+        }
+        let local_root = root.to_string_lossy().into_owned();
+        let remote_path = normalize_remote_path(&folder.remote_path)?;
+        let id = folder_fingerprint(
+            &account.server_url,
+            &account.login_name,
+            &local_root,
+            &remote_path,
+        );
+        if account.folders.iter().any(|item| item.id == id) {
+            return Err(ConfigError::new("This local folder is already configured."));
+        }
+        account.folders.push(FolderConfig {
+            id: id.clone(),
+            local_root,
+            remote_path,
+            space_id: folder.space_id.clone(),
+        });
+        self.save(&config)?;
+        Ok(id)
+    }
+
+    /// Remove a folder from an account, returning `false` when it (or the
+    /// account) did not exist.
+    pub fn remove_folder(&self, account_id: &str, folder_id: &str) -> Result<bool, ConfigError> {
+        let mut config = self.load()?;
+        let account = config
+            .accounts
+            .iter_mut()
+            .find(|item| item.id == account_id);
+        let Some(account) = account else {
+            return Ok(false);
+        };
+        let before = account.folders.len();
+        account.folders.retain(|item| item.id != folder_id);
+        if account.folders.len() == before {
+            return Ok(false);
+        }
+        self.save(&config)?;
+        Ok(true)
+    }
+
+    /// Replace the stored account that matches `account.id` and persist
+    /// (mirrors the Python `_sync_back` + `save` used by Settings). When the
+    /// incoming account carries no id, it is recomputed from its identity.
+    pub fn update_account(&self, account: &AccountConfig) -> Result<(), ConfigError> {
+        let lookup_id = if account.id.is_empty() {
+            account_id(&account.server_url, &account.login_name)
+        } else {
+            account.id.clone()
+        };
+        let mut config = self.load()?;
+        let index = config
+            .accounts
+            .iter()
+            .position(|item| item.id == lookup_id)
+            .ok_or_else(|| ConfigError::new("Account not found."))?;
+        let mut updated = account.clone();
+        if updated.id.is_empty() {
+            updated.id = lookup_id;
+        }
+        config.accounts[index] = updated;
+        self.save(&config)?;
         Ok(())
     }
 }
@@ -1586,5 +1730,246 @@ mod tests {
             );
         }
         assert_eq!(validate_pattern("  *.tmp ").unwrap(), "*.tmp");
+    }
+
+    // ---- remote_path_for --------------------------------------------------
+
+    #[test]
+    fn remote_path_for_blank_uses_local_folder_name() {
+        assert_eq!(
+            remote_path_for("/home/user/NextCloud", "").unwrap(),
+            "/NextCloud"
+        );
+        assert_eq!(
+            remote_path_for("/home/user/NextCloud", "   ").unwrap(),
+            "/NextCloud"
+        );
+        assert_eq!(remote_path_for("~/NextCloud", "").unwrap(), "/NextCloud");
+    }
+
+    #[test]
+    fn remote_path_for_explicit_root_keeps_account_root() {
+        assert_eq!(remote_path_for("/home/user/NextCloud", "/").unwrap(), "");
+    }
+
+    #[test]
+    fn remote_path_for_typed_value_is_normalized() {
+        assert_eq!(
+            remote_path_for("/home/user/NextCloud", "Documents").unwrap(),
+            "/Documents"
+        );
+        assert_eq!(
+            remote_path_for("/home/user/NextCloud", "/Documents/").unwrap(),
+            "/Documents"
+        );
+    }
+
+    // ---- account mutations -------------------------------------------------
+
+    fn account_fixture(server_url: &str, login_name: &str) -> AccountConfig {
+        AccountConfig {
+            id: account_id(server_url, login_name),
+            server_url: server_url.to_string(),
+            login_name: login_name.to_string(),
+            authentication_type: "browser".to_string(),
+            provider: Provider::Nextcloud,
+            folders: Vec::new(),
+            sync: SyncConfig::default(),
+            delete_guard: DeleteGuardConfig::default(),
+            runtime: RuntimeConfig::default(),
+        }
+    }
+
+    fn folder_fixture(local_root: &str, remote_path: &str) -> FolderConfig {
+        FolderConfig {
+            id: "bogus-id".to_string(),
+            local_root: local_root.to_string(),
+            remote_path: remote_path.to_string(),
+            space_id: None,
+        }
+    }
+
+    #[test]
+    fn add_and_remove_account_round_trip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = ConfigStore::with_path(path.clone());
+
+        let first_id = store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+        let second_id = store
+            .add_account(&account_fixture("https://work.example.com", "bob"))
+            .unwrap();
+        assert_ne!(first_id, second_id);
+        assert_eq!(
+            store.account(&first_id).unwrap().unwrap().login_name,
+            "alice"
+        );
+
+        assert!(store.remove_account(&second_id).unwrap());
+        assert!(store.account(&second_id).unwrap().is_none());
+        assert!(!store.remove_account(&second_id).unwrap());
+
+        let reloaded = ConfigStore::with_path(path);
+        let config = reloaded.load().unwrap();
+        assert_eq!(config.accounts.len(), 1);
+        assert_eq!(config.accounts[0].login_name, "alice");
+    }
+
+    #[test]
+    fn add_duplicate_account_is_rejected() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+        let err = store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap_err();
+        assert!(err.message.contains("same server and username"));
+
+        let err = store
+            .add_account(&account_fixture("https://cloud.example.com", "ALICE"))
+            .unwrap_err();
+        assert!(err.message.contains("same server and username"));
+    }
+
+    #[test]
+    fn add_account_normalizes_server_url() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        let id = store
+            .add_account(&account_fixture("HTTPS://cloud.example.com/", "alice"))
+            .unwrap();
+        let stored = store.account(&id).unwrap().unwrap();
+        assert_eq!(stored.server_url, "https://cloud.example.com");
+    }
+
+    #[test]
+    fn account_getter_returns_none_for_missing() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        assert!(store.account("missing").unwrap().is_none());
+    }
+
+    // ---- folder mutations -------------------------------------------------
+
+    #[test]
+    fn add_and_remove_folder_idempotent() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        let account_id = store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+
+        let first_id = store
+            .add_folder(&account_id, &folder_fixture("/tmp/NextCloud", ""))
+            .unwrap();
+        // The id is recomputed over normalized values, ignoring the caller's.
+        assert_eq!(
+            first_id,
+            folder_fingerprint("https://cloud.example.com", "alice", "/tmp/NextCloud", "")
+        );
+
+        let second_id = store
+            .add_folder(&account_id, &folder_fixture("/tmp/Second", "Docs"))
+            .unwrap();
+        let account = store.account(&account_id).unwrap().unwrap();
+        assert_eq!(account.folders.len(), 2);
+        assert_eq!(account.folders[1].local_root, "/tmp/Second");
+        assert_eq!(account.folders[1].remote_path, "/Docs");
+        assert_eq!(account.folders[1].id, second_id);
+
+        let err = store
+            .add_folder(&account_id, &folder_fixture("/tmp/NextCloud", ""))
+            .unwrap_err();
+        assert!(err.message.contains("already configured"));
+
+        assert!(store.remove_folder(&account_id, &second_id).unwrap());
+        assert_eq!(
+            store.account(&account_id).unwrap().unwrap().folders.len(),
+            1
+        );
+        assert!(!store.remove_folder(&account_id, &second_id).unwrap());
+        assert!(!store.remove_folder("missing", &second_id).unwrap());
+    }
+
+    #[test]
+    fn add_folder_rejects_relative_local_root_and_missing_account() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        let account_id = store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+
+        let err = store
+            .add_folder(&account_id, &folder_fixture("relative/path", ""))
+            .unwrap_err();
+        assert!(err.message.contains("must be absolute"));
+
+        let err = store
+            .add_folder("missing", &folder_fixture("/tmp/X", ""))
+            .unwrap_err();
+        assert!(err.message.contains("Account not found."));
+    }
+
+    // ---- update_account ---------------------------------------------------
+
+    #[test]
+    fn update_account_persists_changes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = ConfigStore::with_path(path.clone());
+        let id = store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+
+        let mut account = store.account(&id).unwrap().unwrap();
+        account.sync.local_interval_minutes = 42;
+        account.delete_guard.enabled = false;
+        account.runtime.last_exit_code = Some(7);
+        store.update_account(&account).unwrap();
+
+        let reloaded = ConfigStore::with_path(path);
+        let stored = &reloaded.load().unwrap().accounts[0];
+        assert_eq!(stored.sync.local_interval_minutes, 42);
+        assert!(!stored.delete_guard.enabled);
+        assert_eq!(stored.runtime.last_exit_code, Some(7));
+        assert_eq!(stored.id, id);
+    }
+
+    #[test]
+    fn update_account_missing_is_an_error() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        let account = account_fixture("https://cloud.example.com", "alice");
+        let err = store.update_account(&account).unwrap_err();
+        assert!(err.message.contains("Account not found."));
+    }
+
+    // ---- persistence ------------------------------------------------------
+
+    #[test]
+    fn mutations_persist_across_stores() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let writer = ConfigStore::with_path(path.clone());
+        let id = writer
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+        writer
+            .add_folder(&id, &folder_fixture("/tmp/NextCloud", ""))
+            .unwrap();
+        writer
+            .add_folder(&id, &folder_fixture("/tmp/Docs", "/Documents"))
+            .unwrap();
+
+        let reader = ConfigStore::with_path(path);
+        let config = reader.load().unwrap();
+        assert_eq!(config.accounts.len(), 1);
+        assert_eq!(config.accounts[0].folders.len(), 2);
+        let account = reader.account(&id).unwrap().unwrap();
+        assert_eq!(account.folders[1].remote_path, "/Documents");
     }
 }
