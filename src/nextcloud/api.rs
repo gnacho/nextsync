@@ -355,8 +355,14 @@ fn find_resource_type<'a, 'input>(response: Node<'a, 'input>) -> Option<Node<'a,
 }
 
 /// Production HTTP transport backed by ureq 3.2 + rustls with system roots.
-struct UreqHttpClient {
+pub struct UreqHttpClient {
     agent: ureq::Agent,
+}
+
+impl Default for UreqHttpClient {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UreqHttpClient {
@@ -368,7 +374,7 @@ impl UreqHttpClient {
     /// - explicit `aws-lc-rs` CryptoProvider: ureq is built with
     ///   `rustls-no-provider` so its default `ring` provider never clashes with
     ///   the crate's `aws-lc-rs` (the process must expose exactly one provider).
-    fn new() -> Self {
+    pub fn new() -> Self {
         let native = rustls_native_certs::load_native_certs();
         let certs: Vec<ureq::tls::Certificate<'static>> = native
             .certs
