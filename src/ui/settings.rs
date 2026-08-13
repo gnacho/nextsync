@@ -15,9 +15,8 @@
 //!   [`SettingsCallbacks`] closures. The live Diagnostics rows (inotify
 //!   watches, push state) are dropped because the window has no handle to the
 //!   runtimes; `runtime.last_exit_code` is shown instead.
-//! - Autostart is only persisted to the configuration; `core::autostart` is a
-//!   placeholder, so writing the desktop autostart entry is deferred to
-//!   Task 5.6.
+//! - Autostart is persisted to the configuration and mirrored into the
+//!   desktop session immediately (atomic `~/.config/autostart` entry).
 //! - The Add Folder dialog is rebuilt on every open so a failed attempt can
 //!   show an inline error label; the previous values are carried over.
 //!   libadwaita 0.9 `AlertDialog` closes on response, so errors surface as
@@ -719,6 +718,12 @@ fn save_general(
         config.general.pause_on_battery = pause.is_active();
     }) {
         eprintln!("Settings: could not save general settings: {error}");
+    }
+    // Reflect the startup preference in the desktop session immediately
+    // (atomic desktop-entry write under ~/.config/autostart).
+    let enabled = autostart.is_active();
+    if let Err(error) = crate::core::autostart::AutostartManager::new(None).set_enabled(enabled) {
+        eprintln!("Settings: could not update the autostart entry: {error}");
     }
 }
 
