@@ -9,10 +9,13 @@
 //! every change; when no controller is available it renders the
 //! `Unconfigured` presentation statically.
 
+use std::path::Path;
 use std::rc::Rc;
 
+use libadwaita::prelude::*;
+
 use crate::core::account_runtime::FolderRuntime;
-use crate::state::{AppState, StateController};
+use crate::state::{AppState, StateController, StateSnapshot};
 use crate::storage::config::FolderConfig;
 
 /// The `(icon_name, status_label)` pair for a folder state, mirroring the
@@ -72,39 +75,201 @@ pub fn pair_folder_runtimes(
         .collect()
 }
 
-/// A GTK action row rendering one synchronized folder with live status.
-pub struct FolderStatusRow {
-    // The live folder runtime handle; kept alive while the row exists.
-    #[allow(dead_code)]
-    runtime: Option<FolderRuntime>,
-    _subscription: Option<Rc<dyn Fn()>>,
-}
-
-impl FolderStatusRow {
-    /// Build the row for one folder. `state` drives the live rendering;
-    /// `callbacks` wire the menu actions (each may be `None` to omit the item).
-    pub fn new(
-        _folder: FolderConfig,
-        _state: Option<StateController>,
-        _runtime: Option<FolderRuntime>,
-        _callbacks: FolderRowCallbacks,
-    ) -> Self {
-        Self {
-            runtime: _runtime,
-            _subscription: None,
-        }
-    }
-}
-
 /// Per-folder menu callbacks. All optional; the corresponding menu item is
 /// omitted when `None`.
 #[derive(Default)]
 pub struct FolderRowCallbacks {
-    pub on_open: Option<Box<dyn Fn()>>,
-    pub on_edit_ignored: Option<Box<dyn Fn()>>,
-    pub on_force_sync: Option<Box<dyn Fn()>>,
-    pub on_toggle_pause: Option<Box<dyn Fn()>>,
-    pub on_remove: Option<Box<dyn Fn()>>,
+    pub on_open: Option<Rc<dyn Fn()>>,
+    pub on_edit_ignored: Option<Rc<dyn Fn()>>,
+    pub on_force_sync: Option<Rc<dyn Fn()>>,
+    pub on_toggle_pause: Option<Rc<dyn Fn()>>,
+    pub on_remove: Option<Rc<dyn Fn()>>,
+}
+
+/// A GTK action row rendering one synchronized folder with live status.
+pub struct FolderStatusRow {
+    pub row: libadwaita::ActionRow,
+    icon: gtk4::Image,
+    spinner: gtk4::Spinner,
+    _menu_button: gtk4::MenuButton,
+    _actions: std::collections::HashMap<String, gio::SimpleAction>,
+    format_last_sync: Option<Rc<dyn Fn() -> String>>,
+    remote_path: String,
+    _subscription: Option<crate::state::Subscription>,
+}
+
+impl FolderStatusRow {
+    /// Build the row for one folder. `state` drives the live rendering.
+    pub fn new(
+        folder: FolderConfig,
+        state: Option<StateController>,
+        callbacks: FolderRowCallbacks,
+        format_last_sync: Option<Rc<dyn Fn() -> String>>,
+        is_paused: Option<Rc<dyn Fn() -> bool>>,
+    ) -> Self {
+        let name = Path::new(&folder.local_root)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| folder.local_root.clone());
+        let row = libadwaita::ActionRow::builder()
+            .title(name)
+            .title_lines(1)
+            .subtitle_lines(1)
+            .activatable(true)
+            .selectable(false)
+            .build();
+
+        let icon = gtk4::Image::builder()
+            .icon_name("folder-symbolic")
+            .pixel_size(16)
+            .build();
+        row.add_prefix(&icon);
+
+        let spinner = gtk4::Spinner::builder().build();
+        spinner.set_visible(false);
+        row.add_suffix(&spinner);
+
+        let menu_button = gtk4::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .tooltip_text("Folder options")
+            .valign(gtk4::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        row.add_suffix(&menu_button);
+
+        let menu_actions = gio::SimpleActionGroup::new();
+        row.insert_action_group("folder", Some(&menu_actions));
+
+        let mut actions: std::collections::HashMap<String, gio::SimpleAction> =
+            std::collections::HashMap::new();
+        for (name, callback) in [
+            ("open", callbacks.on_open.clone()),
+            ("edit-ignored", callbacks.on_edit_ignored.clone()),
+            ("force-sync", callbacks.on_force_sync.clone()),
+            ("toggle-pause", callbacks.on_toggle_pause.clone()),
+            ("remove", callbacks.on_remove.clone()),
+        ] {
+            let Some(callback) = callback else { continue };
+            let action = gio::SimpleAction::new(name, None);
+            action.connect_activate(move |_action, _param| callback());
+            menu_actions.add_action(&action);
+            actions.insert(name.to_string(), action);
+        }
+
+        let menu = gio::Menu::new();
+        if actions.contains_key("open") {
+            let item = gio::MenuItem::new(Some("Open local folder"), Some("folder.open"));
+            item.set_icon(&gio::ThemedIcon::new("folder-open-symbolic"));
+            menu.append_item(&item);
+        }
+        if actions.contains_key("edit-ignored") {
+            let item = gio::MenuItem::new(Some("Edit ignored files"), Some("folder.edit-ignored"));
+            item.set_icon(&gio::ThemedIcon::new("text-x-generic-symbolic"));
+            menu.append_item(&item);
+        }
+        if actions.contains_key("force-sync") {
+            let item = gio::MenuItem::new(Some("Force sync now"), Some("folder.force-sync"));
+            item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
+            menu.append_item(&item);
+        }
+        if actions.contains_key("toggle-pause") {
+            let paused = is_paused.as_ref().map(|f| f()).unwrap_or(false);
+            let item = gio::MenuItem::new(
+                Some(if paused { "Resume sync" } else { "Pause sync" }),
+                Some("folder.toggle-pause"),
+            );
+            item.set_icon(&gio::ThemedIcon::new(if paused {
+                "media-playback-start-symbolic"
+            } else {
+                "media-playback-pause-symbolic"
+            }));
+            menu.append_item(&item);
+        }
+        if actions.contains_key("remove") {
+            let item = gio::MenuItem::new(Some("Remove synchronization"), Some("folder.remove"));
+            item.set_icon(&gio::ThemedIcon::new("user-trash-symbolic"));
+            menu.append_item(&item);
+        }
+        let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+        menu_button.set_popover(Some(&popover));
+
+        let remote_path = folder.remote_path.clone();
+        let mut this = Self {
+            row,
+            icon,
+            spinner,
+            _menu_button: menu_button,
+            _actions: actions,
+            format_last_sync,
+            remote_path: remote_path.clone(),
+            _subscription: None,
+        };
+
+        match state {
+            Some(controller) => {
+                let icon = this.icon.clone();
+                let spinner = this.spinner.clone();
+                let row = this.row.clone();
+                let remote_path = this.remote_path.clone();
+                let format_last_sync = this.format_last_sync.clone();
+                let subscription = controller.subscribe(move |snapshot: &StateSnapshot| {
+                    render(
+                        &row,
+                        &icon,
+                        &spinner,
+                        &remote_path,
+                        format_last_sync.as_ref().map(|f| f()),
+                        snapshot,
+                    );
+                });
+                this._subscription = Some(subscription);
+            }
+            None => {
+                let snapshot = StateSnapshot::new(AppState::Unconfigured);
+                render(
+                    &this.row,
+                    &this.icon,
+                    &this.spinner,
+                    &this.remote_path,
+                    this.format_last_sync.as_ref().map(|f| f()),
+                    &snapshot,
+                );
+            }
+        }
+        this
+    }
+}
+
+/// Render one snapshot into the row widgets.
+fn render(
+    row: &libadwaita::ActionRow,
+    icon: &gtk4::Image,
+    spinner: &gtk4::Spinner,
+    remote_path: &str,
+    last_sync: Option<String>,
+    snapshot: &StateSnapshot,
+) {
+    let (icon_name, status) = folder_status_presentation(snapshot.state);
+    icon.set_icon_name(Some(icon_name));
+    let syncing = snapshot.state == AppState::Syncing;
+    spinner.set_visible(syncing);
+    if syncing {
+        spinner.start();
+    } else {
+        spinner.stop();
+    }
+    let mut parts = vec![status.to_string()];
+    if !remote_path.is_empty() {
+        parts.push(format!("Remote: {remote_path}"));
+    }
+    if let Some(last_sync) = last_sync {
+        parts.push(last_sync);
+    }
+    row.set_subtitle(&parts.join(" · "));
+    if !snapshot.message.is_empty() {
+        row.set_tooltip_text(Some(&snapshot.message));
+    }
 }
 
 #[cfg(test)]
@@ -188,5 +353,32 @@ mod tests {
         assert_eq!(paired.len(), 2);
         assert!(paired[0].1.is_none());
         assert!(paired[1].1.is_none());
+    }
+
+    #[test]
+    fn row_construction_smoke() {
+        if gtk4::init().is_err() {
+            eprintln!("skipped: no display available");
+            return;
+        }
+        let folder = FolderConfig {
+            id: "f1".to_string(),
+            local_root: "/tmp/a".to_string(),
+            remote_path: "/docs".to_string(),
+            space_id: None,
+        };
+        let state = StateController::new(AppState::IdleOk);
+        let row = FolderStatusRow::new(
+            folder,
+            Some(state),
+            FolderRowCallbacks::default(),
+            None,
+            None,
+        );
+        assert_eq!(row.row.title(), "a");
+        assert_eq!(
+            row.row.subtitle().as_deref(),
+            Some("Synchronized · Remote: /docs")
+        );
     }
 }
