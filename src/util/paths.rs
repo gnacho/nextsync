@@ -122,6 +122,7 @@ mod tests {
 
     #[test]
     fn state_dir_uses_xdg_state_home_when_set() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_STATE_HOME");
         env::set_var("XDG_STATE_HOME", "/tmp/nxs-state");
         let result = state_dir();
@@ -131,6 +132,7 @@ mod tests {
 
     #[test]
     fn config_dir_uses_xdg_config_home_when_set() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_CONFIG_HOME");
         env::set_var("XDG_CONFIG_HOME", "/tmp/nxs-config");
         let result = config_dir();
@@ -140,6 +142,7 @@ mod tests {
 
     #[test]
     fn empty_variable_falls_back_to_home() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_STATE_HOME");
         env::remove_var("XDG_STATE_HOME");
         let result = state_dir();
@@ -149,6 +152,7 @@ mod tests {
 
     #[test]
     fn autostart_dir_uses_config_home() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_CONFIG_HOME");
         env::set_var("XDG_CONFIG_HOME", "/tmp/nxs-cfg");
         let result = autostart_dir();
@@ -158,6 +162,7 @@ mod tests {
 
     #[test]
     fn gtk_bookmarks_path_uses_config_home() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_CONFIG_HOME");
         env::set_var("XDG_CONFIG_HOME", "/tmp/nxs-cfg");
         let result = gtk_bookmarks_path();
@@ -167,6 +172,7 @@ mod tests {
 
     #[test]
     fn user_data_dir_uses_xdg_data_home() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_DATA_HOME");
         env::set_var("XDG_DATA_HOME", "/tmp/nxs-data");
         let result = user_data_dir();
@@ -176,6 +182,7 @@ mod tests {
 
     #[test]
     fn user_data_dir_falls_back_to_local_share() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_DATA_HOME");
         env::remove_var("XDG_DATA_HOME");
         let result = user_data_dir();
@@ -185,6 +192,7 @@ mod tests {
 
     #[test]
     fn desktop_dir_prefers_xdg_desktop_dir_override() {
+        let _env = crate::util::test_env::lock();
         let previous = env::var_os("XDG_DESKTOP_DIR");
         env::set_var("XDG_DESKTOP_DIR", "/tmp/desktop");
         let result = desktop_dir();

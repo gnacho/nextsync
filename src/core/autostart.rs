@@ -112,6 +112,11 @@ fn shell_quote(value: &str) -> String {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+    /// Environment variables are process-global state; tests that touch them
+    /// must not run concurrently (shared with the paths tests).
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::util::test_env::lock()
+    }
 
     fn restore_env(previous: Option<OsString>) {
         match previous {
@@ -122,6 +127,7 @@ mod tests {
 
     #[test]
     fn command_defaults_to_nextsync_when_unset() {
+        let _env = lock_env();
         let previous = env::var_os("NEXTSYNC_LAUNCHER");
         env::remove_var("NEXTSYNC_LAUNCHER");
         let manager = AutostartManager::new(None);
@@ -131,6 +137,7 @@ mod tests {
 
     #[test]
     fn command_defaults_to_nextsync_when_empty() {
+        let _env = lock_env();
         let previous = env::var_os("NEXTSYNC_LAUNCHER");
         env::set_var("NEXTSYNC_LAUNCHER", "");
         let manager = AutostartManager::new(None);
@@ -140,6 +147,7 @@ mod tests {
 
     #[test]
     fn command_respects_launcher_env_var() {
+        let _env = lock_env();
         let previous = env::var_os("NEXTSYNC_LAUNCHER");
         env::set_var("NEXTSYNC_LAUNCHER", "/opt/nextsync/nextsync");
         let manager = AutostartManager::new(None);
@@ -149,6 +157,7 @@ mod tests {
 
     #[test]
     fn command_quotes_launcher_with_spaces() {
+        let _env = lock_env();
         let previous = env::var_os("NEXTSYNC_LAUNCHER");
         env::set_var("NEXTSYNC_LAUNCHER", "/opt/next sync/run");
         let manager = AutostartManager::new(None);
@@ -158,6 +167,7 @@ mod tests {
 
     #[test]
     fn set_enabled_true_writes_desktop_file() {
+        let _env = lock_env();
         let previous = env::var_os("NEXTSYNC_LAUNCHER");
         env::set_var("NEXTSYNC_LAUNCHER", "/opt/nextsync/nextsync");
         let dir = tempfile::tempdir().unwrap();
@@ -210,6 +220,7 @@ mod tests {
 
     #[test]
     fn default_path_lives_under_autostart_dir() {
+        let _env = lock_env();
         let previous = env::var_os("XDG_CONFIG_HOME");
         env::set_var("XDG_CONFIG_HOME", "/tmp/nxs-cfg");
         let manager = AutostartManager::new(None);

@@ -3,3 +3,6 @@
 pub mod i18n;
 pub mod paths;
 pub mod redact;
+
+#[cfg(test)]
+pub mod test_env;
