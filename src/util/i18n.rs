@@ -148,7 +148,10 @@ mod tests {
             assert!(starts_with_es(language), "{language} should select Spanish");
         }
         for language in ["en", "en_US.UTF-8", "C", "POSIX", "pt_BR", "gl", ""] {
-            assert!(!starts_with_es(language), "{language} should not select Spanish");
+            assert!(
+                !starts_with_es(language),
+                "{language} should not select Spanish"
+            );
         }
     }
 

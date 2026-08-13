@@ -8,8 +8,8 @@
 //!
 //! # Deviations from `settings.py` (motivated)
 //!
-//! - No i18n yet: the crate has no gettext catalogs (Task 6.1); strings are
-//!   English like the rest of the current UI.
+//! - i18n (Task 6.1): user-visible strings go through [`crate::util::i18n::t`];
+//!   msgids missing from the Spanish catalog fall back to the English source.
 //! - No `runtime`/`desktop_integration` parameters. The window only receives a
 //!   [`ConfigStore`], the [`AccountConfig`] snapshot, the account id and the
 //!   [`SettingsCallbacks`] closures. The live Diagnostics rows (inotify
@@ -41,6 +41,7 @@ use crate::storage::config::{
     default_sync_root, expanduser, remote_path_for, validate_pattern, AccountConfig, Config,
     ConfigError, ConfigStore, FolderConfig, GeneralConfig, LoggingConfig, DEFAULT_PATTERNS,
 };
+use crate::util::i18n::t;
 use crate::util::paths::state_dir;
 
 /// A simple no-argument callback.
@@ -75,7 +76,7 @@ impl SettingsWindow {
         callbacks: SettingsCallbacks,
     ) -> Self {
         let window = libadwaita::PreferencesWindow::new();
-        window.set_title(Some("Settings"));
+        window.set_title(Some(t("Settings")));
         window.set_default_size(720, 640);
 
         // Top-level sections (general/logging/network) come from the current
@@ -133,20 +134,20 @@ fn build_general_page(
     folders_group: &libadwaita::PreferencesGroup,
 ) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
-        .title("General")
+        .title(t("General"))
         .icon_name("preferences-system-symbolic")
         .build();
 
     let startup = libadwaita::PreferencesGroup::builder()
-        .title("Startup")
+        .title(t("Startup"))
         .build();
     let autostart = libadwaita::SwitchRow::builder()
-        .title("Start NextSync when I sign in")
+        .title(t("Start NextSync when I sign in"))
         .active(general.autostart)
         .build();
     let pause_battery = libadwaita::SwitchRow::builder()
-        .title("Pause synchronization while on battery")
-        .subtitle("A running synchronization is allowed to finish.")
+        .title(t("Pause synchronization while on battery"))
+        .subtitle(t("A running synchronization is allowed to finish."))
         .active(general.pause_on_battery)
         .build();
 
@@ -171,13 +172,13 @@ fn build_general_page(
     page.add(&startup);
 
     let power = libadwaita::PreferencesGroup::builder()
-        .title("Power")
+        .title(t("Power"))
         .build();
     power.add(&pause_battery);
     page.add(&power);
 
     let folders = libadwaita::PreferencesGroup::builder()
-        .title("Synchronization Folders")
+        .title(t("Synchronization Folders"))
         .build();
     folders.add(folders_group);
     page.add(&folders);
@@ -195,14 +196,14 @@ fn build_sync_page(
 ) -> libadwaita::PreferencesPage {
     let sync = &account.sync;
     let page = libadwaita::PreferencesPage::builder()
-        .title("Synchronization")
+        .title(t("Synchronization"))
         .icon_name("emblem-synchronizing-symbolic")
         .build();
 
     let manual_group = libadwaita::PreferencesGroup::new();
-    let banner = libadwaita::Banner::new(
+    let banner = libadwaita::Banner::new(t(
         "Automatic synchronization is off. Files synchronize only with Sync Now.",
-    );
+    ));
     banner.set_revealed(crate::core::triggers::manual_only(&TriggerSettings::from(
         sync,
     )));
@@ -210,19 +211,19 @@ fn build_sync_page(
     page.add(&manual_group);
 
     let local = libadwaita::PreferencesGroup::builder()
-        .title("Local Changes")
+        .title(t("Local Changes"))
         .build();
     let inotify = libadwaita::SwitchRow::builder()
-        .title("Monitor filesystem changes")
-        .subtitle("Synchronizes shortly after a local file changes.")
+        .title(t("Monitor filesystem changes"))
+        .subtitle(t("Synchronizes shortly after a local file changes."))
         .active(sync.local_inotify_enabled)
         .build();
     let local_timer = libadwaita::SwitchRow::builder()
-        .title("Run a local interval")
+        .title(t("Run a local interval"))
         .active(sync.local_interval_enabled)
         .build();
     let local_minutes = spin_row(
-        "Local interval (minutes)",
+        t("Local interval (minutes)"),
         1.0,
         1440.0,
         sync.local_interval_minutes as f64,
@@ -234,20 +235,20 @@ fn build_sync_page(
     page.add(&local);
 
     let remote = libadwaita::PreferencesGroup::builder()
-        .title("Remote Changes")
+        .title(t("Remote Changes"))
         .build();
     let push = libadwaita::SwitchRow::builder()
-        .title("Use server push notifications")
-        .subtitle("Near-real-time detection when notify_push is supported.")
+        .title(t("Use server push notifications"))
+        .subtitle(t("Near-real-time detection when notify_push is supported."))
         .active(sync.remote_push_enabled)
         .build();
     let remote_timer = libadwaita::SwitchRow::builder()
-        .title("Run a remote interval")
-        .subtitle("Recommended because push delivery is best effort.")
+        .title(t("Run a remote interval"))
+        .subtitle(t("Recommended because push delivery is best effort."))
         .active(sync.remote_interval_enabled)
         .build();
     let remote_minutes = spin_row(
-        "Remote interval (minutes)",
+        t("Remote interval (minutes)"),
         1.0,
         1440.0,
         sync.remote_interval_minutes as f64,
@@ -259,17 +260,17 @@ fn build_sync_page(
     page.add(&remote);
 
     let excluded = libadwaita::PreferencesGroup::builder()
-        .title("Excluded Files")
+        .title(t("Excluded Files"))
         .build();
     let exclusions_enabled = libadwaita::SwitchRow::builder()
-        .title("Exclude disposable files")
-        .subtitle("Hidden files remain synchronized unless a rule matches.")
+        .title(t("Exclude disposable files"))
+        .subtitle(t("Hidden files remain synchronized unless a rule matches."))
         .active(sync.exclude_patterns_enabled)
         .build();
     excluded.add(&exclusions_enabled);
     let edit_row = libadwaita::ActionRow::builder()
-        .title("File patterns")
-        .subtitle("Names, extensions, and wildcard patterns")
+        .title(t("File patterns"))
+        .subtitle(t("Names, extensions, and wildcard patterns"))
         .activatable(true)
         .build();
     let next = gtk4::Image::builder()
@@ -292,10 +293,10 @@ fn build_sync_page(
     page.add(&excluded);
 
     let reliability = libadwaita::PreferencesGroup::builder()
-        .title("Reliability")
+        .title(t("Reliability"))
         .build();
     let retries = spin_row(
-        "Maximum sync retries",
+        t("Maximum sync retries"),
         1.0,
         10.0,
         sync.max_sync_retries as f64,
@@ -399,12 +400,12 @@ fn build_network_page(
     network: &crate::storage::config::NetworkConfig,
 ) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
-        .title("Network")
+        .title(t("Network"))
         .icon_name("network-wired-symbolic")
         .build();
 
     let server = libadwaita::PreferencesGroup::builder()
-        .title("Server")
+        .title(t("Server"))
         .build();
     server.add(
         &libadwaita::ActionRow::builder()
@@ -415,15 +416,17 @@ fn build_network_page(
     page.add(&server);
 
     let proxy_group = libadwaita::PreferencesGroup::builder()
-        .title("Proxy")
+        .title(t("Proxy"))
         .build();
     let proxy = libadwaita::EntryRow::new();
-    proxy.set_title("Custom HTTP proxy");
+    proxy.set_title(t("Custom HTTP proxy"));
     proxy.set_text(network.custom_proxy.as_deref().unwrap_or(""));
     proxy.set_show_apply_button(true);
     let trust = libadwaita::SwitchRow::builder()
-        .title("Allow invalid or self-signed certificates")
-        .subtitle("This weakens connection security. Enable only for a server you trust.")
+        .title(t("Allow invalid or self-signed certificates"))
+        .subtitle(t(
+            "This weakens connection security. Enable only for a server you trust.",
+        ))
         .active(network.trust_invalid_certificates)
         .build();
 
@@ -447,7 +450,9 @@ fn build_network_page(
     proxy_group.add(&proxy);
     page.add(&proxy_group);
 
-    let tls = libadwaita::PreferencesGroup::builder().title("TLS").build();
+    let tls = libadwaita::PreferencesGroup::builder()
+        .title(t("TLS"))
+        .build();
     tls.add(&trust);
     page.add(&tls);
     page
@@ -465,21 +470,23 @@ fn build_advanced_page(
     window: &libadwaita::PreferencesWindow,
 ) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
-        .title("Advanced")
+        .title(t("Advanced"))
         .icon_name("applications-system-symbolic")
         .build();
 
     // Logging (top-level config section).
     let logging_group = libadwaita::PreferencesGroup::builder()
-        .title("Logging")
+        .title(t("Logging"))
         .build();
     let save_logs = libadwaita::SwitchRow::builder()
-        .title("Save log files")
-        .subtitle("Live activity remains available when file logging is off.")
+        .title(t("Save log files"))
+        .subtitle(t(
+            "Live activity remains available when file logging is off.",
+        ))
         .active(logging.save_logs)
         .build();
     let log_retention = spin_row(
-        "Keep daily logs (days)",
+        t("Keep daily logs (days)"),
         1.0,
         365.0,
         logging.retention_days as f64,
@@ -508,7 +515,7 @@ fn build_advanced_page(
 
     let log_dir = state_dir();
     let log_folder = libadwaita::ActionRow::builder()
-        .title("Log folder")
+        .title(t("Log folder"))
         .subtitle(log_dir.to_string_lossy().into_owned())
         .activatable(true)
         .build();
@@ -527,7 +534,7 @@ fn build_advanced_page(
 
     logging_group.add(
         &libadwaita::ActionRow::builder()
-            .title("Daily file naming")
+            .title(t("Daily file naming"))
             .subtitle("nextsync-YYYY-MM-DD.log")
             .build(),
     );
@@ -535,7 +542,7 @@ fn build_advanced_page(
     // Detailed output sits in the Logging group but persists through the
     // account sync settings (the store field is `account.sync.detailed_output`).
     let detailed = libadwaita::SwitchRow::builder()
-        .title("Detailed synchronization output")
+        .title(t("Detailed synchronization output"))
         .active(account.sync.detailed_output)
         .build();
     logging_group.add(&detailed);
@@ -556,24 +563,26 @@ fn build_advanced_page(
     page.add(&logging_group);
     // Deletion guard (account-owned).
     let guard = libadwaita::PreferencesGroup::builder()
-        .title("Deletion Guard")
+        .title(t("Deletion Guard"))
         .description(
-            "Blocks synchronization before nextcloudcmd starts when too many previously synchronized local files disappear.",
+            t("Blocks synchronization before nextcloudcmd starts when too many previously synchronized local files disappear."),
         )
         .build();
     let guard_enabled = libadwaita::SwitchRow::builder()
-        .title("Protect against mass local deletion")
-        .subtitle("Recommended. Stops sync when the local folder loses many files at once.")
+        .title(t("Protect against mass local deletion"))
+        .subtitle(t(
+            "Recommended. Stops sync when the local folder loses many files at once.",
+        ))
         .active(account.delete_guard.enabled)
         .build();
     let guard_count = spin_row(
-        "Review after this many missing files",
+        t("Review after this many missing files"),
         1.0,
         100_000.0,
         account.delete_guard.count_threshold as f64,
     );
     let guard_percent = spin_row(
-        "Review after this percentage is missing",
+        t("Review after this percentage is missing"),
         1.0,
         100.0,
         account.delete_guard.percent_threshold as f64,
@@ -635,16 +644,16 @@ fn build_advanced_page(
 
     // Diagnostics.
     let diagnostics = libadwaita::PreferencesGroup::builder()
-        .title("Diagnostics")
+        .title(t("Diagnostics"))
         .build();
     let last_code = account
         .runtime
         .last_exit_code
         .map(|code| code.to_string())
-        .unwrap_or_else(|| "None".to_string());
+        .unwrap_or_else(|| t("None").to_string());
     diagnostics.add(
         &libadwaita::ActionRow::builder()
-            .title("Last exit code")
+            .title(t("Last exit code"))
             .subtitle(last_code)
             .build(),
     );
@@ -652,14 +661,14 @@ fn build_advanced_page(
 
     // Account removal (typed confirmation).
     let account_group = libadwaita::PreferencesGroup::builder()
-        .title("Account")
+        .title(t("Account"))
         .description(
-            "Removing the account only removes the connection; your local folders and files are never touched.",
+            t("Removing the account only removes the connection; your local folders and files are never touched."),
         )
         .build();
     let remove = libadwaita::ActionRow::builder()
-        .title("Remove Account")
-        .subtitle("Rarely needed. Keeps all local files.")
+        .title(t("Remove Account"))
+        .subtitle(t("Rarely needed. Keeps all local files."))
         .activatable(true)
         .build();
     remove.add_css_class("error");
@@ -802,7 +811,7 @@ fn save_delete_guard(
 fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libadwaita::SwitchRow) {
     let value = proxy.text().trim().to_string();
     if !value.is_empty() && !valid_proxy_url(&value) {
-        proxy.set_title("Invalid HTTP proxy URL");
+        proxy.set_title(t("Invalid HTTP proxy URL"));
         proxy.add_css_class("error");
         return;
     }
@@ -817,7 +826,7 @@ fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libad
         eprintln!("Settings: could not save network settings: {error}");
         return;
     }
-    proxy.set_title("Custom HTTP proxy");
+    proxy.set_title(t("Custom HTTP proxy"));
     proxy.remove_css_class("error");
 }
 
@@ -851,7 +860,11 @@ impl FolderUi {
         for folder in &account.folders {
             let row = libadwaita::ActionRow::builder()
                 .title(folder.local_root.as_str())
-                .subtitle(format!("Remote: {}", folder_subtitle(&folder.remote_path)))
+                .subtitle(t("Remote: {remote}").replacen(
+                    "{remote}",
+                    folder_subtitle(&folder.remote_path),
+                    1,
+                ))
                 .build();
             let icon = gtk4::Image::builder()
                 .icon_name("folder-symbolic")
@@ -861,7 +874,7 @@ impl FolderUi {
             let remove = gtk4::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .valign(gtk4::Align::Center)
-                .tooltip_text("Remove folder")
+                .tooltip_text(t("Remove folder"))
                 .css_classes(["flat"])
                 .build();
             let folder_id = folder.id.clone();
@@ -877,8 +890,8 @@ impl FolderUi {
         }
 
         let add_row = libadwaita::ActionRow::builder()
-            .title("Add Folder")
-            .subtitle("Mirror another local folder from this account")
+            .title(t("Add Folder"))
+            .subtitle(t("Mirror another local folder from this account"))
             .activatable(true)
             .build();
         let add_icon = gtk4::Image::builder()
@@ -912,15 +925,15 @@ impl FolderUi {
         };
 
         let dialog = libadwaita::AlertDialog::new(
-            Some("Add Folder"),
-            Some(
+            Some(t("Add Folder")),
+            Some(t(
                 "Choose a local folder and an optional remote folder to mirror from this account.",
-            ),
+            )),
         );
         let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
         let local_entry = libadwaita::EntryRow::new();
-        local_entry.set_title("Local folder");
+        local_entry.set_title(t("Local folder"));
         local_entry.set_text(&local_default);
 
         let choose = gtk4::Button::builder()
@@ -936,7 +949,7 @@ impl FolderUi {
         entry_box.append(&local_entry);
 
         let remote_entry = libadwaita::EntryRow::new();
-        remote_entry.set_title("Remote folder (empty: use the local folder name)");
+        remote_entry.set_title(t("Remote folder (empty: use the local folder name)"));
         if !previous_remote.is_empty() {
             remote_entry.set_text(&previous_remote);
         }
@@ -945,7 +958,7 @@ impl FolderUi {
         picker.set_model(Some(&remote_list));
         picker.set_selected(u32::MAX);
         picker.set_sensitive(false);
-        picker.set_tooltip_text(Some("Choose an existing remote folder"));
+        picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
         let entry_for_pick = remote_entry.clone();
         picker.connect_selected_notify(move |picker| {
             if let Some(item) = picker.selected_item() {
@@ -969,8 +982,8 @@ impl FolderUi {
         }
 
         dialog.set_extra_child(Some(&entry_box));
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("add", "Add");
+        dialog.add_response("cancel", t("Cancel"));
+        dialog.add_response("add", t("Add"));
         dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
 
         if let Ok(Some(account)) = self.store.account(&self.account_id) {
@@ -994,7 +1007,7 @@ impl FolderUi {
             let remote_text = remote_entry.text().to_string();
             let root = expanduser(&local_root);
             let outcome = if !root.is_absolute() {
-                Err(ConfigError::new("Choose an absolute local folder."))
+                Err(ConfigError::new(t("Choose an absolute local folder.")))
             } else {
                 remote_path_for(&local_root, &remote_text).and_then(|remote| {
                     store.add_folder(
@@ -1030,7 +1043,7 @@ impl FolderUi {
 /// Present a folder chooser and write the selection into the entry row.
 fn choose_local_folder(entry: libadwaita::EntryRow) {
     let dialog = gtk4::FileDialog::builder()
-        .title("Choose NextCloud Folder")
+        .title(t("Choose NextCloud Folder"))
         .modal(true)
         .build();
     dialog.select_folder(
@@ -1118,14 +1131,14 @@ impl ExclusionsDialog {
     /// Build the dialog. Call [`present`](Self::present) to show it.
     pub fn new(store: ConfigStore, account_id: String, callbacks: SettingsCallbacks) -> Self {
         let dialog = libadwaita::Dialog::new();
-        dialog.set_title("Excluded Files");
+        dialog.set_title(t("Excluded Files"));
         dialog.set_content_width(520);
         dialog.set_content_height(580);
 
         let toolbar = libadwaita::ToolbarView::new();
         let header = gtk4::HeaderBar::new();
         let done = gtk4::Button::builder()
-            .label("Done")
+            .label(t("Done"))
             .css_classes(["suggested-action"])
             .build();
         let dialog_guard = dialog.clone();
@@ -1141,7 +1154,7 @@ impl ExclusionsDialog {
         content.set_margin_start(18);
         content.set_margin_end(18);
         let explanation = gtk4::Label::builder()
-            .label("Only file names, extensions, and wildcard patterns are allowed. Folders and paths cannot be excluded.")
+            .label(t("Only file names, extensions, and wildcard patterns are allowed. Folders and paths cannot be excluded."))
             .wrap(true)
             .xalign(0.0)
             .css_classes(["dim-label"])
@@ -1156,11 +1169,11 @@ impl ExclusionsDialog {
 
         let entry_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
         let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("Example: *.swp"));
+        entry.set_placeholder_text(Some(t("Example: *.swp")));
         entry.set_hexpand(true);
         entry_box.append(&entry);
         let add = gtk4::Button::builder()
-            .label("Add Pattern")
+            .label(t("Add Pattern"))
             .css_classes(["suggested-action"])
             .build();
         entry_box.append(&add);
@@ -1174,7 +1187,7 @@ impl ExclusionsDialog {
         content.append(&error_label);
 
         let restore = gtk4::Button::builder()
-            .label("Restore Defaults")
+            .label(t("Restore Defaults"))
             .halign(gtk4::Align::Start)
             .build();
         content.append(&restore);
@@ -1259,7 +1272,7 @@ impl ExclusionsDialog {
             let remove = gtk4::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .valign(gtk4::Align::Center)
-                .tooltip_text("Remove pattern")
+                .tooltip_text(t("Remove pattern"))
                 .css_classes(["flat"])
                 .build();
             let state = self.handle();
@@ -1367,11 +1380,11 @@ fn present_remove_account(
     callbacks: &SettingsCallbacks,
 ) {
     let dialog = libadwaita::AlertDialog::new(
-        Some("Remove Nextcloud Account?"),
-        Some("The account credential will be removed from the password keyring. Your local NextCloud folder and all files inside it will remain untouched."),
+        Some(t("Remove Nextcloud Account?")),
+        Some(t("The account credential will be removed from the password keyring. Your local NextCloud folder and all files inside it will remain untouched.")),
     );
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("remove", "Continue");
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("remove", t("Continue"));
     dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
 
     let login_name = login_name.to_string();
@@ -1396,16 +1409,16 @@ fn present_remove_account_step_two(
     callbacks: &SettingsCallbacks,
 ) {
     let dialog = libadwaita::AlertDialog::new(
-        Some(&format!("Remove {login_name}?")),
-        Some("Type “remove” to confirm. This cannot be undone and stops synchronization immediately."),
+        Some(t(&format!("Remove {login_name}?"))),
+        Some(t("Type “remove” to confirm. This cannot be undone and stops synchronization immediately.")),
     );
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Type “remove”"));
+    entry.set_placeholder_text(Some(t("Type “remove”")));
     let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     entry_box.append(&entry);
     dialog.set_extra_child(Some(&entry_box));
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("remove", "Remove Account");
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("remove", t("Remove Account"));
     dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
 
@@ -1432,6 +1445,7 @@ fn present_remove_account_step_two(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
     use tempfile::tempdir;
 
     fn sample_account() -> AccountConfig {
@@ -1547,21 +1561,55 @@ mod tests {
         assert!(error.message.contains("already configured"));
     }
 
+    // ---- i18n --------------------------------------------------------------
+
+    #[test]
+    fn known_settings_strings_translate_to_spanish_and_back() {
+        set_locale(Locale::Spanish);
+        assert_eq!(t("Settings"), "Configuración");
+        assert_eq!(t("Synchronization"), "Sincronización");
+        assert_eq!(
+            t("Start NextSync when I sign in"),
+            "Iniciar NextSync al iniciar sesión"
+        );
+        set_locale(Locale::English);
+        assert_eq!(t("Settings"), "Settings");
+        assert_eq!(t("Synchronization"), "Synchronization");
+        reset_locale();
+    }
+
     // ---- GTK smoke --------------------------------------------------------
 
     #[test]
     fn settings_window_construction_smoke() {
         crate::ui::test_helpers::gtk_smoke(|| {
+            // The ambient environment is Spanish (LANG=es_ES.UTF-8); pin the
+            // locale on the GTK worker thread so the title assertion is
+            // deterministic, then verify the window actually localizes.
+            set_locale(Locale::English);
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
             let account_id = store.add_account(&account).unwrap();
-            let window =
-                SettingsWindow::new(store, account, account_id, SettingsCallbacks::default());
+            let window = SettingsWindow::new(
+                store.clone(),
+                account.clone(),
+                account_id.clone(),
+                SettingsCallbacks::default(),
+            );
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
                 "Settings"
             );
+
+            set_locale(Locale::Spanish);
+            let window =
+                SettingsWindow::new(store, account, account_id, SettingsCallbacks::default());
+            assert_eq!(
+                window.window().title().unwrap_or_default().to_string(),
+                "Configuración"
+            );
+            reset_locale();
         });
     }
 }

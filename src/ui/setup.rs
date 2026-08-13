@@ -41,8 +41,9 @@
 //! - **First-sync probe errors finish setup directly** (matching the Python
 //!   `on_remote` error branch), and the conflicted-copy wording keeps the
 //!   literal `{name}` / `.<ext>.` placeholders of the Python message.
-//! - **No i18n**: strings are English like the rest of the current UI
-//!   (Task 6.1 adds the catalogs).
+//! - **i18n (Task 6.1)**: user-visible strings go through
+//!   [`crate::util::i18n::t`]; msgids missing from the Spanish catalog fall
+//!   back to the English source.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -57,6 +58,7 @@ use crate::storage::config::{
     account_id, default_sync_root, expanduser, normalize_remote_path, normalize_server_url,
     AccountConfig, Config, ConfigError, ConfigStore, FolderConfig,
 };
+use crate::util::i18n::t;
 
 const WINDOW_TITLE: &str = "Set Up NextSync";
 
@@ -126,35 +128,35 @@ struct SetupWidgets {
 impl SetupWidgets {
     fn new() -> Self {
         let provider_row = libadwaita::ComboRow::builder()
-            .title("Sync provider")
+            .title(t("Sync provider"))
             .build();
         let model = gtk4::StringList::new(&["Nextcloud", "OpenCloud"]);
         provider_row.set_model(Some(&model));
 
         let provider_warning = libadwaita::Banner::new("");
 
-        let server_title = title_label("Connect to Nextcloud");
+        let server_title = title_label(t("Connect to Nextcloud"));
         let server_entry = libadwaita::EntryRow::new();
-        server_entry.set_title("Nextcloud server URL");
+        server_entry.set_title(t("Nextcloud server URL"));
         server_entry.set_text("https://");
         let trust_invalid =
-            gtk4::CheckButton::with_label("Allow invalid or self-signed certificates");
-        trust_invalid.set_tooltip_text(Some(
+            gtk4::CheckButton::with_label(t("Allow invalid or self-signed certificates"));
+        trust_invalid.set_tooltip_text(Some(t(
             "This weakens connection security. Enable only for a server you trust.",
-        ));
+        )));
         let server_error = error_label("");
 
-        let auth_title = title_label("Sign In");
+        let auth_title = title_label(t("Sign In"));
         let opencloud_hint = dim_label(
-            "OpenCloud requires an app password. Create one in the server account settings (App Tokens) and enter it below.",
+            t("OpenCloud requires an app password. Create one in the server account settings (App Tokens) and enter it below."),
         );
         opencloud_hint.set_visible(false);
         let username_entry = libadwaita::EntryRow::new();
-        username_entry.set_title("Username");
+        username_entry.set_title(t("Username"));
         let password_entry = libadwaita::PasswordEntryRow::new();
-        password_entry.set_title("Password or app password");
+        password_entry.set_title(t("Password or app password"));
         let auth_error = error_label("");
-        let manual_button = gtk4::Button::with_label("Sign In");
+        let manual_button = gtk4::Button::with_label(t("Sign In"));
         manual_button.add_css_class("suggested-action");
 
         let folder_list = gtk4::ListBox::builder()
@@ -170,9 +172,9 @@ impl SetupWidgets {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
         let summary_hint = dim_label(
-            "The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine.",
+            t("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine."),
         );
-        let start_button = gtk4::Button::with_label("Start Synchronizing");
+        let start_button = gtk4::Button::with_label(t("Start Synchronizing"));
         start_button.add_css_class("suggested-action");
 
         Self {
@@ -223,7 +225,7 @@ impl SetupWindow {
     ) -> Self {
         let window = libadwaita::ApplicationWindow::builder()
             .application(application)
-            .title(WINDOW_TITLE)
+            .title(t(WINDOW_TITLE))
             .default_width(620)
             .default_height(680)
             .build();
@@ -278,19 +280,21 @@ fn build_welcome_page(ctx: &SetupContext) {
     let status = libadwaita::StatusPage::builder()
         .icon_name("io.github.gnacho.nextsync")
         .title("NextSync")
-        .description("A lightweight desktop synchronizer for Nextcloud and OpenCloud.")
+        .description(t(
+            "A lightweight desktop synchronizer for Nextcloud and OpenCloud.",
+        ))
         .vexpand(true)
         .build();
     content.append(&status);
 
     content.append(
         &dim_label(
-            "Your complete file tree will be stored physically on this computer and synchronized in both directions.",
+            t("Your complete file tree will be stored physically on this computer and synchronized in both directions."),
         ),
     );
 
     let provider_group = libadwaita::PreferencesGroup::builder()
-        .title("Provider")
+        .title(t("Provider"))
         .build();
     provider_group.add(&ctx.widgets.provider_row);
     content.append(&provider_group);
@@ -304,7 +308,7 @@ fn build_welcome_page(ctx: &SetupContext) {
         update_provider_warning(&warning, provider_from_combo(row));
     });
 
-    let continue_button = gtk4::Button::with_label("Continue");
+    let continue_button = gtk4::Button::with_label(t("Continue"));
     continue_button.add_css_class("suggested-action");
     continue_button.add_css_class("pill");
     continue_button.set_halign(gtk4::Align::Center);
@@ -326,9 +330,9 @@ fn build_welcome_page(ctx: &SetupContext) {
 fn build_server_page(ctx: &SetupContext) {
     let (page, content) = page();
     content.append(&ctx.widgets.server_title);
-    content.append(&dim_label(
+    content.append(&dim_label(t(
         "Enter the address you normally use to open the server in a browser.",
-    ));
+    )));
 
     let group = libadwaita::PreferencesGroup::new();
     group.add(&ctx.widgets.server_entry);
@@ -338,7 +342,7 @@ fn build_server_page(ctx: &SetupContext) {
 
     let actions = action_box();
     actions.append(&back_button(&ctx.stack, "welcome"));
-    let continue_button = gtk4::Button::with_label("Continue");
+    let continue_button = gtk4::Button::with_label(t("Continue"));
     continue_button.add_css_class("suggested-action");
     {
         let ctx = ctx.clone();
@@ -374,7 +378,7 @@ fn build_authentication_page(ctx: &SetupContext) {
     content.append(&ctx.widgets.opencloud_hint);
 
     let manual_group = libadwaita::PreferencesGroup::builder()
-        .title("Manual Sign In")
+        .title(t("Manual Sign In"))
         .build();
     manual_group.add(&ctx.widgets.username_entry);
     manual_group.add(&ctx.widgets.password_entry);
@@ -396,9 +400,9 @@ fn build_authentication_page(ctx: &SetupContext) {
 
 fn build_folders_page(ctx: &SetupContext) {
     let (page, content) = page();
-    content.append(&title_label("Synchronization Folders"));
+    content.append(&title_label(t("Synchronization Folders")));
     content.append(&dim_label(
-        "Choose the local folders to mirror from this account. You can add several, or finish now and add folders later from Settings.",
+        t("Choose the local folders to mirror from this account. You can add several, or finish now and add folders later from Settings."),
     ));
     content.append(&ctx.widgets.space_label);
     content.append(&ctx.widgets.folder_list);
@@ -409,8 +413,8 @@ fn build_folders_page(ctx: &SetupContext) {
         .selection_mode(gtk4::SelectionMode::None)
         .build();
     let add_row = libadwaita::ActionRow::builder()
-        .title("Add Folder")
-        .subtitle("Mirror another local folder from this account")
+        .title(t("Add Folder"))
+        .subtitle(t("Mirror another local folder from this account"))
         .activatable(true)
         .build();
     let add_icon = gtk4::Image::builder()
@@ -428,7 +432,7 @@ fn build_folders_page(ctx: &SetupContext) {
 
     let actions = action_box();
     actions.append(&back_button(&ctx.stack, "authentication"));
-    let review = gtk4::Button::with_label("Review Setup");
+    let review = gtk4::Button::with_label(t("Review Setup"));
     review.add_css_class("suggested-action");
     {
         let ctx = ctx.clone();
@@ -452,7 +456,7 @@ fn build_folders_page(ctx: &SetupContext) {
 
 fn build_summary_page(ctx: &SetupContext) {
     let (page, content) = page();
-    content.append(&title_label("Ready to Synchronize"));
+    content.append(&title_label(t("Ready to Synchronize")));
     content.append(&ctx.widgets.summary_list);
     content.append(&ctx.widgets.summary_hint);
 
@@ -477,19 +481,19 @@ fn build_summary_page(ctx: &SetupContext) {
 fn configure_authentication(ctx: &SetupContext) {
     let opencloud = ctx.state.borrow().provider == Provider::OpenCloud;
     ctx.widgets.server_title.set_text(if opencloud {
-        "Connect to OpenCloud"
+        t("Connect to OpenCloud")
     } else {
-        "Connect to Nextcloud"
+        t("Connect to Nextcloud")
     });
     ctx.widgets.auth_title.set_text(if opencloud {
-        "Connect to OpenCloud"
+        t("Connect to OpenCloud")
     } else {
-        "Sign In"
+        t("Sign In")
     });
     ctx.widgets.password_entry.set_title(if opencloud {
-        "App password"
+        t("App password")
     } else {
-        "Password or app password"
+        t("Password or app password")
     });
     ctx.widgets.opencloud_hint.set_visible(opencloud);
     ctx.widgets.manual_button.set_sensitive(true);
@@ -502,11 +506,11 @@ fn manual_login(ctx: &SetupContext) {
     if username.is_empty() || password.is_empty() {
         ctx.widgets
             .auth_error
-            .set_text("Enter a username and password or app password.");
+            .set_text(t("Enter a username and password or app password."));
         return;
     }
     ctx.widgets.manual_button.set_sensitive(false);
-    ctx.widgets.auth_error.set_text("Checking account…");
+    ctx.widgets.auth_error.set_text(t("Checking account…"));
 
     let server = ctx.state.borrow().server.clone();
     let server_for_validate = server.clone();
@@ -558,9 +562,9 @@ fn manual_login(ctx: &SetupContext) {
                         }
                         Err(message) => {
                             ctx_for_store.widgets.manual_button.set_sensitive(true);
-                            ctx_for_store.widgets.auth_error.set_text(&format!(
+                            ctx_for_store.widgets.auth_error.set_text(t(&format!(
                                 "Could not store the account password: {message}"
-                            ));
+                            )));
                         }
                     }
                 });
@@ -596,13 +600,13 @@ fn start_space_discovery(ctx: &SetupContext, server: &str, username: &str, passw
 fn update_space_label(ctx: &SetupContext, space_id: Option<&str>) {
     match space_id {
         Some(id) => {
-            ctx.widgets.space_label.set_text(&format!("Space: {id}"));
+            ctx.widgets.space_label.set_text(t(&format!("Space: {id}")));
             ctx.widgets.space_label.set_visible(true);
         }
         None => {
-            ctx.widgets
-                .space_label
-                .set_text("No space discovered. Enter the space id in the Add Folder dialog.");
+            ctx.widgets.space_label.set_text(t(
+                "No space discovered. Enter the space id in the Add Folder dialog.",
+            ));
             ctx.widgets.space_label.set_visible(true);
         }
     }
@@ -625,13 +629,15 @@ fn present_add_folder_dialog(
     };
 
     let dialog = libadwaita::AlertDialog::new(
-        Some("Add Folder"),
-        Some("Choose a local folder and an optional remote folder to mirror from this account."),
+        Some(t("Add Folder")),
+        Some(t(
+            "Choose a local folder and an optional remote folder to mirror from this account.",
+        )),
     );
     let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let local_entry = libadwaita::EntryRow::new();
-    local_entry.set_title("Local folder");
+    local_entry.set_title(t("Local folder"));
     local_entry.set_text(&local_default);
     let choose = gtk4::Button::builder()
         .icon_name("folder-open-symbolic")
@@ -646,7 +652,7 @@ fn present_add_folder_dialog(
     entry_box.append(&local_entry);
 
     let remote_entry = libadwaita::EntryRow::new();
-    remote_entry.set_title("Remote folder (optional, default /)");
+    remote_entry.set_title(t("Remote folder (optional, default /)"));
     remote_entry.set_text(if previous_remote.is_empty() {
         "/"
     } else {
@@ -656,7 +662,7 @@ fn present_add_folder_dialog(
 
     let space_entry = libadwaita::EntryRow::new();
     if opencloud {
-        space_entry.set_title("Space ID (optional)");
+        space_entry.set_title(t("Space ID (optional)"));
         let space_default = if previous_space.is_empty() {
             ctx.state.borrow().space_id.clone().unwrap_or_default()
         } else {
@@ -671,8 +677,8 @@ fn present_add_folder_dialog(
     }
 
     dialog.set_extra_child(Some(&entry_box));
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("add", "Add");
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("add", t("Add"));
     dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
 
     let window = ctx.window.clone();
@@ -697,7 +703,7 @@ fn present_add_folder_dialog(
                     present_add_folder_dialog(
                         &ctx,
                         Some((local_root, remote_text, space_text)),
-                        Some("This local folder is already added.".to_string()),
+                        Some(t("This local folder is already added.").to_string()),
                     );
                     return;
                 }
@@ -725,7 +731,7 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
     };
     let row = libadwaita::ActionRow::builder()
         .title(folder.local_root.as_str())
-        .subtitle(format!("Remote: {remote_label}"))
+        .subtitle(t("Remote: {remote}").replacen("{remote}", remote_label, 1))
         .build();
     let icon = gtk4::Image::builder()
         .icon_name("folder-symbolic")
@@ -735,7 +741,7 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
     let remove = gtk4::Button::builder()
         .icon_name("user-trash-symbolic")
         .valign(gtk4::Align::Center)
-        .tooltip_text("Remove folder")
+        .tooltip_text(t("Remove folder"))
         .css_classes(["flat"])
         .build();
     let list = ctx.widgets.folder_list.clone();
@@ -761,36 +767,36 @@ fn folders_continue(ctx: &SetupContext) {
         ctx.widgets.summary_list.remove_all();
         append_summary_row(
             &ctx.widgets.summary_list,
-            "Server",
+            t("Server"),
             &state.server,
             "network-server-symbolic",
         );
         append_summary_row(
             &ctx.widgets.summary_list,
-            "Account",
+            t("Account"),
             &state.username,
             "avatar-default-symbolic",
         );
         if state.folders.is_empty() {
             append_summary_row(
                 &ctx.widgets.summary_list,
-                "No Folders",
-                "Connected without synchronization folders. Add them later from Settings.",
+                t("No Folders"),
+                t("Connected without synchronization folders. Add them later from Settings."),
                 "folder-symbolic",
             );
-            ctx.widgets.start_button.set_label("Finish Setup");
+            ctx.widgets.start_button.set_label(t("Finish Setup"));
             ctx.widgets.summary_hint.set_text(
-                "The account will be connected without synchronizing any folder. You can add folders later from Settings.",
+                t("The account will be connected without synchronizing any folder. You can add folders later from Settings."),
             );
         } else {
-            ctx.widgets.start_button.set_label("Start Synchronizing");
+            ctx.widgets.start_button.set_label(t("Start Synchronizing"));
             ctx.widgets.summary_hint.set_text(
-                "The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine.",
+                t("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine."),
             );
             for folder in &state.folders {
                 append_summary_row(
                     &ctx.widgets.summary_list,
-                    "Local Folder",
+                    t("Local Folder"),
                     &folder.local_root,
                     "folder-symbolic",
                 );
@@ -801,7 +807,7 @@ fn folders_continue(ctx: &SetupContext) {
                 };
                 append_summary_row(
                     &ctx.widgets.summary_list,
-                    "Remote Folder",
+                    t("Remote Folder"),
                     remote,
                     "folder-remote-symbolic",
                 );
@@ -811,21 +817,21 @@ fn folders_continue(ctx: &SetupContext) {
             let space = state.space_id.as_deref().unwrap_or("Not set");
             append_summary_row(
                 &ctx.widgets.summary_list,
-                "Space",
-                space,
+                t("Space"),
+                t(space),
                 "drive-multidisk-symbolic",
             );
         }
         append_summary_row(
             &ctx.widgets.summary_list,
-            "Local Detection",
-            "Filesystem monitor",
+            t("Local Detection"),
+            t("Filesystem monitor"),
             "folder-saved-search-symbolic",
         );
         append_summary_row(
             &ctx.widgets.summary_list,
-            "Remote Detection",
-            "Server push + every 10 minutes",
+            t("Remote Detection"),
+            t("Server push + every 10 minutes"),
             "network-transmit-receive-symbolic",
         );
     }
@@ -896,9 +902,9 @@ fn present_first_sync_dialog(
         (state.folders.len(), folders_short_names(&state.folders))
     };
     let body = first_sync_body(&account, count, &folder_label, local_empty, remote_empty);
-    let dialog = libadwaita::AlertDialog::new(Some("Start Synchronizing?"), Some(&body));
-    dialog.add_response("back", "Back to setup");
-    dialog.add_response("start", "Start");
+    let dialog = libadwaita::AlertDialog::new(Some(t("Start Synchronizing?")), Some(&body));
+    dialog.add_response("back", t("Back to setup"));
+    dialog.add_response("start", t("Start"));
     dialog.set_response_appearance("start", libadwaita::ResponseAppearance::Suggested);
     let window = ctx.window.clone();
     let ctx = ctx.clone();
@@ -953,10 +959,10 @@ fn finish_setup(ctx: &SetupContext) {
         }
         Err(error) => {
             let dialog = libadwaita::AlertDialog::new(
-                Some("Could Not Add the Account"),
+                Some(t("Could Not Add the Account")),
                 Some(&error.to_string()),
             );
-            dialog.add_response("ok", "OK");
+            dialog.add_response("ok", t("OK"));
             dialog.present(Some(&ctx.window));
         }
     }
@@ -1056,7 +1062,7 @@ fn validate_add_folder(
 ) -> Result<WizardFolder, String> {
     let root = expanduser(local_root);
     if !root.is_absolute() {
-        return Err("Choose an absolute local folder.".to_string());
+        return Err(t("Choose an absolute local folder.").to_string());
     }
     let remote_path = normalize_remote_path(remote_text).map_err(|error| error.to_string())?;
     let space_id = if provider == Provider::OpenCloud {
@@ -1096,6 +1102,11 @@ fn folders_short_names(folders: &[WizardFolder]) -> String {
 }
 
 /// The first-sync confirmation body, replicating the Python wording.
+///
+/// The catalog stores the whole sentence as a `{account}`/`{count}`/`{folders}`
+/// (and `{conflict}`) template, so the translation is looked up first and the
+/// placeholders substituted afterwards; in English `t` is the identity and
+/// the output matches the source template verbatim.
 fn first_sync_body(
     account: &str,
     count: usize,
@@ -1103,23 +1114,24 @@ fn first_sync_body(
     local_empty: bool,
     remote_empty: bool,
 ) -> String {
-    if local_empty && remote_empty {
-        format!(
-            "Connect {account} and start syncing {count} folder(s) ({folders}) now? Both sides are empty; synchronization will keep them in sync as empty mirrors."
-        )
+    let template = if local_empty && remote_empty {
+        t("Connect {account} and start syncing {count} folder(s) ({folders}) now? Both sides are empty; synchronization will keep them in sync as empty mirrors.")
     } else if local_empty {
-        format!(
-            "Connect {account} and start syncing {count} folder(s) ({folders}) now? The remote folders already contain files; they will be downloaded."
-        )
+        t("Connect {account} and start syncing {count} folder(s) ({folders}) now? The remote folders already contain files; they will be downloaded.")
     } else if remote_empty {
-        format!(
-            "Connect {account} and start syncing {count} folder(s) ({folders}) now? The local folders already contain files; they will be uploaded."
-        )
+        t("Connect {account} and start syncing {count} folder(s) ({folders}) now? The local folders already contain files; they will be uploaded.")
     } else {
-        format!(
-            "Connect {account} and start syncing {count} folder(s) ({folders}) now? Files that changed on both sides will be preserved as {{name}} (Nextcloud conflicted copy <date>).<ext>."
-        )
-    }
+        t("Connect {account} and start syncing {count} folder(s) ({folders}) now? Files that changed on both sides will be preserved as {conflict} (Nextcloud conflicted copy <date>).<ext>.")
+    };
+    fill_first_sync_template(template, account, count, folders).replacen("{conflict}", "{name}", 1)
+}
+
+/// Substitute the first-sync template placeholders.
+fn fill_first_sync_template(template: &str, account: &str, count: usize, folders: &str) -> String {
+    template
+        .replacen("{account}", account, 1)
+        .replacen("{count}", &count.to_string(), 1)
+        .replacen("{folders}", folders, 1)
 }
 
 /// Whether the given provider's sync binary is missing, for the welcome banner.
@@ -1127,13 +1139,13 @@ fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider) {
     match provider {
         Provider::Nextcloud if find_binary("nextcloudcmd").is_none() => {
             banner.set_title(
-                "nextcloudcmd is missing. Install the nextcloud-desktop-cmd package before the first synchronization.",
+                t("nextcloudcmd is missing. Install the nextcloud-desktop-cmd package before the first synchronization."),
             );
             banner.set_revealed(true);
         }
         Provider::OpenCloud if find_binary("opencloudcmd").is_none() => {
             banner.set_title(
-                "opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization.",
+                t("opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization."),
             );
             banner.set_revealed(true);
         }
@@ -1175,7 +1187,7 @@ fn action_box() -> gtk4::Box {
 }
 
 fn back_button(stack: &gtk4::Stack, page: &'static str) -> gtk4::Button {
-    let button = gtk4::Button::with_label("Back");
+    let button = gtk4::Button::with_label(t("Back"));
     let stack = stack.clone();
     button.connect_clicked(move |_| stack.set_visible_child_name(page));
     button
@@ -1233,7 +1245,7 @@ fn append_summary_row(list: &gtk4::ListBox, title: &str, subtitle: &str, icon: &
 /// Present a folder chooser and write the selection into the entry row.
 fn choose_local_folder(entry: libadwaita::EntryRow) {
     let dialog = gtk4::FileDialog::builder()
-        .title("Choose NextCloud Folder")
+        .title(t("Choose NextCloud Folder"))
         .modal(true)
         .build();
     dialog.select_folder(
@@ -1266,6 +1278,7 @@ fn persist_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::i18n::{reset_locale, set_locale, Locale};
     use tempfile::tempdir;
 
     // ---- pure helpers ------------------------------------------------------
@@ -1379,6 +1392,7 @@ mod tests {
 
     #[test]
     fn validate_add_folder_normalizes_inputs() {
+        set_locale(Locale::English);
         let folder =
             validate_add_folder(Provider::Nextcloud, "/tmp/nsync-wz", "/Docs/", "").unwrap();
         assert_eq!(folder.local_root, "/tmp/nsync-wz");
@@ -1386,6 +1400,7 @@ mod tests {
         assert_eq!(folder.space_id, None);
         let error = validate_add_folder(Provider::Nextcloud, "relative", "/", "").unwrap_err();
         assert!(error.contains("absolute"));
+        reset_locale();
     }
 
     #[test]
@@ -1426,6 +1441,7 @@ mod tests {
 
     #[test]
     fn first_sync_body_both_empty() {
+        set_locale(Locale::English);
         let body = first_sync_body(
             "alice@https://cloud.example.com",
             1,
@@ -1437,10 +1453,12 @@ mod tests {
             body,
             "Connect alice@https://cloud.example.com and start syncing 1 folder(s) (NextCloud) now? Both sides are empty; synchronization will keep them in sync as empty mirrors."
         );
+        reset_locale();
     }
 
     #[test]
     fn first_sync_body_local_empty_downloads() {
+        set_locale(Locale::English);
         let body = first_sync_body(
             "alice@https://cloud.example.com",
             1,
@@ -1452,10 +1470,12 @@ mod tests {
             body,
             "Connect alice@https://cloud.example.com and start syncing 1 folder(s) (NextCloud) now? The remote folders already contain files; they will be downloaded."
         );
+        reset_locale();
     }
 
     #[test]
     fn first_sync_body_remote_empty_uploads() {
+        set_locale(Locale::English);
         let body = first_sync_body(
             "alice@https://cloud.example.com",
             1,
@@ -1467,15 +1487,47 @@ mod tests {
             body,
             "Connect alice@https://cloud.example.com and start syncing 1 folder(s) (NextCloud) now? The local folders already contain files; they will be uploaded."
         );
+        reset_locale();
     }
 
     #[test]
     fn first_sync_body_both_populated_mentions_conflicts() {
+        set_locale(Locale::English);
         let body = first_sync_body("bob@https://cloud.example.com", 2, "A, B", false, false);
         assert_eq!(
             body,
             "Connect bob@https://cloud.example.com and start syncing 2 folder(s) (A, B) now? Files that changed on both sides will be preserved as {name} (Nextcloud conflicted copy <date>).<ext>."
         );
+        reset_locale();
+    }
+
+    // ---- i18n --------------------------------------------------------------
+
+    #[test]
+    fn wizard_title_translates_to_spanish_and_back() {
+        set_locale(Locale::Spanish);
+        assert_eq!(t(WINDOW_TITLE), "Configurar NextSync");
+        assert_eq!(t("Start Synchronizing?"), "¿Empezar a sincronizar?");
+        set_locale(Locale::English);
+        assert_eq!(t(WINDOW_TITLE), "Set Up NextSync");
+        assert_eq!(t("Start Synchronizing?"), "Start Synchronizing?");
+        reset_locale();
+    }
+
+    #[test]
+    fn first_sync_body_translates_the_catalog_template() {
+        set_locale(Locale::Spanish);
+        let body = first_sync_body("alice@https://cloud.example.com", 2, "A, B", true, false);
+        assert_eq!(
+            body,
+            "¿Conectar alice@https://cloud.example.com y empezar a sincronizar 2 carpeta(s) (A, B)? Las carpetas remotas ya contienen archivos; se descargarán."
+        );
+        let conflict = first_sync_body("bob@https://cloud.example.com", 1, "Docs", false, false);
+        assert!(conflict.starts_with("¿Conectar bob@https://cloud.example.com"));
+        assert!(conflict
+            .contains("se conservarán como {name} (Nextcloud conflicted copy <date>).<ext>."));
+        set_locale(Locale::English);
+        reset_locale();
     }
 
     // ---- GTK smoke --------------------------------------------------------
@@ -1483,6 +1535,10 @@ mod tests {
     #[test]
     fn setup_window_construction_smoke() {
         crate::ui::test_helpers::gtk_smoke(|| {
+            // The ambient environment is Spanish (LANG=es_ES.UTF-8); pin the
+            // locale on the GTK worker thread so the title assertion is
+            // deterministic.
+            set_locale(Locale::English);
             let app = libadwaita::Application::builder()
                 .application_id("io.github.gnacho.nextsync")
                 .build();
@@ -1493,6 +1549,7 @@ mod tests {
                 window.window().title().unwrap_or_default().to_string(),
                 WINDOW_TITLE
             );
+            reset_locale();
         });
     }
 }
