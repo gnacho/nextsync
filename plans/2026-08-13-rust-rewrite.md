@@ -2,7 +2,7 @@
 
 > **Decisiones (13-Ago-2026, usuario A FUEGO):** refactor a Rust aprobado. Se abandona la caza de bugs de la línea Python (el bug de Settings de ryzen-ai queda sin diagnosticar). Todo el conocimiento de git se usa para el rewrite: issues #4/#5/#7/#8/#9/#12/#13/#16-#22, `docs/REDESIGN.md`, `docs/REFACTOR-NOTES.md`, CHANGELOG, arquitectura v0.2.5 y spike validado en `/tmp/opencode/spike-ncsync`.
 
-**Actualización paridad (13-Ago-2026):** el Python avanzó a **v0.3.0** con features nuevas que el plan original no recogía. Se añaden a paridad (ver §Delta v0.2.5→v0.3.0): #25 (remote folder picker + auto-name), #33 (per-folder sync status), #30/#31 (log row + conflictos solo presentes), #32 (accent en Settings post-#16), fixes v0.2.6-v0.2.9. El plan se actualiza contra **origin/main v0.3.0**, no v0.2.4.
+**Actualización paridad (13-Ago-2026):** el Python avanzó a **v0.4.0** con features nuevas que el plan original no recogía. Se añaden a paridad (ver §Delta v0.2.5→v0.3.0 y la fila #34/#35): #25 (remote folder picker + auto-name), #33 (per-folder sync status), #30/#31 (log row + conflictos solo presentes), #32 (accent en Settings post-#16), fixes v0.2.6-v0.2.9, y **#34/#35 (v0.4.0): redesign de la vista de cuenta centrada en folders** (menú por fila, sin header de estado, account removal con confirmación tipeada). El plan se actualiza contra **origin/main v0.4.0**, no v0.2.4.
 
 **Goal:** Reescribir NextSync (wrapper fino sobre `nextcloudcmd`) en Rust + gtk-rs + libadwaita, con paridad de features con la v0.3.0 Python y empaquetado nativo.
 
@@ -75,6 +75,7 @@ Verificado contra origin/main v0.3.0 el 13-Ago-2026:
 | `36b59c5` | **Pick up added/removed folders sin restart**: `AccountRuntime` reconfigura en caliente cuando cambian los folders de una cuenta. | AccountManager Rust debe reconfigurar FolderRuntimes en caliente (añadir/eliminar). Fase de core. |
 | `f71ea90` | Fix Settings: `set_placeholder_text` → título compatible con EntryRow. | Detalle UI (Fase 5.2). |
 | `a261c31` | Fix Settings: `delete_guard` leído con default para evitar KeyError. | ConfigStore Rust ya usa `#[serde(default)]` → cubierto. |
+| #34/#35 `c8180b4` (v0.4.0) | **Redesign account view centrada en folders** (estilo cliente oficial/OpenCloud): la vista de cuenta muestra SOLO las carpetas, cada una con su estado en vivo (check si sincronizada) y menú "…" con acciones por fila: open local folder, edit ignored files, force sync now, pause/resume, remove folder (los ficheros locales se conservan). Se ELIMINAN de la vista: el header de estado grande, la fila de cuenta, la fila last-sync, el expander de actividad reciente y las filas log/conflicts. El borrado de CUENTA se mueve a Settings>Advanced con confirmación tipeada ("remove"); borrar cuenta solo elimina la conexión, nunca ficheros locales. | **Fase 5.1 reescrita**: vista de cuenta = lista de FolderStatusRow con acciones por fila (open/edit-ignored/sync/pause/remove-folder) y popover de menú; sin header de estado. Task 5.4 queda reducida (activity/log ya no están en la vista de cuenta). Account removal en Task 5.2 (Settings>Advanced, confirmación tipeada). |
 
 ## Fases y tareas
 
@@ -149,18 +150,19 @@ Verificado contra origin/main v0.3.0 el 13-Ago-2026:
 
 ### Fase 5 — UI (la parte grande)
 
-**Task 5.1: Ventana principal**
-- `src/ui/main_window.rs`: `Adw.ApplicationWindow` con `NavigationSplitView` (sidebar cuentas + content), label estado, progreso, botones header (Lucide settings-2/info — issue #21), Accent en botones (issue #16).
-- **Per-folder sync status (#33)**: una `FolderStatusRow` por folder con su estado individual (replica `folder_status.py`: etiqueta+icono por estado via `folder_status_presentation`).
-- **Refresh al cerrar Settings (v0.2.9)**: conectar close-request de Settings → refrescar main window.
-- Tests: smoke (construcción), contracts, presentación por estado de folder.
-- Commit: `feat(ui): main window with account sidebar and per-folder status`
+**Task 5.1: Ventana principal** (v0.3.0 + redesign v0.4.0)
+- `src/ui/main_window.rs`: `Adw.ApplicationWindow` con `NavigationSplitView` (sidebar cuentas + content), botones header (Lucide settings-2/info — issue #21), Accent en botones (issue #16).
+- **Vista de cuenta centrada en folders (v0.4.0, #35)** — replica el redesign: la vista de cuenta muestra SOLO la lista de `FolderStatusRow` (una por folder con su estado en vivo: check si sincronizada, spinner si syncing) y cada fila tiene un menú "…" (`Gtk.PopoverMenu`, acciones Gio `folder.*`) con: Open local folder, Edit ignored files, Force sync now, Pause/Resume, Remove folder (los ficheros locales se conservan). NO hay header de estado grande, ni fila de cuenta, ni last-sync row, ni expander de actividad, ni filas log/conflicts en la vista de cuenta.
+- **Refresh al cerrar Settings (v0.2.9)**: conectar close-request de Settings → refrescar la vista de la cuenta activa (nuevo folder aparece al instante).
+- Tests: smoke (construcción), contracts, presentación por estado de folder, acciones del menú.
+- Commit: `feat(ui): main window with folder-focused account view`
 
 **Task 5.2: Settings**
-- `src/ui/settings.rs`: `Adw.PreferencesWindow` con General/Sync/Network/Advanced + grupos por folder + Add Folder. Acepta un runtime (fachada). Empty state con cero folders (issue #17). Fix EntryRow title (v0.2.7).
+- `src/ui/settings.rs`: `Adw.PreferencesWindow` con General/Sync/Network/**Advanced** + grupos por folder + Add Folder. Acepta un runtime (fachada). Empty state con cero folders (issue #17). Fix EntryRow title (v0.2.7).
 - **Remote folder picker (#25)**: al configurar una carpeta, listar las carpetas remotas existentes (`list_remote_folders` PROPFIND contra `/remote.php/dav/files/{user}`) y ofrecerlas; `remote_path_for(local_root, text)` auto-nombra un blank con el nombre de la carpeta local.
-- Tests: contrato accent (#32), empty state, picker con fixtures PROPFIND.
-- Commit: `feat(ui): settings window with remote folder picker`
+- **Account removal en Advanced (v0.4.0, #35)**: botón Remove Account con **confirmación tipeada** (el usuario escribe "remove") y diálogo en dos pasos (`_remove_account_choice`/`_remove_account_step_two`). Borrar cuenta solo elimina la conexión; los folders y ficheros locales se conservan.
+- Tests: contrato accent (#32), empty state, picker con fixtures PROPFIND, confirmación tipeada.
+- Commit: `feat(ui): settings window with remote folder picker and account removal`
 
 **Task 5.3: Setup wizard**
 - `src/ui/setup.rs`: **selector de proveedor** (Nextcloud / OpenCloud) al crear cuenta.
@@ -170,7 +172,8 @@ Verificado contra origin/main v0.3.0 el 13-Ago-2026:
 
 **Task 5.4: Conflict resolver + activity + log**
 - `src/ui/conflict_resolver.rs` (issue #7: keep local/remote/open), `src/ui/activity.rs` (recent), `src/ui/log_view.rs`.
-- **Fix v0.2.9 (#30/#31)**: log row siempre adjunta a la actividad; la fila de conflictos solo aparece si hay conflicted copies.
+- **v0.4.0**: activity/log/conflicts ya NO viven en la vista de cuenta (el redesign #35 los sacó). El log se abre desde la ventana principal (botón/acción Show Log) y los conflicts desde la acción correspondiente; el resolver sigue siendo una ventana aparte.
+- **Fix v0.2.9 (#30/#31)**: log row siempre adjunta; la fila de conflictos solo aparece si hay conflicted copies.
 - Commit: `feat(ui): conflict resolver, activity, log view`
 
 **Task 5.5: Tray**
