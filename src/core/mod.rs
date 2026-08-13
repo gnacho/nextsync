@@ -3,6 +3,7 @@
 
 pub mod account_runtime;
 pub mod autostart;
+pub mod conflict_files;
 pub mod debounce;
 pub mod delete_guard;
 pub mod desktop_integration;
