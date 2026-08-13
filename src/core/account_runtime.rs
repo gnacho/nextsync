@@ -425,6 +425,20 @@ impl AccountManager {
         self.ensure_runtime(account);
     }
 
+    /// Reconcile the folder runtimes of an existing account with a fresh
+    /// account configuration (folders added or removed in Settings).
+    ///
+    /// The runtime keeps running; only the folder set is reconciled. Returns
+    /// `false` when the account has no runtime yet.
+    pub fn sync_folders(&mut self, account: &AccountConfig) -> bool {
+        let Some(runtime) = self.runtimes.get_mut(&account.id) else {
+            return false;
+        };
+        runtime.account = account.clone();
+        runtime.sync_folders();
+        true
+    }
+
     /// Drop a single account runtime, leaving the rest running.
     pub fn remove(&mut self, account_id: &str) -> bool {
         let Some(mut runtime) = self.runtimes.remove(account_id) else {

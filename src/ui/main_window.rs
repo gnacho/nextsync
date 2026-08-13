@@ -10,14 +10,16 @@
 //! Header buttons use the Lucide `settings-2` / `info` symbolic icons
 //! (issue #21).
 
-use std::rc::Rc;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
 use libadwaita::prelude::*;
 
 use crate::core::account_runtime::{AccountManager, AccountRuntime};
 use crate::state::{AppState, StateSnapshot};
-use crate::storage::config::Config;
+use crate::storage::config::{Config, ConfigStore};
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
+use crate::ui::settings::{SettingsCallbacks, SettingsWindow};
 
 /// Stable machine-readable name used as a window hint (no GTK dependency).
 pub const WINDOW_TITLE: &str = "NextSync";
@@ -30,6 +32,10 @@ pub type OpenFolderCallback = Rc<dyn Fn(&str)>;
 pub type RemoveFolderCallback = Rc<dyn Fn(&str, &str)>;
 /// Callback invoked when the user wants to edit ignored files.
 pub type EditIgnoredCallback = Rc<dyn Fn()>;
+
+/// Shared holder for the Settings header-button handler, installed after the
+/// window lives in a shared cell.
+pub type SettingsHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
 
 /// Folder row callbacks as plain functions the view can invoke.
 pub struct AccountCallbacks {
@@ -234,10 +240,15 @@ pub struct MainWindow {
     window: libadwaita::ApplicationWindow,
     account_manager: AccountManager,
     config: Config,
+    config_store: ConfigStore,
+    active_account_id: Option<String>,
+    settings_window: Option<SettingsWindow>,
     accounts_list: gtk4::ListBox,
     content_stack: gtk4::Stack,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
     account_view: Option<AccountView>,
+    settings_handler: SettingsHandler,
+    self_weak: Weak<RefCell<MainWindow>>,
     _subscription: Option<crate::state::Subscription>,
     // Kept alive while the window exists.
     _sidebar_page: libadwaita::NavigationPage,
@@ -250,9 +261,9 @@ impl MainWindow {
     pub fn new(
         application: &libadwaita::Application,
         config: Config,
+        config_store: ConfigStore,
         account_manager: AccountManager,
         on_add_account: Option<Rc<dyn Fn()>>,
-        on_open_settings: Option<Rc<dyn Fn()>>,
         on_show_about: Option<Rc<dyn Fn()>>,
     ) -> Self {
         let window = libadwaita::ApplicationWindow::builder()
@@ -272,10 +283,13 @@ impl MainWindow {
             .tooltip_text("Settings")
             .css_classes(["flat"])
             .build();
-        let settings_cb = on_open_settings.clone();
+        // The handler is installed after construction (the window must exist
+        // inside a shared cell first); until then the button is inert.
+        let settings_handler: SettingsHandler = Rc::new(RefCell::new(None));
+        let handler_for_button = settings_handler.clone();
         settings_button.connect_clicked(move |_button| {
-            if let Some(cb) = &settings_cb {
-                cb();
+            if let Some(handler) = handler_for_button.borrow_mut().as_mut() {
+                handler();
             }
         });
         header.pack_end(&settings_button);
@@ -334,20 +348,31 @@ impl MainWindow {
         split.set_sidebar(Some(&sidebar_page));
         split.set_content(Some(&content_page));
         toolbar.set_content(Some(&split));
-        window.set_child(Some(&toolbar));
+        window.set_content(Some(&toolbar));
 
         let mut main = Self {
             window,
             account_manager,
             config,
+            config_store,
+            active_account_id: None,
+            settings_window: None,
             accounts_list,
             content_stack,
             account_rows: std::collections::HashMap::new(),
             account_view: None,
+            settings_handler,
+            self_weak: Weak::new(),
             _subscription: None,
             _sidebar_page: sidebar_page,
             _content_page: content_page,
         };
+        // Install the Settings handler: opening Settings needs the whole
+        // window, so it is wired once the shared cell exists.
+        let settings_handler = main.settings_handler.clone();
+        *settings_handler.borrow_mut() = Some(Box::new(move || {
+            // Replaced after construction via `install_settings_handler`.
+        }));
         main.refresh_sidebar();
         main.present_account(None);
         main
@@ -356,6 +381,109 @@ impl MainWindow {
     /// The underlying window, for presentation and wiring.
     pub fn window(&self) -> &libadwaita::ApplicationWindow {
         &self.window
+    }
+
+    /// Wire the Settings header button to open this window's Settings.
+    ///
+    /// Called once from the launcher once the window lives in a shared cell.
+    pub fn install_settings_handler(&mut self, weak: Weak<RefCell<MainWindow>>) {
+        self.self_weak = weak.clone();
+        let handler = self.settings_handler.clone();
+        *handler.borrow_mut() = Some(Box::new(move || {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().show_settings();
+            }
+        }));
+    }
+
+    /// Open (or bring to front) the Settings window for the active account.
+    pub fn show_settings(&mut self) {
+        let Some(account_id) = self.active_account_id.clone() else {
+            return;
+        };
+        let Some(account) = self
+            .config
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(window) = &self.settings_window {
+            window.window().present();
+            return;
+        }
+        let callbacks = self.build_settings_callbacks();
+        let window = SettingsWindow::new(self.config_store.clone(), account, account_id, callbacks);
+        window.window().present();
+        self.settings_window = Some(window);
+    }
+
+    /// Re-read the configuration, refresh the sidebar and re-present the
+    /// active account (called after Settings mutates folders).
+    fn refresh_after_config_change(&mut self) {
+        self.config = self.config_store.load().unwrap_or_default();
+        self.refresh_sidebar();
+        let account_id = self.active_account_id.clone();
+        self.present_account(account_id.as_deref());
+    }
+
+    /// Reconcile the active account runtimes with the current configuration.
+    fn reconfigure_active_account(&mut self) {
+        self.config = self.config_store.load().unwrap_or_default();
+        if let Some(account_id) = &self.active_account_id {
+            if let Some(account) = self
+                .config
+                .accounts
+                .iter()
+                .find(|account| &account.id == account_id)
+                .cloned()
+            {
+                self.account_manager.sync_folders(&account);
+            }
+        }
+    }
+
+    /// Build the Settings callbacks against this window's shared cell.
+    fn build_settings_callbacks(&mut self) -> SettingsCallbacks {
+        let weak = self.self_weak.clone();
+        SettingsCallbacks {
+            on_folder_changed: {
+                let weak = weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().refresh_after_config_change();
+                    }
+                }))
+            },
+            on_reconfigure: {
+                let weak = weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().reconfigure_active_account();
+                    }
+                }))
+            },
+            on_remove_account: {
+                let weak = weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().remove_active_account();
+                    }
+                }))
+            },
+        }
+    }
+
+    /// Remove the active account (config + runtime), then refresh the window.
+    fn remove_active_account(&mut self) {
+        let Some(account_id) = self.active_account_id.clone() else {
+            return;
+        };
+        let _ = self.config_store.remove_account(&account_id);
+        let _ = self.account_manager.remove(&account_id);
+        self.refresh_after_config_change();
     }
 
     /// Refresh the account sidebar from the current configuration.
@@ -415,6 +543,7 @@ impl MainWindow {
                 .first()
                 .map(|account| account.id.clone()),
         };
+        self.active_account_id = account_id.clone();
         self.show_account(account_id.as_deref());
     }
 
@@ -508,7 +637,8 @@ mod tests {
             let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
                 crate::core::debounce::FakeTimeoutSource::default(),
             )));
-            let window = MainWindow::new(&app, Config::default(), manager, None, None, None);
+            let store = ConfigStore::with_path(std::env::temp_dir().join("nextsync-smoke.json"));
+            let window = MainWindow::new(&app, Config::default(), store, manager, None, None);
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
                 "NextSync"
