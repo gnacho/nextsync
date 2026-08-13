@@ -202,6 +202,7 @@ mod tests {
 
     #[test]
     fn desktop_dir_parses_user_dirs_dirs() {
+        let _env = crate::util::test_env::lock();
         let config = tempfile::tempdir().unwrap();
         fs::create_dir_all(config.path()).unwrap();
         fs::write(
@@ -215,6 +216,7 @@ mod tests {
 
     #[test]
     fn desktop_dir_falls_back_to_home_desktop() {
+        let _env = crate::util::test_env::lock();
         let config = tempfile::tempdir().unwrap();
         let result = desktop_dir_from(config.path());
         assert_eq!(result, home_dir().join("Desktop"));
