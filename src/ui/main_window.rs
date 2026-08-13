@@ -18,6 +18,7 @@ use libadwaita::prelude::*;
 use crate::core::account_runtime::{AccountManager, AccountRuntime};
 use crate::state::{AppState, StateSnapshot};
 use crate::storage::config::{Config, ConfigStore};
+use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{SettingsCallbacks, SettingsWindow};
 use crate::util::i18n::t;
@@ -262,6 +263,9 @@ pub struct MainWindow {
     setup_window: Option<crate::ui::setup::SetupWindow>,
     log_window: Option<crate::ui::log_view::LogWindow>,
     conflicts_window: Option<crate::ui::conflict_resolver::ConflictResolverWindow>,
+    about_dialog: Option<libadwaita::AboutDialog>,
+    checking_dialog: Option<libadwaita::Dialog>,
+    update_result_dialog: Option<libadwaita::Dialog>,
     accounts_list: gtk4::ListBox,
     content_stack: gtk4::Stack,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
@@ -382,6 +386,9 @@ impl MainWindow {
             setup_window: None,
             log_window: None,
             conflicts_window: None,
+            about_dialog: None,
+            checking_dialog: None,
+            update_result_dialog: None,
             accounts_list,
             content_stack,
             account_rows: std::collections::HashMap::new(),
@@ -481,6 +488,113 @@ impl MainWindow {
         );
         window.present();
         self.conflicts_window = Some(window);
+    }
+
+    /// Open (or bring to front) the About dialog. The dialog's
+    /// "Check for Updates" link is wired back to [`Self::check_for_updates`]
+    /// via this window's shared cell.
+    pub fn show_about(&mut self) {
+        if let Some(dialog) = &self.about_dialog {
+            dialog.present(Some(&self.window));
+            return;
+        }
+        let version = env!("CARGO_PKG_VERSION");
+        let dialog = about::build_about_dialog(version);
+        let weak = self.self_weak.clone();
+        dialog.connect_activate_link(move |_dialog, uri| {
+            if uri == about::CHECK_UPDATES_URI {
+                if let Some(main) = weak.upgrade() {
+                    // Defer so the About dialog can close first (the checker
+                    // opens its own modal spinner over the main window).
+                    glib::idle_add_local_once(move || {
+                        main.borrow_mut().check_for_updates();
+                    });
+                }
+                return true;
+            }
+            false
+        });
+        dialog.present(Some(&self.window));
+
+        // Drop our reference when the dialog is dismissed.
+        let weak = self.self_weak.clone();
+        dialog.connect_closed(move |_| {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().about_dialog = None;
+            }
+        });
+        self.about_dialog = Some(dialog);
+    }
+
+    /// Run the update check off the main thread, showing a spinner dialog
+    /// while the synchronous [`about::run_update_check`] runs on the Gio
+    /// blocking pool, then present the result.
+    pub fn check_for_updates(&mut self) {
+        if self.checking_dialog.is_some() {
+            // A check is already running; ignore the second click.
+            return;
+        }
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let checking = about::build_checking_dialog();
+        checking.present(Some(&self.window));
+
+        let weak = self.self_weak.clone();
+        checking.connect_closed(move |_| {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().checking_dialog = None;
+            }
+        });
+        self.checking_dialog = Some(checking);
+
+        let weak = self.self_weak.clone();
+        glib::spawn_future_local(async move {
+            // Build the checker *inside* the blocking closure: the shared
+            // `HttpClient` is not `Send`, so the checker never crosses the
+            // thread boundary — only the version string does.
+            let handle = gio::spawn_blocking(move || about::run_update_check(&version));
+            match handle.await {
+                Ok(result) => {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().finish_update_check(result);
+                    }
+                }
+                Err(_panic) => {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().finish_update_check(
+                            crate::core::updates::UpdateCheckResult {
+                                error: Some(
+                                    t("The version information could not be obtained. Check your connection and try again later.")
+                                        .to_string(),
+                                ),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    /// Replace the spinner with the result dialog.
+    fn finish_update_check(&mut self, result: crate::core::updates::UpdateCheckResult) {
+        if let Some(error) = &result.error {
+            self.logger.append(&format!("update check failed: {error}"));
+        }
+        // Close the spinner first.
+        if let Some(checking) = self.checking_dialog.take() {
+            checking.force_close();
+        }
+        let outcome = about::classify_update_result(&result);
+        let dialog = about::build_update_result_dialog(&outcome, env!("CARGO_PKG_VERSION"));
+        dialog.present(Some(&self.window));
+
+        let weak = self.self_weak.clone();
+        dialog.connect_closed(move |_| {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().update_result_dialog = None;
+            }
+        });
+        self.update_result_dialog = Some(dialog);
     }
 
     pub fn show_add_account(&mut self) {
