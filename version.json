@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "version": "0.1.0",
+  "mandatory": false,
+  "summary": "First Rust rewrite milestone: folder-focused main window, settings, setup wizard, tray, conflict resolver and i18n.",
+  "changelog": [
+    "Folder-focused main window with per-folder live status and menus.",
+    "Settings window with remote folder picker and typed account removal.",
+    "Setup wizard with Nextcloud and OpenCloud provider selection.",
+    "StatusNotifier tray, sync activity/conflicts window and live log.",
+    "Spanish translation embedded; English fallback."
+  ],
+  "released_at": "2026-08-13T20:30:00Z"
+}

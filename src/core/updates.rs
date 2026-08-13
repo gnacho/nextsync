@@ -647,6 +647,18 @@ mod tests {
     }
 
     #[test]
+    fn repository_version_manifest_is_valid_and_matches_the_crate() {
+        let data = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/version.json"))
+            .expect("version.json ships with the repository");
+        let manifest = parse_update_manifest(&data).unwrap();
+        assert_eq!(
+            manifest.version_text,
+            env!("CARGO_PKG_VERSION"),
+            "version.json and Cargo.toml must agree"
+        );
+    }
+
+    #[test]
     fn checker_uses_the_canonical_json_and_releases_urls() {
         let checker = UpdateChecker::with_http(
             Box::new(FakeHttp {

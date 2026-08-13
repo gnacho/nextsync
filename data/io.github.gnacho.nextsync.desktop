@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=NextSync
+Comment=Keep a physical local mirror of your Nextcloud files
+Exec=nextsync
+Icon=io.github.gnacho.nextsync
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;Utility;
+Keywords=Nextcloud;Sync;Cloud;Files;
+StartupNotify=true
