@@ -2182,3 +2182,19 @@ msgstr "Una sincronización ha fallado."
 #: src/core/notifications.rs
 msgid "NextSync"
 msgstr "NextSync"
+
+#: src/ui/main_window.rs
+msgid "Follow system style"
+msgstr "Seguir el estilo del sistema"
+
+#: src/ui/main_window.rs
+msgid "Light style"
+msgstr "Estilo claro"
+
+#: src/ui/main_window.rs
+msgid "Dark style"
+msgstr "Estilo oscuro"
+
+#: src/ui/settings.rs
+msgid "Desktop Integration"
+msgstr "Integración con el escritorio"
