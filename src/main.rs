@@ -86,6 +86,34 @@ fn main() {
                 runtime.connect_logger(&logger, Some(notifier.clone()), notifications_enabled);
             }
 
+            // Show the server's own notifications (shares, comments, mentions)
+            // as desktop notifications when the preference is on (issue #31).
+            // One watcher per Nextcloud account: OpenCloud has no notifications
+            // API, so it is gated the same way the notify_push trigger is.
+            // The notify_push `notify_notification` hint pokes the watcher for
+            // near-instant delivery; a periodic poll covers the rest. The
+            // watchers stay alive through their GLib timers and the push hook.
+            for runtime in account_manager.runtimes().values() {
+                if !nextsync::nextcloud::push::remote_push_supported(runtime.account.provider) {
+                    continue;
+                }
+                let watcher = std::rc::Rc::new(
+                    nextsync::core::server_notifications::ServerNotificationWatcher::new(
+                        config_store.clone(),
+                        runtime.account.id.clone(),
+                        runtime.account.server_url.clone(),
+                        runtime.account.login_name.clone(),
+                        notifier.clone(),
+                        logger.clone(),
+                    ),
+                );
+                runtime.set_on_server_notification(std::rc::Rc::new({
+                    let watcher = std::rc::Rc::clone(&watcher);
+                    move || watcher.poke()
+                }));
+                watcher.start();
+            }
+
             // Wire notify_push for every account that has a push client,
             // resolving the keyring password off the main thread so the
             // startup stays instant. A locked/missing credential just leaves

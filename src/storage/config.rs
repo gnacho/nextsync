@@ -215,6 +215,10 @@ pub struct GeneralConfig {
     /// Whether desktop notifications are sent for sync/auth failures.
     #[serde(default = "yes")]
     pub show_notifications: bool,
+    /// Whether the account's server notifications (shares, comments,
+    /// mentions) are raised as desktop notifications (issue #31).
+    #[serde(default)]
+    pub show_server_notifications: bool,
 }
 
 /// Default color scheme (follow the desktop).
@@ -234,6 +238,7 @@ impl Default for GeneralConfig {
             pause_on_battery: false,
             color_scheme: default_color_scheme(),
             show_notifications: yes(),
+            show_server_notifications: false,
         }
     }
 }
@@ -1012,6 +1017,7 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
         pause_on_battery: get_bool(obj, "pause_on_battery", false),
         color_scheme: get_string(obj, "color_scheme", &default_color_scheme()),
         show_notifications: get_bool(obj, "show_notifications", true),
+        show_server_notifications: get_bool(obj, "show_server_notifications", false),
     }
 }
 
@@ -1674,6 +1680,7 @@ mod tests {
         assert!(account.sync.local_inotify_enabled);
         assert!(!config.general.autostart);
         assert!(!config.general.pause_on_battery);
+        assert!(!config.general.show_server_notifications);
         assert_eq!(account.delete_guard.count_threshold, 50);
     }
 
@@ -1734,6 +1741,26 @@ mod tests {
         assert_eq!(config, Config::default());
         assert_eq!(config.schema_version, 7);
         assert!(config.accounts.is_empty());
+    }
+
+    #[test]
+    fn server_notifications_preference_roundtrips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = ConfigStore::with_path(path.clone());
+
+        let mut config = Config::default();
+        config.general.show_server_notifications = true;
+        store.save(&config).unwrap();
+        let loaded = store.load().unwrap();
+        assert!(loaded.general.show_server_notifications);
+
+        // Older config files without the key keep the (off) default.
+        let dir = tempdir().unwrap();
+        let legacy = dir.path().join("settings.json");
+        std::fs::write(&legacy, r#"{"general":{"show_notifications":true}}"#).unwrap();
+        let store = ConfigStore::with_path(legacy);
+        assert!(!store.load().unwrap().general.show_server_notifications);
     }
 
     #[test]

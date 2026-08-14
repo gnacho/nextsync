@@ -10,6 +10,8 @@
 //!   bodies) to check a folder exists and holds at least one entry.
 //! - [`NextcloudApi::list_remote_folders`]: PROPFIND against the account root
 //!   to list existing top-level folders as normalized paths (`/Documents`).
+//! - [`NextcloudApi::notifications`]: list the account's server notifications
+//!   (shares, comments, mentions) for desktop notifications.
 //!
 //! # HTTP client choice (verified)
 //!
@@ -45,9 +47,6 @@
 //!
 //! - The Python API is callback-asynchronous; this port is synchronous and
 //!   returns `Result`, per the crate's module contract.
-//! - `revoke_app_password` is not ported: the Rust rewrite does not manage app
-//!   passwords yet (the wizard uses the user's regular password in the Secret
-//!   Service). Port it when app-password lifecycle lands.
 //! - `validate_credentials` returns `Ok(None)` when the payload has no
 //!   `display-name`, matching the Python (which passes `None` to its callback).
 
@@ -125,6 +124,21 @@ impl AccountSummary {
             (None, _) => String::new(),
         }
     }
+}
+
+/// One server notification (shares, comments, mentions) from the OCS
+/// notifications endpoint. Only the fields needed for a desktop notification
+/// are parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerNotification {
+    /// The numeric id used to deduplicate notifications across polls.
+    pub notification_id: i64,
+    /// The app that produced it (e.g. `files_sharing`, `comments`, `spreed`).
+    pub app: String,
+    /// The parsed subject, e.g. "Alice shared a file with you".
+    pub subject: String,
+    /// The parsed message (optional; many notifications only have a subject).
+    pub message: Option<String>,
 }
 
 /// Format bytes with binary prefixes (KiB/MiB/GiB), one decimal.
@@ -375,6 +389,68 @@ impl NextcloudApi {
         }
         folders.sort();
         Ok(folders)
+    }
+
+    /// List the account's server notifications (issue #31).
+    ///
+    /// `GET /ocs/v2.php/apps/notifications/api/v1/notifications?format=json`
+    /// with the OCS headers. A 204 (no app uses notifications) is an empty
+    /// list, not an error; `subject`/`message` are the parsed strings.
+    pub fn notifications(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Vec<ServerNotification>, ApiError> {
+        let url = format!(
+            "{}/ocs/v2.php/apps/notifications/api/v1/notifications?format=json",
+            server.trim_end_matches('/')
+        );
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Accept", "application/json"),
+            ("OCS-APIREQUEST", "true"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self.http.request("GET", &url, &headers, None)?;
+        if response.status == 204 {
+            return Ok(Vec::new());
+        }
+        map_status(response.status)?;
+        let payload: serde_json::Value =
+            serde_json::from_slice(&response.body).map_err(|_| ApiError::InvalidResponse)?;
+        let items = payload
+            .get("ocs")
+            .and_then(|ocs| ocs.get("data"))
+            .and_then(|data| data.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let mut notifications = Vec::with_capacity(items.len());
+        for item in items {
+            let message = item
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .filter(|message| !message.is_empty());
+            notifications.push(ServerNotification {
+                notification_id: item
+                    .get("notification_id")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+                app: item
+                    .get("app")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+                subject: item
+                    .get("subject")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+                message,
+            });
+        }
+        Ok(notifications)
     }
 
     /// Run a Depth-1 PROPFIND and parse the multistatus response.
@@ -1056,6 +1132,96 @@ mod tests {
         assert_eq!(
             api.validate_credentials("https://cloud.example.com", "alice", "secret"),
             Err(ApiError::Transport)
+        );
+    }
+
+    // ---- notifications -----------------------------------------------------
+
+    const NOTIFICATIONS_JSON: &[u8] = br#"{"ocs":{"data":[
+      {"notification_id":42,"app":"files_sharing","subject":"Alice shared a file with you","message":"Documents/report.pdf"},
+      {"notification_id":43,"app":"comments","subject":"Bob commented on your post","message":""},
+      {"notification_id":44,"app":"spreed","subject":"Call with Carol"}
+    ]}}"#;
+
+    #[test]
+    fn notifications_parses_id_app_subject_and_message() {
+        let http = FakeHttp::new(200, NOTIFICATIONS_JSON);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let notifications = api
+            .notifications("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert_eq!(notifications.len(), 3);
+        assert_eq!(notifications[0].notification_id, 42);
+        assert_eq!(notifications[0].app, "files_sharing");
+        assert_eq!(notifications[0].subject, "Alice shared a file with you");
+        assert_eq!(
+            notifications[0].message.as_deref(),
+            Some("Documents/report.pdf")
+        );
+        assert_eq!(notifications[1].notification_id, 43);
+        assert_eq!(notifications[1].message, None, "empty message becomes None");
+        assert_eq!(
+            notifications[2].message, None,
+            "missing message becomes None"
+        );
+    }
+
+    #[test]
+    fn notifications_sends_get_with_ocs_headers() {
+        let http = FakeHttp::new(200, NOTIFICATIONS_JSON);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.notifications("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "GET");
+        assert_eq!(header_value(request, "Accept"), Some("application/json"));
+        assert_eq!(header_value(request, "OCS-APIREQUEST"), Some("true"));
+        assert!(header_value(request, "Authorization")
+            .unwrap()
+            .starts_with("Basic "));
+        assert!(request
+            .url
+            .ends_with("/ocs/v2.php/apps/notifications/api/v1/notifications?format=json"));
+    }
+
+    #[test]
+    fn notifications_204_without_notifiers_is_empty() {
+        let http = FakeHttp::new(204, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        let notifications = api
+            .notifications("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        assert!(notifications.is_empty());
+    }
+
+    #[test]
+    fn notifications_empty_payload_is_empty() {
+        let http = FakeHttp::new(200, br#"{"ocs":{"data":[]}}"#);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(api
+            .notifications("https://cloud.example.com", "alice", "secret")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn notifications_auth_rejection_surfaces() {
+        let http = FakeHttp::new(403, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.notifications("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::AuthRejected)
+        );
+    }
+
+    #[test]
+    fn notifications_invalid_json_surfaces() {
+        let http = FakeHttp::new(200, b"not json");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.notifications("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::InvalidResponse)
         );
     }
 

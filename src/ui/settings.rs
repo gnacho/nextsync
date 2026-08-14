@@ -217,20 +217,52 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         .active(general.show_notifications)
         .build();
 
+    let server_notifications = libadwaita::SwitchRow::builder()
+        .title(t("Show server notifications"))
+        .subtitle(t("New shares, comments and mentions from your account"))
+        .active(general.show_server_notifications)
+        .build();
+
     {
         let store = store.clone();
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
         autostart.connect_active_notify(move |_| {
-            save_general(&store, &autostart_guard, &notifications_guard);
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+            );
         });
     }
     {
         let store = store.clone();
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
         notifications.connect_active_notify(move |_| {
-            save_general(&store, &autostart_guard, &notifications_guard);
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        server_notifications.connect_active_notify(move |_| {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+            );
         });
     }
 
@@ -241,6 +273,7 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         .title(t("Notifications"))
         .build();
     notifications_group.add(&notifications);
+    notifications_group.add(&server_notifications);
     page.add(&notifications_group);
 
     page
@@ -821,10 +854,12 @@ fn save_general(
     store: &ConfigStore,
     autostart: &libadwaita::SwitchRow,
     notifications: &libadwaita::SwitchRow,
+    server_notifications: &libadwaita::SwitchRow,
 ) {
     if let Err(error) = persist_config(store, |config| {
         config.general.autostart = autostart.is_active();
         config.general.show_notifications = notifications.is_active();
+        config.general.show_server_notifications = server_notifications.is_active();
     }) {
         eprintln!("Settings: could not save general settings: {error}");
     }

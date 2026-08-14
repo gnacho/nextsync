@@ -3,7 +3,8 @@
 //! Fase 4 (Task 4.1). A Rust port of the Python `NotifyPushClient`
 //! (`nextcloud/push.py`): it discovers the notify_push endpoints over OCS,
 //! authenticates (pre-auth token or app password), keeps the WebSocket alive
-//! and reports file-change hints plus a [`PushState`] machine.
+//! and reports file-change hints, `notify_notification` hints (issue #31) and
+//! a [`PushState`] machine.
 //!
 //! Threading: the GLib main thread is never blocked. Every connect attempt
 //! spawns one blocking worker thread (`std::thread` + an `async_channel`; the
@@ -93,6 +94,9 @@ enum PushEventKind {
     Authenticated,
     /// The WebSocket sent a `notify_file*` hint.
     FileNotification,
+    /// The WebSocket sent a `notify_notification` hint (new server
+    /// notification, issue #31).
+    Notification,
     /// The connection closed without an intentional close.
     Closed {
         reason: String,
@@ -123,6 +127,7 @@ struct PushInner {
     tls: Option<Arc<ClientConfig>>,
     backoff_scale: f64,
     on_file_notification: Rc<dyn Fn()>,
+    on_notification: Rc<dyn Fn()>,
     on_state: Rc<dyn Fn(PushState, String)>,
 }
 
@@ -138,12 +143,14 @@ pub struct NotifyPushClient {
 impl NotifyPushClient {
     /// Create a client for an account bound to `provider`.
     ///
-    /// `on_file_notification` fires on every remote file hint, `on_state` on
-    /// every [`PushState`] transition (message included). Both run on the main
+    /// `on_file_notification` fires on every remote file hint, `on_notification`
+    /// on every `notify_notification` server hint, `on_state` on every
+    /// [`PushState`] transition (message included). All three run on the main
     /// thread.
     pub fn new(
         provider: Provider,
         on_file_notification: impl Fn() + 'static,
+        on_notification: impl Fn() + 'static,
         on_state: impl Fn(PushState, String) + 'static,
     ) -> Self {
         Self {
@@ -162,6 +169,7 @@ impl NotifyPushClient {
                 tls: None,
                 backoff_scale: 1.0,
                 on_file_notification: Rc::new(on_file_notification),
+                on_notification: Rc::new(on_notification),
                 on_state: Rc::new(on_state),
             })),
         }
@@ -327,6 +335,10 @@ impl NotifyPushClient {
             }
             PushEventKind::FileNotification => {
                 let callback = self.inner.borrow().on_file_notification.clone();
+                callback();
+            }
+            PushEventKind::Notification => {
+                let callback = self.inner.borrow().on_notification.clone();
                 callback();
             }
             PushEventKind::Closed {
@@ -589,6 +601,11 @@ fn push_worker_main(inputs: WorkerInputs) {
                     let _ = tx.send_blocking(PushEvent {
                         generation,
                         kind: PushEventKind::FileNotification,
+                    });
+                } else if text == "notify_notification" {
+                    let _ = tx.send_blocking(PushEvent {
+                        generation,
+                        kind: PushEventKind::Notification,
                     });
                 } else if text == "invalid credentials" || text == "authentication failed" {
                     let _ = tx.send_blocking(PushEvent {
@@ -1055,6 +1072,7 @@ mod tests {
             move || {
                 notifications_clone.set(notifications_clone.get() + 1);
             },
+            || {},
             move |state, message| {
                 states_clone.borrow_mut().push((state, message));
             },
@@ -1146,7 +1164,7 @@ mod tests {
     }
 
     impl FakePushServer {
-        fn start(upgrade_header: &str, close_before_auth: bool) -> Self {
+        fn start(upgrade_header: &str, close_before_auth: bool, send_notification: bool) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind the fake server");
             let addr = listener.local_addr().expect("local address");
             let stop = Arc::new(AtomicBool::new(false));
@@ -1166,6 +1184,7 @@ mod tests {
                                 addr,
                                 &upgrade_header,
                                 close_before_auth,
+                                send_notification,
                                 &pre_auth_requests,
                                 &ws_connections,
                             ),
@@ -1213,6 +1232,7 @@ mod tests {
         addr: SocketAddr,
         upgrade_header: &str,
         close_before_auth: bool,
+        send_notification: bool,
         pre_auth_requests: &AtomicUsize,
         ws_connections: &AtomicUsize,
     ) {
@@ -1299,6 +1319,9 @@ mod tests {
             }
             let _ = websocket.send(Message::text("authenticated"));
             let _ = websocket.send(Message::text("notify_file_id 42"));
+            if send_notification {
+                let _ = websocket.send(Message::text("notify_notification"));
+            }
             let _ = websocket.close(None);
             let _ = websocket.flush();
             return;
@@ -1308,7 +1331,7 @@ mod tests {
 
     #[test]
     fn tolerant_handshake_accepts_comma_separated_upgrade_header() {
-        let server = FakePushServer::start("h2,h2c, websocket", false);
+        let server = FakePushServer::start("h2,h2c, websocket", false, false);
         let (tx, rx) = async_channel::unbounded::<PushEvent>();
         let stop = Arc::new(AtomicBool::new(false));
         let worker = {
@@ -1340,6 +1363,51 @@ mod tests {
         assert_eq!(kinds, vec!["authenticated", "file_notification", "closed"]);
     }
 
+    /// A `notify_notification` text message must surface as a
+    /// `Notification` event (issue #31).
+    #[test]
+    fn notify_notification_text_emits_a_notification_event() {
+        let server = FakePushServer::start("websocket", false, true);
+        let (tx, rx) = async_channel::unbounded::<PushEvent>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                push_worker_main(WorkerInputs {
+                    generation: 1,
+                    server: server.server_url(),
+                    username: "alice".to_string(),
+                    password: "secret".to_string(),
+                    force_password_auth: false,
+                    tls: test_tls_config(),
+                    stop,
+                    tx,
+                });
+            })
+        };
+        let events = collect_events(&rx, 4, Duration::from_secs(15));
+        let _ = worker.join();
+        let kinds: Vec<&str> = events
+            .iter()
+            .map(|event| match &event.kind {
+                PushEventKind::Authenticated => "authenticated",
+                PushEventKind::FileNotification => "file_notification",
+                PushEventKind::Notification => "notification",
+                PushEventKind::Closed { .. } => "closed",
+                other => panic!("unexpected event: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "authenticated",
+                "file_notification",
+                "notification",
+                "closed"
+            ]
+        );
+    }
+
     /// Drain `count` events off the channel (used by worker-level tests).
     fn collect_events(
         rx: &async_channel::Receiver<PushEvent>,
@@ -1367,7 +1435,7 @@ mod tests {
         let _guard = TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let server = FakePushServer::start("websocket", true);
+        let server = FakePushServer::start("websocket", true, false);
         let context = glib::MainContext::new();
         let (client, states, _notifications) = test_client(Provider::Nextcloud);
         context

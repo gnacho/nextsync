@@ -13,6 +13,7 @@ pub mod network;
 pub mod notifications;
 pub mod power;
 pub mod scheduler;
+pub mod server_notifications;
 pub mod suspend;
 pub mod sync_permit;
 pub mod triggers;

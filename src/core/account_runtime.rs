@@ -78,6 +78,9 @@ struct WatcherTargets {
     on_battery: bool,
     /// Last notify_push state/message reported by the push client.
     push_state: Option<(PushState, String)>,
+    /// App-layer hook for the push `notify_notification` hint (issue #31): set
+    /// by the launcher to poke the server-notifications poller.
+    on_server_notification: Option<Rc<dyn Fn()>>,
 }
 
 impl WatcherTargets {
@@ -142,6 +145,15 @@ impl WatcherTargets {
     fn store_push_state(targets: &Rc<RefCell<WatcherTargets>>, state: PushState, message: String) {
         if let Ok(mut current) = targets.try_borrow_mut() {
             current.push_state = Some((state, message));
+        }
+    }
+
+    /// A `notify_notification` hint from the push client pokes the app layer's
+    /// server-notifications poller (issue #31), when one is installed.
+    fn apply_server_notification(targets: &Rc<RefCell<WatcherTargets>>) {
+        let callback = targets.borrow().on_server_notification.clone();
+        if let Some(callback) = callback {
+            callback();
         }
     }
 }
@@ -538,6 +550,14 @@ impl AccountRuntime {
         self.push.clone()
     }
 
+    /// Install the app-layer hook invoked when the push client reports a
+    /// `notify_notification` server hint (issue #31). Set once at startup;
+    /// the push client routes through the shared [`WatcherTargets`], so the
+    /// hook keeps working even if the channel reconnects.
+    pub fn set_on_server_notification(&self, callback: Rc<dyn Fn()>) {
+        self.targets.borrow_mut().on_server_notification = Some(callback);
+    }
+
     /// Connect an activity logger to every folder scheduler: one line per
     /// finished run with its outcome. The logger is shared (`LogBuffer` is
     /// `Clone` over a shared buffer), so the UI recent/log views see the same
@@ -681,10 +701,12 @@ impl AccountRuntime {
             return None;
         }
         let file_targets = Rc::clone(&self.targets);
+        let notification_targets = Rc::clone(&self.targets);
         let state_targets = Rc::clone(&self.targets);
         Some(NotifyPushClient::new(
             self.account.provider,
             move || WatcherTargets::apply_remote_push(&file_targets),
+            move || WatcherTargets::apply_server_notification(&notification_targets),
             move |state, message| WatcherTargets::store_push_state(&state_targets, state, message),
         ))
     }
