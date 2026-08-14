@@ -77,9 +77,13 @@ fn main() {
             // Start the per-folder filesystem watchers and progress forwarders
             // (main-loop consumers, production only).
             account_manager.connect_all_glue();
-            // Feed the activity/recent log from every folder's finished runs.
+            // Feed the activity/recent log from every folder's finished runs
+            // and raise desktop notifications for problem outcomes.
+            let notifier: std::rc::Rc<dyn nextsync::core::notifications::DesktopNotifier> =
+                std::rc::Rc::new(nextsync::core::notifications::FreedesktopNotifier);
+            let notifications_enabled = config.general.show_notifications;
             for runtime in account_manager.runtimes().values() {
-                runtime.connect_logger(&logger);
+                runtime.connect_logger(&logger, Some(notifier.clone()), notifications_enabled);
             }
 
             // Wire notify_push for every account that has a push client,

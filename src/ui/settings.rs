@@ -193,7 +193,7 @@ pub mod page {
 // Page builders
 // ---------------------------------------------------------------------------
 
-/// General page: Startup and Power switches.
+/// General page: Startup and Notifications switches.
 fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("General"))
@@ -207,37 +207,38 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         .title(t("Start NextSync when I sign in"))
         .active(general.autostart)
         .build();
-    let pause_battery = libadwaita::SwitchRow::builder()
-        .title(t("Pause synchronization while on battery"))
-        .subtitle(t("A running synchronization is allowed to finish."))
-        .active(general.pause_on_battery)
+
+    let notifications = libadwaita::SwitchRow::builder()
+        .title(t("Show desktop notifications"))
+        .subtitle(t("Authentication and synchronization failures"))
+        .active(general.show_notifications)
         .build();
 
     {
         let store = store.clone();
         let autostart_guard = autostart.clone();
-        let pause_guard = pause_battery.clone();
+        let notifications_guard = notifications.clone();
         autostart.connect_active_notify(move |_| {
-            save_general(&store, &autostart_guard, &pause_guard);
+            save_general(&store, &autostart_guard, &notifications_guard);
         });
     }
     {
         let store = store.clone();
         let autostart_guard = autostart.clone();
-        let pause_guard = pause_battery.clone();
-        pause_battery.connect_active_notify(move |_| {
-            save_general(&store, &autostart_guard, &pause_guard);
+        let notifications_guard = notifications.clone();
+        notifications.connect_active_notify(move |_| {
+            save_general(&store, &autostart_guard, &notifications_guard);
         });
     }
 
     startup.add(&autostart);
     page.add(&startup);
 
-    let power = libadwaita::PreferencesGroup::builder()
-        .title(t("Power"))
+    let notifications_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Notifications"))
         .build();
-    power.add(&pause_battery);
-    page.add(&power);
+    notifications_group.add(&notifications);
+    page.add(&notifications_group);
 
     page
 }
@@ -802,11 +803,11 @@ fn invoke(callback: &Option<SettingsCallback>) {
 fn save_general(
     store: &ConfigStore,
     autostart: &libadwaita::SwitchRow,
-    pause: &libadwaita::SwitchRow,
+    notifications: &libadwaita::SwitchRow,
 ) {
     if let Err(error) = persist_config(store, |config| {
         config.general.autostart = autostart.is_active();
-        config.general.pause_on_battery = pause.is_active();
+        config.general.show_notifications = notifications.is_active();
     }) {
         eprintln!("Settings: could not save general settings: {error}");
     }

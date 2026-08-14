@@ -541,13 +541,21 @@ impl AccountRuntime {
     /// Connect an activity logger to every folder scheduler: one line per
     /// finished run with its outcome. The logger is shared (`LogBuffer` is
     /// `Clone` over a shared buffer), so the UI recent/log views see the same
-    /// lines the engine writes.
-    pub fn connect_logger(&self, logger: &crate::core::log::LogBuffer) {
+    /// lines the engine writes. When `notifications` is enabled, problem
+    /// outcomes also raise a desktop notification through `notifier`.
+    pub fn connect_logger(
+        &self,
+        logger: &crate::core::log::LogBuffer,
+        notifier: Option<Rc<dyn crate::core::notifications::DesktopNotifier>>,
+        notifications_enabled: bool,
+    ) {
         let account_label = self.account.id.clone();
         for runtime in self.folders.values() {
             let account_label = account_label.clone();
             let folder_id = runtime.folder.id.clone();
             let logger = logger.clone();
+            let notifier = notifier.clone();
+            let folder_path = runtime.folder.local_root.clone();
             runtime
                 .scheduler()
                 .set_on_completed(Some(Box::new(move |outcome| {
@@ -555,6 +563,14 @@ impl AccountRuntime {
                         "{account_label}/{folder_id}: {}",
                         outcome_log_line(outcome)
                     ));
+                    if let Some(notifier) = notifier.as_ref() {
+                        crate::core::notifications::notify_for_outcome(
+                            notifier,
+                            notifications_enabled,
+                            &folder_path,
+                            outcome,
+                        );
+                    }
                 })));
         }
     }

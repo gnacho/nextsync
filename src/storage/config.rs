@@ -204,15 +204,27 @@ pub struct RuntimeConfig {
 #[serde(default)]
 pub struct GeneralConfig {
     pub autostart: bool,
+    /// Battery pause preference. The UI switch was removed by user decision
+    /// (issue #22); the field stays (default false, neutral behavior) so the
+    /// runtime plumbing and older config files keep working.
+    #[serde(default)]
     pub pause_on_battery: bool,
     /// Color scheme preference: `"system"`, `"light"` or `"dark"`.
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
+    /// Whether desktop notifications are sent for sync/auth failures.
+    #[serde(default = "yes")]
+    pub show_notifications: bool,
 }
 
 /// Default color scheme (follow the desktop).
 fn default_color_scheme() -> String {
     "system".to_string()
+}
+
+/// Default for `show_notifications` (on).
+fn yes() -> bool {
+    true
 }
 
 impl Default for GeneralConfig {
@@ -221,6 +233,7 @@ impl Default for GeneralConfig {
             autostart: true,
             pause_on_battery: false,
             color_scheme: default_color_scheme(),
+            show_notifications: yes(),
         }
     }
 }
@@ -998,6 +1011,7 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
         autostart: get_bool(obj, "autostart", true),
         pause_on_battery: get_bool(obj, "pause_on_battery", false),
         color_scheme: get_string(obj, "color_scheme", &default_color_scheme()),
+        show_notifications: get_bool(obj, "show_notifications", true),
     }
 }
 
