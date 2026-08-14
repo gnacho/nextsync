@@ -1306,7 +1306,13 @@ fn populate_remote_picker(
     let list = list.clone();
     let status = status.clone();
     let handle = gio::spawn_blocking(move || -> RemoteFolderLookup {
-        let password = match CredentialsStore::get(&account_id) {
+        let server_for_lookup = server.clone();
+        let username_for_lookup = username.clone();
+        let password = match CredentialsStore::get_for_account(
+            &account_id,
+            &server_for_lookup,
+            &username_for_lookup,
+        ) {
             Ok(Some(password)) => Some(password),
             Ok(None) => None,
             Err(_) => None,
