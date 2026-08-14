@@ -2,6 +2,15 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.40.0] - 2026-08-15
+
+OpenCloud sync deja de ser una suposición: la autenticación se verifica contra el endpoint documentado del servidor.
+
+### Añadido
+- **Validación de credenciales OpenCloud (#48)**: username + app token se validan con un PROPFIND sobre `/remote.php/dav/spaces/` (el punto de entrada WebDAV que la documentación de OpenCloud define para clientes externos, `Basic user:app-token`). Un token malo o expirado se rechaza con el mismo error de credenciales que Nextcloud; el fallback anterior usaba el endpoint OCS de Nextcloud, que los servidores OpenCloud no exponen.
+- **Listado nativo de spaces (#48)**: el asistente descubre los spaces con un PROPFIND Depth-1 sobre el mismo árbol WebDAV (id = último segmento del href, nombre = `<d:displayname>`), sin depender de `opencloudcmd` para el descubrimiento. El modo query del CLI queda como fallback.
+- **Probe del space para el primer sync (#48)**: el diálogo de confirmación del primer sync sondea la raíz del space (no la ruta `files/` de Nextcloud, inexistente en OpenCloud), así que avisa correctamente de espacios remotos no vacíos.
+
 ## [0.30.0] - 2026-08-14
 
 Corrección del selector de tema para que coincida con el patrón de GNOME Text Editor.
