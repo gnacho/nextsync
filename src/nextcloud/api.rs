@@ -176,6 +176,52 @@ impl NextcloudApi {
         Ok(display_name)
     }
 
+    /// Create the remote folder (and any missing parents) over WebDAV MKCOL.
+    ///
+    /// `nextcloudcmd` fails silently (exit 1, no output) when `--path` points
+    /// at a folder that does not exist on the server, so the app must create
+    /// the target itself before the first sync. Idempotent per segment:
+    /// 201 (created) and 405 (already exists) both succeed; 401/403 map to
+    /// [`ApiError::AuthRejected`]; an empty `remote_path` (the account root)
+    /// is a no-op.
+    pub fn ensure_remote_folder(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+        remote_path: &str,
+    ) -> Result<(), ApiError> {
+        let path = remote_path.trim_matches('/');
+        if path.is_empty() {
+            return Ok(());
+        }
+        let base = dav_base(server, username);
+        let authorization = basic_authorization(username, password);
+        let mut accumulated = String::new();
+        for segment in path.split('/') {
+            if segment.is_empty() {
+                continue;
+            }
+            if !accumulated.is_empty() {
+                accumulated.push('/');
+            }
+            accumulated.push_str(segment);
+            let url = format!("{base}/{accumulated}");
+            let response = self.http.request(
+                "MKCOL",
+                &url,
+                &[("Authorization", authorization.as_str())],
+                None,
+            )?;
+            match response.status {
+                201 | 405 => {}
+                401 | 403 => return Err(ApiError::AuthRejected),
+                status => return Err(ApiError::Http { status }),
+            }
+        }
+        Ok(())
+    }
+
     /// Probe whether a remote folder exists and holds at least one entry,
     /// using a shallow PROPFIND (Depth 1, no file bodies).
     ///
@@ -592,6 +638,101 @@ mod tests {
     }
 
     // ---- probe_remote -------------------------------------------------------
+
+    /// Fake returning a scripted status per request (MKCOL sequences).
+    struct ScriptedHttp {
+        statuses: Rc<RefCell<std::collections::VecDeque<u16>>>,
+        requests: Rc<RefCell<Vec<RecordedRequest>>>,
+    }
+
+    impl ScriptedHttp {
+        fn new(statuses: &[u16]) -> Self {
+            Self {
+                statuses: Rc::new(RefCell::new(statuses.iter().copied().collect())),
+                requests: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+    }
+
+    impl HttpClient for ScriptedHttp {
+        fn request(
+            &self,
+            method: &str,
+            url: &str,
+            headers: &[(&str, &str)],
+            body: Option<&[u8]>,
+        ) -> Result<HttpResponse, ApiError> {
+            self.requests.borrow_mut().push(RecordedRequest {
+                method: method.to_owned(),
+                url: url.to_owned(),
+                headers: headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                body: body.map(<[u8]>::to_vec),
+            });
+            let status = self.statuses.borrow_mut().pop_front().unwrap_or(500);
+            Ok(HttpResponse {
+                status,
+                body: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn ensure_remote_folder_noops_on_account_root() {
+        let http = ScriptedHttp::new(&[]);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.ensure_remote_folder("https://cloud.example.com", "alice", "pw", "")
+            .unwrap();
+        assert!(requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn ensure_remote_folder_creates_each_segment() {
+        let http = ScriptedHttp::new(&[201, 201]);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.ensure_remote_folder("https://cloud.example.com", "alice", "pw", "/a/b")
+            .unwrap();
+        let urls: Vec<String> = requests
+            .borrow()
+            .iter()
+            .map(|request| request.url.clone())
+            .collect();
+        let base = "https://cloud.example.com/remote.php/dav/files/alice";
+        assert_eq!(urls, vec![format!("{base}/a"), format!("{base}/a/b")]);
+        assert!(requests.borrow().iter().all(|r| r.method == "MKCOL"));
+    }
+
+    #[test]
+    fn ensure_remote_folder_treats_405_as_existing() {
+        let http = ScriptedHttp::new(&[405]);
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.ensure_remote_folder("https://cloud.example.com", "alice", "pw", "/docs")
+            .unwrap();
+    }
+
+    #[test]
+    fn ensure_remote_folder_maps_401_to_auth_rejected() {
+        let http = ScriptedHttp::new(&[401]);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(matches!(
+            api.ensure_remote_folder("https://cloud.example.com", "alice", "pw", "/docs"),
+            Err(ApiError::AuthRejected)
+        ));
+    }
+
+    #[test]
+    fn ensure_remote_folder_surfaces_unexpected_status() {
+        let http = ScriptedHttp::new(&[500]);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(matches!(
+            api.ensure_remote_folder("https://cloud.example.com", "alice", "pw", "/docs"),
+            Err(ApiError::Http { status: 500 })
+        ));
+    }
 
     #[test]
     fn probe_empty_folder_returns_false() {

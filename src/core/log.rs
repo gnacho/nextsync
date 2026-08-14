@@ -1,10 +1,12 @@
 //! Application logger with live subscription and on-disk daily files.
 //!
 //! Task 5.4: ports `storage/log.py` (v0.4.0). The [`LogBuffer`] is the real
-//! logger the UI consumes: `ui/log_view.rs` (LogWindow) subscribes to new
-//! lines and seeds its buffer from [`LogBuffer::tail`], and the conflict
-//! resolver's Recent tab will use [`LogBuffer::subscribe`] and
-//! [`LogBuffer::recent_lines`] (mirroring `ui/conflict_resolver.py`).
+//! logger the app consumes: emitters (the per-run outcome lines, the update
+//! checker) append through it, and the conflict resolver's Recent tab uses
+//! [`LogBuffer::subscribe`] and [`LogBuffer::recent_lines`] (mirroring
+//! `ui/conflict_resolver.py`). The interactive log window was removed by
+//! user decision (issue #15); the daily files under `$XDG_STATE_HOME` are
+//! what "check the log" refers to.
 //!
 //! The buffer keeps the last `live_history_lines` lines in memory (the Python
 //! `deque(maxlen=...)`), so `tail` works without a subscription. When
@@ -20,12 +22,12 @@
 //! - The daily date defaults to UTC (`utc_date_string`, no `chrono`
 //!   dependency) instead of `dt.date.today()` (local). `date_provider` is
 //!   injectable for tests and for a future local-time implementation.
-//! - The log directory is created lazily on the first disk write (or by
-//!   `LogWindow::open_folder`) instead of eagerly in the constructor, so
-//!   building a `LogBuffer` has no filesystem side effects.
+//! - The log directory is created lazily on the first disk write instead of
+//!   eagerly in the constructor, so building a `LogBuffer` has no filesystem
+//!   side effects.
 //! - `Subscription` mirrors the `state.rs` pattern but does **not** invoke the
 //!   callback with the current history on subscribe (the Python `subscribe`
-//!   only registers; the LogWindow seeds from `tail` explicitly).
+//!   only registers; consumers seed from `tail` explicitly).
 //! - Subscribers unsubscribed during a notification stop receiving in the same
 //!   pass (the Python snapshot `tuple()` would still notify them once). This is
 //!   unobservable in practice and only differs under adversarial callbacks.
