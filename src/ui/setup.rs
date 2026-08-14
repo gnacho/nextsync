@@ -20,8 +20,9 @@
 //!   `glib::timeout_add_seconds_local` source on the main loop (like the
 //!   Python GLib timer); cancellation is generation-based (a stale async
 //!   continuation or timer tick becomes a no-op). While waiting, the wizard
-//!   shows the login URL with a copy-to-clipboard button next to the Python
-//!   "Open Browser Again" and "Cancel" actions.
+//!   shows the login URL (ellipsized so a long URL never stretches the
+//!   window) with a copy-to-clipboard button next to the Python "Open Browser
+//!   Again" and "Cancel" actions.
 //! - **OpenCloud remote folder is optional**: OpenCloud folders mirror a whole
 //!   space by default; the remote field normalizes like Nextcloud's (blank or
 //!   `/` = the space root, which omits the `--remote-folder` flag).
@@ -253,9 +254,10 @@ impl SetupWidgets {
             "Waiting for authorization in your browser…",
         )));
         let login_url_label = gtk4::Label::builder()
-            .wrap(true)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .max_width_chars(40)
             .selectable(true)
-            .justify(gtk4::Justification::Center)
+            .halign(gtk4::Align::Center)
             .css_classes(["dim-label"])
             .build();
         waiting_box.append(&login_url_label);
@@ -2045,6 +2047,33 @@ mod tests {
             // Switching back restores the row.
             window.configure_authentication_for(Provider::Nextcloud);
             assert!(window.widgets().browser_group.get_visible());
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn login_url_label_is_ellipsized_and_keeps_the_full_url() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let dir = tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
+            let label = window.widgets().login_url_label.clone();
+            assert_eq!(label.ellipsize(), gtk4::pango::EllipsizeMode::End);
+            assert!(
+                label.max_width_chars() > 0,
+                "the login URL label must not stretch the window"
+            );
+            assert!(!label.wraps(), "wrapping defeats ellipsis");
+            assert!(label.is_selectable());
+            // The whole URL stays on the widget so "Copy Link" (which reads
+            // `label.text()`) copies the complete link even when truncated.
+            let url = "https://cloud.example.com/index.php/login/v2/flow?token=AVeryLongTokenValue";
+            label.set_text(url);
+            assert_eq!(label.text().as_str(), url);
             reset_locale();
         });
     }
