@@ -452,6 +452,24 @@ pub struct AccountRuntime {
     watcher_factory: WatcherFactory,
 }
 
+/// One activity-log line for a finished run: a human readable account label
+/// (`login@host`) and the folder's local path instead of the internal SHA-256
+/// ids, so the Recent tab rows read naturally (issue #33).
+pub fn activity_line(
+    login_name: &str,
+    server_url: &str,
+    local_root: &str,
+    outcome: &crate::core::scheduler::SyncOutcome,
+) -> String {
+    format!(
+        "{}@{} · {}: {}",
+        login_name,
+        crate::util::url::server_host(server_url),
+        local_root,
+        outcome_log_line(outcome)
+    )
+}
+
 impl AccountRuntime {
     /// Create a runtime for one account. No folders are started yet; call
     /// [`start`](Self::start) or [`sync_folders`](Self::sync_folders).
@@ -549,19 +567,25 @@ impl AccountRuntime {
         notifier: Option<Rc<dyn crate::core::notifications::DesktopNotifier>>,
         notifications_enabled: bool,
     ) {
-        let account_label = self.account.id.clone();
+        // Human readable account label (`login@host`) and folder local path
+        // instead of the internal SHA-256 ids, so the Recent tab rows read
+        // naturally (issue #33).
+        let login_name = self.account.login_name.clone();
+        let server_url = self.account.server_url.clone();
         for runtime in self.folders.values() {
-            let account_label = account_label.clone();
-            let folder_id = runtime.folder.id.clone();
+            let login_name = login_name.clone();
+            let server_url = server_url.clone();
             let logger = logger.clone();
             let notifier = notifier.clone();
             let folder_path = runtime.folder.local_root.clone();
             runtime
                 .scheduler()
                 .set_on_completed(Some(Box::new(move |outcome| {
-                    logger.append(&format!(
-                        "{account_label}/{folder_id}: {}",
-                        outcome_log_line(outcome)
+                    logger.append(&activity_line(
+                        &login_name,
+                        &server_url,
+                        &folder_path,
+                        outcome,
                     ));
                     if let Some(notifier) = notifier.as_ref() {
                         crate::core::notifications::notify_for_outcome(
@@ -1542,6 +1566,27 @@ mod tests {
         assert_eq!(
             outcome_log_line(&SyncOutcome::Success),
             "Sincronización completada"
+        );
+        crate::util::i18n::reset_locale();
+    }
+
+    #[test]
+    fn activity_line_uses_readable_account_and_folder_identifiers() {
+        use crate::core::scheduler::SyncOutcome;
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
+        let line = activity_line(
+            "alice",
+            "https://cloud.example.com/",
+            "/home/alice/Nextcloud",
+            &SyncOutcome::Success,
+        );
+        assert_eq!(
+            line,
+            "alice@cloud.example.com · /home/alice/Nextcloud: Synchronization completed"
+        );
+        assert!(
+            !line.contains("  "),
+            "single spaces only, no double separator"
         );
         crate::util::i18n::reset_locale();
     }

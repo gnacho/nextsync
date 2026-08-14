@@ -1317,13 +1317,7 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
 
 /// Host part of a server URL (`https://cloud.example.com` ->
 /// `cloud.example.com`); the raw URL when it does not parse as expected.
-pub fn server_host(server_url: &str) -> &str {
-    let trimmed = server_url.trim_end_matches('/');
-    match trimmed.split_once("://") {
-        Some((_scheme, host)) => host,
-        None => trimmed,
-    }
-}
+pub use crate::util::url::server_host;
 
 /// Build the sidebar: the container, the accounts list and the Add Account
 /// button.
