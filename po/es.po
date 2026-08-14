@@ -2168,6 +2168,14 @@ msgid "Authentication and synchronization failures"
 msgstr "Fallo de autenticación y sincronización"
 
 #: src/ui/settings.rs
+msgid "Show server notifications"
+msgstr "Mostrar notificaciones del servidor"
+
+#: src/ui/settings.rs
+msgid "New shares, comments and mentions from your account"
+msgstr "Nuevos archivos compartidos, comentarios y menciones de tu cuenta"
+
+#: src/ui/settings.rs
 msgid "Notifications"
 msgstr "Notificaciones"
 
