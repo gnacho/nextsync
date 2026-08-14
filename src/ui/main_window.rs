@@ -325,7 +325,6 @@ pub struct MainWindow {
     /// Outer stack that slides the settings view over the sync view.
     root_stack: gtk4::Stack,
     setup_window: Option<crate::ui::setup::SetupWindow>,
-    log_window: Option<crate::ui::log_view::LogWindow>,
     conflicts_window: Option<crate::ui::conflict_resolver::ConflictResolverWindow>,
     about_dialog: Option<libadwaita::AboutDialog>,
     checking_dialog: Option<libadwaita::Dialog>,
@@ -428,19 +427,6 @@ impl MainWindow {
         hamburger.insert_action_group("app", Some(&actions));
         header.pack_start(&hamburger);
 
-        let log_button = gtk4::Button::builder()
-            .icon_name("view-list-symbolic")
-            .tooltip_text(t("Synchronization Log"))
-            .css_classes(["flat"])
-            .build();
-        let log_weak = self_weak.clone();
-        log_button.connect_clicked(move |_button| {
-            if let Some(main) = log_weak.upgrade() {
-                main.borrow_mut().show_log();
-            }
-        });
-        header.pack_end(&log_button);
-
         toolbar.add_top_bar(&header);
 
         let toast_overlay = libadwaita::ToastOverlay::new();
@@ -519,7 +505,6 @@ impl MainWindow {
             settings_view: None,
             root_stack,
             setup_window: None,
-            log_window: None,
             conflicts_window: None,
             about_dialog: None,
             checking_dialog: None,
@@ -579,17 +564,6 @@ impl MainWindow {
     }
 
     /// Open (or bring to front) the account setup wizard.
-    /// Open (or bring to front) the live synchronization log window.
-    pub fn show_log(&mut self) {
-        if let Some(window) = &self.log_window {
-            window.present();
-            return;
-        }
-        let window = crate::ui::log_view::LogWindow::new(Some(&self.window), &self.logger);
-        window.present();
-        self.log_window = Some(window);
-    }
-
     /// Open (or bring to front) the activity/conflicts window for the active
     /// account's first synchronized folder.
     pub fn show_conflicts(&mut self) {
@@ -845,6 +819,12 @@ impl MainWindow {
     /// active account (called after Settings mutates folders).
     fn refresh_after_config_change(&mut self) {
         self.config = self.config_store.load().unwrap_or_default();
+        // Reconcile the folder runtimes first: the sync view reads the
+        // runtimes (not the config), so an add/remove made in Settings would
+        // otherwise stay invisible until restart.
+        for account in self.config.accounts.clone() {
+            self.account_manager.sync_folders(&account);
+        }
         self.refresh_sidebar();
         let account_id = self.active_account_id.clone();
         self.present_account(account_id.as_deref());
@@ -1393,6 +1373,82 @@ mod tests {
                 Some("sync")
             );
             reset_locale();
+        });
+    }
+
+    /// Adding a folder through the store (what Settings does) plus the
+    /// `on_folder_changed` callback path must repaint the sync view without
+    /// a restart (issue #13).
+    #[test]
+    fn folder_add_and_remove_refresh_in_place() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            use crate::storage::config::FolderConfig;
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("settings.json");
+            let store = ConfigStore::with_path(path.clone());
+
+            let mut account = window_account();
+            account.folders.clear();
+            let account_id = store.add_account(&account).unwrap();
+            account.id = account_id.clone();
+
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let mut manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let config = crate::storage::config::Config {
+                accounts: vec![account.clone()],
+                ..Default::default()
+            };
+            manager.start(&config);
+            let mut window = MainWindow::new(
+                &app,
+                config,
+                store.clone(),
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            window.present_account(Some(&account_id));
+            let view = window.account_view.as_ref().expect("account view");
+            assert!(
+                view._account_runtime.account.folders.is_empty(),
+                "starts with no folders"
+            );
+
+            // What Settings' Add Folder flow does: mutate the store, then
+            // fire on_folder_changed (refresh_after_config_change).
+            store
+                .add_folder(
+                    &account_id,
+                    &FolderConfig {
+                        id: String::new(),
+                        local_root: dir.path().join("one").to_string_lossy().into_owned(),
+                        remote_path: "/one".to_string(),
+                        space_id: None,
+                    },
+                )
+                .unwrap();
+            window.refresh_after_config_change();
+            let view = window.account_view.as_ref().expect("account view");
+            assert_eq!(
+                view._account_runtime.account.folders.len(),
+                1,
+                "added folder is visible without restart"
+            );
+
+            // And the remove path (trash button in the folder list).
+            let folder_id = view._account_runtime.account.folders[0].id.clone();
+            store.remove_folder(&account_id, &folder_id).unwrap();
+            window.refresh_after_config_change();
+            let view = window.account_view.as_ref().expect("account view");
+            assert!(
+                view._account_runtime.account.folders.is_empty(),
+                "removed folder disappears without restart"
+            );
         });
     }
 }

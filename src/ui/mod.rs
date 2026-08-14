@@ -4,7 +4,6 @@ pub mod about;
 pub mod activity;
 pub mod conflict_resolver;
 pub mod folder_status;
-pub mod log_view;
 pub mod main_window;
 pub mod settings;
 pub mod setup;

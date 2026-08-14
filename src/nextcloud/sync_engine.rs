@@ -40,9 +40,10 @@ use std::time::{Duration, Instant};
 
 use crate::core::scheduler::{SyncOutcome, SyncRunner};
 use crate::core::triggers::Trigger;
+use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::command::{BoundedOutputCapture, Classification, DEFAULT_MAX_LINES};
 use crate::nextcloud::credentials::CredentialsStore;
-use crate::nextcloud::driver::{driver_for, DriverContext};
+use crate::nextcloud::driver::{driver_for, DriverContext, Provider};
 use crate::storage::config::{AccountConfig, FolderConfig, NetworkConfig};
 use crate::util::redact::Redact;
 
@@ -116,6 +117,40 @@ impl SyncResult {
     }
 }
 
+/// Creates the remote folder before a sync when one is configured.
+///
+/// Production installs [`ProductionRemoteEnsurer`] (WebDAV MKCOL through
+/// [`NextcloudApi`](crate::nextcloud::api::NextcloudApi)); tests leave it
+/// unset to stay hermetic.
+pub type RemoteEnsurer =
+    Arc<dyn Fn(&AccountConfig, &FolderConfig, &str) -> Result<(), ApiError> + Send + Sync>;
+
+/// Production [`RemoteEnsurer`]: MKCOL the folder's remote path (Nextcloud
+/// accounts only; OpenCloud spaces are managed by `opencloudcmd` itself).
+#[derive(Default)]
+pub struct ProductionRemoteEnsurer;
+
+impl ProductionRemoteEnsurer {
+    /// Run the ensure step for one folder pair.
+    pub fn run(
+        account: &AccountConfig,
+        folder: &FolderConfig,
+        password: &str,
+    ) -> Result<(), ApiError> {
+        if account.provider != Provider::Nextcloud
+            || folder.remote_path.trim_matches('/').is_empty()
+        {
+            return Ok(());
+        }
+        NextcloudApi::new().ensure_remote_folder(
+            &account.server_url,
+            &account.login_name,
+            password,
+            &folder.remote_path,
+        )
+    }
+}
+
 /// Spawns and drains `nextcloudcmd`, reporting [`SyncProgress`] and the final
 /// [`SyncOutcome`]. Implements the scheduler's [`SyncRunner`].
 pub struct SyncEngine {
@@ -127,6 +162,7 @@ pub struct SyncEngine {
     progress: async_channel::Sender<SyncProgress>,
     credentials: Arc<dyn CredentialSource>,
     process: Arc<Mutex<Option<Child>>>,
+    remote_ensurer: Option<RemoteEnsurer>,
 }
 
 impl SyncEngine {
@@ -152,12 +188,19 @@ impl SyncEngine {
             progress,
             credentials: Arc::new(KeyringCredentialSource),
             process: Arc::new(Mutex::new(None)),
+            remote_ensurer: None,
         }
     }
 
     /// Replace the credential source (used by tests).
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialSource>) -> Self {
         self.credentials = credentials;
+        self
+    }
+
+    /// Install the remote-folder ensure step (production wiring).
+    pub fn with_remote_ensurer(mut self, ensurer: RemoteEnsurer) -> Self {
+        self.remote_ensurer = Some(ensurer);
         self
     }
 
@@ -180,12 +223,14 @@ impl SyncRunner for SyncEngine {
         let progress = self.progress.clone();
         let credentials = Arc::clone(&self.credentials);
         let process = Arc::clone(&self.process);
+        let remote_ensurer = self.remote_ensurer.clone();
         let inputs = EngineInputs {
             account,
             folder,
             network,
             exclude_file,
             executable,
+            remote_ensurer,
         };
         glib::spawn_future_local(async move {
             let run =
@@ -232,6 +277,7 @@ struct EngineInputs {
     network: NetworkConfig,
     exclude_file: Option<PathBuf>,
     executable: Option<PathBuf>,
+    remote_ensurer: Option<RemoteEnsurer>,
 }
 
 /// Run the whole reconciliation on the blocking thread pool.
@@ -249,6 +295,14 @@ fn engine_thread(
             return EngineRun::Direct(SyncOutcome::AuthFailed);
         }
     };
+    // `nextcloudcmd` exits 1 with no output when the remote folder does not
+    // exist; create it (and its parents) first. Auth rejection surfaces as
+    // such; anything else falls through and lets nextcloudcmd report.
+    if let Some(ensure) = inputs.remote_ensurer.as_ref() {
+        if let Err(ApiError::AuthRejected) = ensure(&inputs.account, &inputs.folder, &password) {
+            return EngineRun::Direct(SyncOutcome::AuthFailed);
+        }
+    }
     let driver = driver_for(inputs.account.provider);
     let ctx = DriverContext::from_folder(
         &inputs.account,
@@ -716,5 +770,76 @@ mod tests {
         );
         let progress = SyncProgress::new("upload", "/a");
         assert_eq!(describe_progress(Some(&progress)), "upload: /a");
+    }
+
+    #[test]
+    fn remote_ensurer_auth_rejection_short_circuits_to_auth_failed() {
+        // The fake "binary" is /bin/false: if the engine spawned it, the run
+        // would end Failed. An AuthRejected ensurer must prevent the spawn
+        // entirely and classify the outcome as AuthFailed.
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(PathBuf::from("/bin/false")),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_remote_ensurer(Arc::new(|_account, _folder, _password| {
+            Err(ApiError::AuthRejected)
+        }));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::AuthFailed);
+    }
+
+    #[test]
+    fn remote_ensurer_non_auth_error_does_not_block_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(dir.path(), "fake-ensure-ok", "#!/bin/sh\nexit 0\n");
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_remote_ensurer(Arc::new(|_account, _folder, _password| {
+            Err(ApiError::Http { status: 500 })
+        }));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::Success);
+    }
+
+    #[test]
+    fn production_ensurer_skips_opencloud_and_account_root() {
+        let mut opencloud = account();
+        opencloud.provider = Provider::OpenCloud;
+        // Neither case touches the network: both return Ok without an HTTP
+        // stack (a live request would fail with a transport error instead).
+        assert!(ProductionRemoteEnsurer::run(&opencloud, &folder(), "pw").is_ok());
+        let mut root_folder = folder();
+        root_folder.remote_path = String::new();
+        assert!(ProductionRemoteEnsurer::run(&account(), &root_folder, "pw").is_ok());
+    }
+
+    #[test]
+    fn production_ensurer_hits_a_real_server_for_nextcloud_paths() {
+        // cloud.example.com does not resolve: a network-touching run must
+        // surface a Transport error (proof the MKCOL path is reached).
+        let mut remote = folder();
+        remote.remote_path = "/docs".to_string();
+        assert!(matches!(
+            ProductionRemoteEnsurer::run(&account(), &remote, "pw"),
+            Err(ApiError::Transport)
+        ));
     }
 }

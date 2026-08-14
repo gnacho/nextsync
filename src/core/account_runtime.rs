@@ -17,6 +17,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::core::debounce::TimeoutSource;
 use crate::core::delete_guard::DeleteGuard;
@@ -289,7 +290,10 @@ impl FolderRuntime {
             exclude_file,
             executable,
             tx,
-        );
+        )
+        .with_remote_ensurer(Arc::new(|account, folder, password| {
+            crate::nextcloud::sync_engine::ProductionRemoteEnsurer::run(account, folder, password)
+        }));
         (Box::new(engine), rx)
     }
 
