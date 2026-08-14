@@ -148,7 +148,11 @@ pub struct AccountView {
 
 impl AccountView {
     /// Build the folder-focused view for one account.
-    pub fn new(account_runtime: AccountRuntime, callbacks: AccountCallbacks) -> Self {
+    pub fn new(
+        account_runtime: AccountRuntime,
+        callbacks: AccountCallbacks,
+        logger: crate::core::log::LogBuffer,
+    ) -> Self {
         let account = account_runtime.account.clone();
         let runtime = account_runtime.clone();
 
@@ -303,8 +307,29 @@ impl AccountView {
                 let row_for_updates = row.row.clone();
                 let size_for_updates = row.local_size.clone();
                 let local_root_for_updates = std::path::PathBuf::from(local_root.clone());
+                let local_root_for_emblems = local_root_for_updates.clone();
+                let logger_for_emblems = logger.clone();
                 let previous = Rc::new(Cell::new(controller.snapshot().state));
                 let subscription = controller.subscribe(move |snapshot| {
+                    // Issue #44: mirror the live state onto the folder as a
+                    // file manager emblem (metadata::emblems via GIO).
+                    let emblem = crate::ui::folder_emblems::folder_emblem_for(snapshot.state);
+                    let emblem_root = local_root_for_emblems.clone();
+                    let handle = gio::spawn_blocking(move || {
+                        crate::ui::folder_emblems::set_folder_emblem(&emblem_root, emblem)
+                    });
+                    let logger_for_emblems = logger_for_emblems.clone();
+                    let local_root_for_log = local_root_for_emblems.clone();
+                    glib::spawn_future_local(async move {
+                        if let Ok(Err(error)) = handle.await {
+                            logger_for_emblems.append(&format!(
+                                "emblem update failed for {}: {error}",
+                                local_root_for_log.display()
+                            ));
+                        }
+                    });
+                    // Issue #43: refresh the used space when a
+                    // synchronization completes.
                     let now = snapshot.state;
                     let was = previous.replace(now);
                     if was == AppState::Syncing && now != AppState::Syncing {
@@ -1323,6 +1348,14 @@ impl MainWindow {
                         if let Some(main) = weak.upgrade() {
                             main.borrow_mut().refresh_after_config_change();
                         }
+                        // Either way the folder leaves the app, so it must
+                        // not keep a stale sync emblem (issue #44).
+                        if let Some(local_root) = local_root.clone() {
+                            let path = std::path::PathBuf::from(&local_root);
+                            std::mem::drop(gio::spawn_blocking(move || {
+                                crate::ui::folder_emblems::set_folder_emblem(&path, None)
+                            }));
+                        }
                         if action == FolderRemoval::Trash {
                             let Some(local_root) = local_root.clone() else {
                                 return;
@@ -1386,7 +1419,7 @@ impl MainWindow {
                 }))
             },
         };
-        let view = AccountView::new(runtime, callbacks);
+        let view = AccountView::new(runtime, callbacks, self.logger.clone());
         self.content_stack.add_named(&view.root, Some("account"));
         self.content_stack.set_visible_child_name("account");
         self.account_view = Some(view);
