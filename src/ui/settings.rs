@@ -1,10 +1,10 @@
 //! Settings window (Task 5.2).
 //!
-//! Port of `ui/settings.py` (v0.4.0) to gtk-rs/libadwaita: a
-//! `Adw.PreferencesWindow` with General, Synchronization, Network and
-//! Advanced pages, the per-folder groups with the Add Folder flow (including
-//! the remote folder picker, issue #25) and the typed Remove Account
-//! confirmation (issue #35, moved to Advanced by the account-view redesign).
+//! Port of `ui/settings.py` (v0.4.0) to gtk-rs/libadwaita: a single in-app
+//! `SettingsView` (ToolbarView + ViewStack + ViewSwitcherBar) with General,
+//! Synchronization, Network and Advanced pages, and the typed Remove account
+//! confirmation. Folder management lives in the sync view (issue #18); the
+//! standalone Add Folder dialog here is shared with it.
 //!
 //! # Deviations from `settings.py` (motivated)
 //!
@@ -34,12 +34,10 @@
 //!   private validator in `storage::config`.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use libadwaita::prelude::*;
 
-use crate::core::desktop_integration::DesktopIntegration;
 use crate::core::triggers::TriggerSettings;
 use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::credentials::CredentialsStore;
@@ -56,7 +54,7 @@ pub type SettingsCallback = Rc<dyn Fn()>;
 /// Callbacks the Settings window invokes after mutating the configuration.
 #[derive(Clone, Default)]
 pub struct SettingsCallbacks {
-    /// Invoked after the typed Remove Account confirmation succeeds.
+    /// Invoked after the typed Remove account confirmation succeeds.
     pub on_remove_account: Option<SettingsCallback>,
     /// Invoked after a folder is added or removed (refreshes the account view).
     pub on_folder_changed: Option<SettingsCallback>,
@@ -122,16 +120,10 @@ impl SettingsView {
         // configuration; account-owned settings come from the snapshot.
         let config = config_store.load().unwrap_or_default();
 
-        let folder_ui = FolderUi {
-            store: config_store.clone(),
-            account_id: account_id.clone(),
-            callbacks: callbacks.clone(),
-            group: libadwaita::PreferencesGroup::new(),
-            host: host.clone(),
-            rows: Rc::new(RefCell::new(Vec::new())),
-        };
-
-        let general = build_general_page(&config_store, &config.general, &folder_ui.group);
+        // Folder management (list, Add Folder, desktop integration) was
+        // removed from Settings by user decision (issue #18): the sync view
+        // owns it, so the settings pages never duplicate it.
+        let general = build_general_page(&config_store, &config.general);
         let synchronization = build_sync_page(&config_store, &account_id, &account, &callbacks);
         let network = build_network_page(&config_store, &account, &config.network);
         let advanced = build_advanced_page(
@@ -142,16 +134,6 @@ impl SettingsView {
             &callbacks,
             host,
         );
-
-        folder_ui.refresh();
-
-        // Desktop integrations sit in the folders group, after the Add Folder
-        // row (same order as `_build_desktop_integrations` in the Python).
-        // They are added once and are NOT tracked in `FolderUi::rows`, so a
-        // folder add/remove refresh never destroys them.
-        for row in desktop_integration_rows(&account, host) {
-            folder_ui.group.add(&row);
-        }
 
         let stack = libadwaita::ViewStack::new();
         let toolbar = libadwaita::ToolbarView::new();
@@ -211,13 +193,8 @@ pub mod page {
 // Page builders
 // ---------------------------------------------------------------------------
 
-/// General page: Startup switch, Power switch and the Synchronization Folders
-/// group (managed by [`FolderUi`]).
-fn build_general_page(
-    store: &ConfigStore,
-    general: &GeneralConfig,
-    folders_group: &libadwaita::PreferencesGroup,
-) -> libadwaita::PreferencesPage {
+/// General page: Startup and Power switches.
+fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("General"))
         .icon_name("preferences-system-symbolic")
@@ -261,12 +238,6 @@ fn build_general_page(
         .build();
     power.add(&pause_battery);
     page.add(&power);
-
-    let folders = libadwaita::PreferencesGroup::builder()
-        .title(t("Synchronization Folders"))
-        .build();
-    folders.add(folders_group);
-    page.add(&folders);
 
     page
 }
@@ -728,22 +699,8 @@ fn build_advanced_page(
     guard.add(&guard_percent);
     page.add(&guard);
 
-    // Diagnostics.
-    let diagnostics = libadwaita::PreferencesGroup::builder()
-        .title(t("Diagnostics"))
-        .build();
-    let last_code = account
-        .runtime
-        .last_exit_code
-        .map(|code| code.to_string())
-        .unwrap_or_else(|| t("None").to_string());
-    diagnostics.add(
-        &libadwaita::ActionRow::builder()
-            .title(t("Last exit code"))
-            .subtitle(last_code)
-            .build(),
-    );
-    page.add(&diagnostics);
+    // Diagnostics removed by user decision (issue #18): the log files under
+    // $XDG_STATE_HOME carry the same information.
 
     // Authentication: re-enter credentials without removing the account.
     let auth_group = libadwaita::PreferencesGroup::builder()
@@ -791,7 +748,7 @@ fn build_advanced_page(
         )
         .build();
     let remove = libadwaita::ActionRow::builder()
-        .title(t("Remove Account"))
+        .title(t("Remove account"))
         .subtitle(t("Rarely needed. Keeps all local files."))
         .tooltip_text(t("Disconnect this account; local files are kept"))
         .activatable(true)
@@ -956,121 +913,8 @@ fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libad
 }
 
 // ---------------------------------------------------------------------------
-// Synchronization Folders group
+// Add Folder dialog
 // ---------------------------------------------------------------------------
-
-/// Shared state for the Synchronization Folders group: the store, the account
-/// id and the widgets the Add/Remove flows rebuild.
-#[derive(Clone)]
-struct FolderUi {
-    store: ConfigStore,
-    account_id: String,
-    callbacks: SettingsCallbacks,
-    group: libadwaita::PreferencesGroup,
-    host: SettingsHost,
-    /// Rows added by [`refresh`](Self::refresh). `PreferencesGroup` keeps an
-    /// internal box as its direct child, so only these rows may be removed.
-    rows: Rc<RefCell<Vec<gtk4::Widget>>>,
-}
-
-impl FolderUi {
-    /// Rebuild the folder rows from the current configuration.
-    fn refresh(&self) {
-        for row in self.rows.borrow_mut().drain(..) {
-            self.group.remove(&row);
-        }
-        let Ok(Some(account)) = self.store.account(&self.account_id) else {
-            return;
-        };
-        for folder in &account.folders {
-            let row = libadwaita::ActionRow::builder()
-                .title(folder.local_root.as_str())
-                .subtitle(t("Remote: {remote}").replacen(
-                    "{remote}",
-                    folder_subtitle(&folder.remote_path),
-                    1,
-                ))
-                .build();
-            let icon = gtk4::Image::builder()
-                .icon_name("folder-symbolic")
-                .pixel_size(16)
-                .build();
-            row.add_prefix(&icon);
-            let remove = gtk4::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .valign(gtk4::Align::Center)
-                .tooltip_text(t("Remove folder"))
-                .css_classes(["flat"])
-                .build();
-            let folder_id = folder.id.clone();
-            let ui = self.clone();
-            remove.connect_clicked(move |_| {
-                let _ = ui.store.remove_folder(&ui.account_id, &folder_id);
-                ui.refresh();
-                invoke(&ui.callbacks.on_folder_changed);
-            });
-            row.add_suffix(&remove);
-            self.group.add(&row);
-            self.rows.borrow_mut().push(row.upcast::<gtk4::Widget>());
-        }
-
-        let add_row = libadwaita::ActionRow::builder()
-            .title(t("Add Folder"))
-            .subtitle(t("Mirror another local folder from this account"))
-            .tooltip_text(t("Add a local folder to synchronize with this account"))
-            .activatable(true)
-            .build();
-        let add_icon = gtk4::Image::builder()
-            .icon_name("folder-new-symbolic")
-            .pixel_size(16)
-            .build();
-        add_row.add_prefix(&add_icon);
-        let next = gtk4::Image::builder()
-            .icon_name("go-next-symbolic")
-            .pixel_size(16)
-            .build();
-        add_row.add_suffix(&next);
-        let ui = self.clone();
-        add_row.connect_activated(move |_| {
-            ui.present_add_folder_dialog(None, None);
-        });
-        self.group.add(&add_row);
-        self.rows
-            .borrow_mut()
-            .push(add_row.upcast::<gtk4::Widget>());
-    }
-
-    /// Present the Add Folder dialog. `previous` and `error` let a failed
-    /// attempt re-open with the typed values and an inline message.
-    ///
-    /// Thin wrapper around the freestanding [`present_add_folder_dialog`]:
-    /// supplies this group's refresh + the host toast from the folder UI's
-    /// own state so the Settings call site stays a one-liner.
-    fn present_add_folder_dialog(&self, previous: Option<(String, String)>, error: Option<String>) {
-        let on_folder_added = {
-            let ui = self.clone();
-            Rc::new(move || {
-                ui.refresh();
-                invoke(&ui.callbacks.on_folder_changed);
-            })
-        };
-        let on_error = {
-            let host = self.host.clone();
-            Rc::new(move |message: String| {
-                host.add_toast(libadwaita::Toast::new(&message));
-            })
-        };
-        present_add_folder_dialog(
-            self.store.clone(),
-            self.account_id.clone(),
-            self.host.parent(),
-            on_folder_added,
-            on_error,
-            previous,
-            error,
-        );
-    }
-}
 
 /// Present the Add Folder dialog for an account against a config store.
 ///
@@ -1354,10 +1198,6 @@ fn populate_remote_picker(
 
 /// The folder the desktop integration switches target: the account's first
 /// folder (the Python used the "active" folder; the rewrite has none).
-fn integration_target(account: &AccountConfig) -> Option<&FolderConfig> {
-    account.folders.first()
-}
-
 /// Build the three desktop integration switches for the first folder of the
 /// account, replicating `_build_desktop_integrations`: "Show in Files
 /// sidebar" (Nautilus bookmark), "Show on Desktop" (shortcut) and "Use
@@ -1367,103 +1207,6 @@ fn integration_target(account: &AccountConfig) -> Option<&FolderConfig> {
 /// Each switch applies its [`DesktopIntegration`] setter on toggle; a `false`
 /// result (e.g. a missing icon asset) reverts the switch to the real state
 /// and surfaces a toast.
-fn desktop_integration_rows(
-    account: &AccountConfig,
-    host: &SettingsHost,
-) -> Vec<libadwaita::SwitchRow> {
-    let Some(folder) = integration_target(account) else {
-        return Vec::new();
-    };
-    let local_root = folder.local_root.clone();
-    // One instance per closure: `DesktopIntegration` is not `Clone`, and each
-    // instance is a cheap paths-only struct over the same real XDG dirs.
-    let make_integration =
-        || DesktopIntegration::new(PathBuf::from(local_root.clone()), None, None);
-    let state = make_integration().state();
-
-    let bookmark = libadwaita::SwitchRow::builder()
-        .title(t("Show in Files sidebar"))
-        .subtitle(t(
-            "Adds the synchronized folder to the file manager sidebar.",
-        ))
-        .active(state.nautilus_bookmark)
-        .build();
-    let shortcut = libadwaita::SwitchRow::builder()
-        .title(t("Show on Desktop"))
-        .subtitle(t(
-            "Creates a link to the synchronized folder on the desktop.",
-        ))
-        .active(state.desktop_shortcut)
-        .build();
-    let icon = libadwaita::SwitchRow::builder()
-        .title(t("Use special folder icon"))
-        .subtitle(t(
-            "Identifies the synchronized folder and its shortcuts in Files.",
-        ))
-        .active(state.special_icon)
-        .build();
-
-    connect_integration_switch(
-        &bookmark,
-        host,
-        {
-            let integration = make_integration();
-            move |enabled| integration.set_nautilus_bookmark(enabled)
-        },
-        {
-            let integration = make_integration();
-            move || integration.state().nautilus_bookmark
-        },
-    );
-    connect_integration_switch(
-        &shortcut,
-        host,
-        {
-            let integration = make_integration();
-            move |enabled| integration.set_desktop_shortcut(enabled)
-        },
-        {
-            let integration = make_integration();
-            move || integration.state().desktop_shortcut
-        },
-    );
-    connect_integration_switch(
-        &icon,
-        host,
-        {
-            let integration = make_integration();
-            move |enabled| integration.set_special_icon(enabled)
-        },
-        {
-            let integration = make_integration();
-            move || integration.state().special_icon
-        },
-    );
-
-    vec![bookmark, shortcut, icon]
-}
-
-/// Wire one integration switch: apply the setter on toggle and, when it
-/// reports `false`, revert to the real state (a no-op notification when the
-/// switch already matches, so the re-entry terminates) and toast.
-fn connect_integration_switch(
-    row: &libadwaita::SwitchRow,
-    host: &SettingsHost,
-    apply: impl Fn(bool) -> bool + 'static,
-    read_state: impl Fn() -> bool + 'static,
-) {
-    let host = host.clone();
-    row.connect_active_notify(move |row| {
-        let desired = row.is_active();
-        if !apply(desired) {
-            row.set_active(read_state());
-            host.add_toast(libadwaita::Toast::new(t(
-                "The change could not be applied.",
-            )));
-        }
-    });
-}
-
 /// Open the log folder in the file manager, creating it when missing.
 fn open_log_folder() {
     let directory = state_dir();
@@ -1718,15 +1461,6 @@ fn spin_row(title: &str, lower: f64, upper: f64, value: f64) -> libadwaita::Spin
     row
 }
 
-/// Remote subtitle of a folder row: the account root displays as `/`.
-fn folder_subtitle(remote_path: &str) -> &str {
-    if remote_path.is_empty() {
-        "/"
-    } else {
-        remote_path
-    }
-}
-
 /// Light proxy validation (scheme + non-empty authority, no userinfo).
 fn valid_proxy_url(value: &str) -> bool {
     let value = value.trim();
@@ -1860,7 +1594,7 @@ fn present_sign_in_again_dialog(
     dialog.present(Some(host.parent()));
 }
 
-/// The two-step Remove Account flow (issue #35).
+/// The two-step Remove account flow (issue #35).
 fn present_remove_account(login_name: &str, host: &SettingsHost, callbacks: &SettingsCallbacks) {
     let dialog = libadwaita::AlertDialog::new(
         Some(t("Remove Nextcloud Account?")),
@@ -1901,7 +1635,7 @@ fn present_remove_account_step_two(
     entry_box.append(&entry);
     dialog.set_extra_child(Some(&entry_box));
     dialog.add_response("cancel", t("Cancel"));
-    dialog.add_response("remove", t("Remove Account"));
+    dialog.add_response("remove", t("Remove account"));
     dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
 
@@ -1965,12 +1699,6 @@ mod tests {
         assert!(!valid_proxy_url("ftp://proxy.example.com"));
         assert!(!valid_proxy_url("proxy.example.com"));
         assert!(!valid_proxy_url("http://user@proxy.example.com"));
-    }
-
-    #[test]
-    fn folder_subtitle_uses_root_for_empty_remote() {
-        assert_eq!(folder_subtitle(""), "/");
-        assert_eq!(folder_subtitle("/Documents"), "/Documents");
     }
 
     #[test]
@@ -2057,22 +1785,7 @@ mod tests {
         assert_eq!(validate_pattern("*.swp").unwrap(), "*.swp");
     }
 
-    #[test]
-    fn integration_target_is_the_first_folder_or_none() {
-        let account = sample_account();
-        assert_eq!(
-            integration_target(&account).map(|folder| folder.id.as_str()),
-            Some("folder-1")
-        );
-        let empty = AccountConfig {
-            folders: Vec::new(),
-            ..account
-        };
-        assert!(integration_target(&empty).is_none());
-    }
-
     // ---- persistence without GTK ------------------------------------------
-
     #[test]
     fn add_and_remove_folder_persist_on_disk() {
         let dir = tempdir().unwrap();
@@ -2231,42 +1944,6 @@ mod tests {
                 Some(page::SYNCHRONIZATION)
             );
             reset_locale();
-        });
-    }
-
-    /// The three integration switches carry the Python titles/subtitles and
-    /// disappear without folders. Building them only READS the real user
-    /// state (gtk-3.0 bookmarks, GIO metadata); nothing is written here.
-    #[test]
-    fn desktop_integration_switches_replicate_the_python_rows() {
-        crate::ui::test_helpers::gtk_smoke(|| {
-            let host = test_host();
-
-            set_locale(Locale::English);
-            let rows = desktop_integration_rows(&sample_account(), &host);
-            assert_eq!(rows.len(), 3);
-            assert_eq!(rows[0].title().as_str(), "Show in Files sidebar");
-            assert_eq!(rows[1].title().as_str(), "Show on Desktop");
-            assert_eq!(rows[2].title().as_str(), "Use special folder icon");
-
-            set_locale(Locale::Spanish);
-            let rows = desktop_integration_rows(&sample_account(), &host);
-            assert_eq!(
-                rows[0].title().as_str(),
-                "Mostrar en la barra lateral de Archivos"
-            );
-            assert_eq!(rows[1].title().as_str(), "Mostrar en el escritorio");
-            assert_eq!(
-                rows[2].title().as_str(),
-                "Usar un icono especial para la carpeta"
-            );
-            reset_locale();
-
-            let empty = AccountConfig {
-                folders: Vec::new(),
-                ..sample_account()
-            };
-            assert!(desktop_integration_rows(&empty, &host).is_empty());
         });
     }
 }
