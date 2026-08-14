@@ -60,7 +60,7 @@ A big thank you to ehstbr for starting something so good, for making the right c
 - **GNOME-native interface.** Rust, GTK 4, and Libadwaita.
 - **Secure credentials.** Stored through Secret Service / GNOME Keyring.
 - **Fast local detection.** Recursive Linux `inotify` monitoring with event coalescing.
-- **Tray menu.** Open, Settings, Log and Quit straight from the tray.
+- **Tray menu.** Open, Settings, Log and Quit straight from the tray; closing the window keeps the app running in the background (the tray Quit item is the only way to fully exit).
 - **Deletion guard.** A mass local deletion blocks sync before the engine can propagate it, because the CLI engines do not ask for confirmation in non-interactive mode.
 - **Private by design.** No telemetry, no analytics, no remote crash reporting.
 
