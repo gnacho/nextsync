@@ -3,8 +3,8 @@
 //! Port of `ui/setup.py` (v0.4.0) plus the **provider selector** introduced by
 //! the Rust rewrite plan. A single [`libadwaita::ApplicationWindow`] with a
 //! `gtk4::Stack` walks the user through: welcome (provider selection) → server
-//! → authentication (manual sign-in) → folders → summary → first-sync
-//! confirmation → account creation.
+//! → authentication (browser flow v2 or manual sign-in) → folders → summary →
+//! first-sync confirmation → account creation.
 //!
 //! # Deviations from `setup.py` (motivated)
 //!
@@ -12,12 +12,16 @@
 //!   OpenCloud before entering any detail (plan Task 5.3). The Python wizard
 //!   is Nextcloud-only. For OpenCloud the sign-in asks for an **app password**
 //!   (the `--token` of `opencloudcmd`, HTTP Basic, no browser/device flow —
-//!   see `memory/opencloud.md`).
-//! - **Browser flow v2 not ported**: the Python "Sign in with browser" row
-//!   (OAuth 2 authorization-code + PKCE against the IdP) is not implemented
-//!   here — porting `login_flow.py` robustly is out of scope for this task.
-//!   The row is therefore absent and the TODO is tracked in the plan; manual
-//!   sign-in is the only path. OpenCloud has no device/browser flow at all.
+//!   see `memory/opencloud.md`); the browser sign-in row is therefore hidden
+//!   for OpenCloud.
+//! - **Browser flow v2 (port of `login_flow.py`)**: the "Sign in with
+//!   browser" row starts [`crate::nextcloud::login_flow::LoginFlowV2`]. The
+//!   HTTP work runs in `gio::spawn_blocking` and the polling timer is a
+//!   `glib::timeout_add_seconds_local` source on the main loop (like the
+//!   Python GLib timer); cancellation is generation-based (a stale async
+//!   continuation or timer tick becomes a no-op). While waiting, the wizard
+//!   shows the login URL with a copy-to-clipboard button next to the Python
+//!   "Open Browser Again" and "Cancel" actions.
 //! - **OpenCloud remote folder is optional**: OpenCloud folders mirror a whole
 //!   space by default; the remote field normalizes like Nextcloud's (blank or
 //!   `/` = the space root, which omits the `--remote-folder` flag).
@@ -48,12 +52,18 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gio::AppInfo;
+use glib::ControlFlow;
 use libadwaita::prelude::*;
 
 use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::command::find_binary;
 use crate::nextcloud::credentials::CredentialsStore;
 use crate::nextcloud::driver::{opencloud_list_spaces, Provider};
+use crate::nextcloud::login_flow::{
+    LoginFlowError, LoginFlowResult, LoginFlowStart, LoginFlowV2, PollOutcome, MAX_POLLS,
+    POLL_INTERVAL_SECONDS,
+};
 use crate::storage::config::{
     account_id, default_sync_root, expanduser, normalize_remote_path, normalize_server_url,
     AccountConfig, Config, ConfigError, ConfigStore, FolderConfig,
@@ -102,6 +112,62 @@ struct WizardState {
     space_id: Option<String>,
 }
 
+/// What the polling timer should do at a given tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PollDecision {
+    /// Stop the timer (flow cancelled, session gone or budget exhausted).
+    Stop,
+    /// Keep the timer running but skip this round (a poll is in flight).
+    Skip,
+    /// Issue poll number N (the caller posts it in `gio::spawn_blocking`).
+    Poll,
+}
+
+/// Live state of the browser sign-in flow (the Rust analogue of the Python
+/// `LoginFlowV2` timer fields, minus the HTTP client which is created per
+/// blocking call so nothing non-`Send` crosses threads).
+#[derive(Debug, Default)]
+struct BrowserFlowState {
+    /// The initiated session (`poll.endpoint`/`token`/`login`), if any.
+    start: Option<LoginFlowStart>,
+    /// Monotonic token: bumped on every cancel so stale continuations of a
+    /// previous flow (timers, in-flight polls, stores) become no-ops.
+    generation: u64,
+    /// Polls issued so far (the Python `_poll_count`).
+    poll_count: usize,
+    /// Whether a poll HTTP call is still pending (the Python
+    /// `_poll_in_flight` guard against overlapping requests).
+    poll_in_flight: bool,
+}
+
+impl BrowserFlowState {
+    /// Cancel the flow and invalidate every pending continuation.
+    fn cancel(&mut self) {
+        self.generation += 1;
+        self.start = None;
+        self.poll_count = 0;
+        self.poll_in_flight = false;
+    }
+
+    /// Decide (and account) what the timer tick at `generation` should do,
+    /// replicating the Python `_poll` bookkeeping.
+    fn begin_poll(&mut self, generation: u64) -> PollDecision {
+        if self.generation != generation || self.start.is_none() {
+            return PollDecision::Stop;
+        }
+        if self.poll_in_flight {
+            return PollDecision::Skip;
+        }
+        self.poll_count += 1;
+        if self.poll_count > MAX_POLLS {
+            self.start = None;
+            return PollDecision::Stop;
+        }
+        self.poll_in_flight = true;
+        PollDecision::Poll
+    }
+}
+
 /// Every widget the handlers need to reach across pages.
 #[derive(Clone)]
 struct SetupWidgets {
@@ -113,6 +179,10 @@ struct SetupWidgets {
     server_error: gtk4::Label,
     auth_title: gtk4::Label,
     opencloud_hint: gtk4::Label,
+    browser_group: libadwaita::PreferencesGroup,
+    browser_row: libadwaita::ActionRow,
+    waiting_box: gtk4::Box,
+    login_url_label: gtk4::Label,
     username_entry: libadwaita::EntryRow,
     password_entry: libadwaita::PasswordEntryRow,
     auth_error: gtk4::Label,
@@ -153,6 +223,43 @@ impl SetupWidgets {
             t("OpenCloud requires an app password. Create one in the server account settings (App Tokens) and enter it below."),
         );
         opencloud_hint.set_visible(false);
+
+        let browser_row = libadwaita::ActionRow::builder()
+            .title(t("Sign in with browser"))
+            .subtitle(t("Recommended. Supports two-factor authentication."))
+            .tooltip_text(t("Sign in by authorizing the app in your browser"))
+            .activatable(true)
+            .build();
+        let browser_icon = gtk4::Image::builder()
+            .icon_name("web-browser-symbolic")
+            .pixel_size(16)
+            .build();
+        browser_row.add_prefix(&browser_icon);
+        let browser_next = gtk4::Image::builder()
+            .icon_name("go-next-symbolic")
+            .pixel_size(16)
+            .build();
+        browser_row.add_suffix(&browser_next);
+        let browser_group = libadwaita::PreferencesGroup::new();
+        browser_group.add(&browser_row);
+
+        let waiting_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+        waiting_box.set_visible(false);
+        let spinner = gtk4::Spinner::new();
+        spinner.set_spinning(true);
+        spinner.set_halign(gtk4::Align::Center);
+        waiting_box.append(&spinner);
+        waiting_box.append(&centered_label(t(
+            "Waiting for authorization in your browser…",
+        )));
+        let login_url_label = gtk4::Label::builder()
+            .wrap(true)
+            .selectable(true)
+            .justify(gtk4::Justification::Center)
+            .css_classes(["dim-label"])
+            .build();
+        waiting_box.append(&login_url_label);
+
         let username_entry = libadwaita::EntryRow::new();
         username_entry.set_title(t("Username"));
         username_entry.set_tooltip_text(Some(t("Your account user name")));
@@ -191,6 +298,10 @@ impl SetupWidgets {
             server_error,
             auth_title,
             opencloud_hint,
+            browser_group,
+            browser_row,
+            waiting_box,
+            login_url_label,
             username_entry,
             password_entry,
             auth_error,
@@ -211,6 +322,7 @@ struct SetupContext {
     stack: gtk4::Stack,
     widgets: SetupWidgets,
     state: Rc<RefCell<WizardState>>,
+    browser: Rc<RefCell<BrowserFlowState>>,
     config_store: ConfigStore,
     callbacks: SetupCallbacks,
     window: libadwaita::ApplicationWindow,
@@ -219,6 +331,10 @@ struct SetupContext {
 /// The account setup wizard: a stack-based multi-page window.
 pub struct SetupWindow {
     window: libadwaita::ApplicationWindow,
+    /// Kept so tests can drive the wizard pages; production only reads
+    /// `window` (the pages hold their own clones of the context).
+    #[cfg_attr(not(test), allow(dead_code))]
+    context: SetupContext,
 }
 
 impl SetupWindow {
@@ -250,6 +366,7 @@ impl SetupWindow {
             stack: stack.clone(),
             widgets: SetupWidgets::new(),
             state: Rc::new(RefCell::new(WizardState::default())),
+            browser: Rc::new(RefCell::new(BrowserFlowState::default())),
             config_store,
             callbacks,
             window: window.clone(),
@@ -262,7 +379,7 @@ impl SetupWindow {
         build_summary_page(&context_for_pages);
         stack.set_visible_child_name("welcome");
 
-        Self { window }
+        Self { window, context }
     }
 
     /// The underlying window, for presentation.
@@ -273,6 +390,20 @@ impl SetupWindow {
     /// Present the wizard window.
     pub fn present(&self) {
         self.window.present();
+    }
+}
+
+#[cfg(test)]
+impl SetupWindow {
+    /// The wizard widgets, for smoke tests.
+    fn widgets(&self) -> &SetupWidgets {
+        &self.context.widgets
+    }
+
+    /// Re-run the provider-specific authentication layout for a provider.
+    fn configure_authentication_for(&self, provider: Provider) {
+        self.context.state.borrow_mut().provider = provider;
+        configure_authentication(&self.context);
     }
 }
 
@@ -383,6 +514,59 @@ fn build_authentication_page(ctx: &SetupContext) {
     let (page, content) = page();
     content.append(&ctx.widgets.auth_title);
     content.append(&ctx.widgets.opencloud_hint);
+
+    content.append(&ctx.widgets.browser_group);
+    {
+        let ctx_for_browser = ctx.clone();
+        ctx.widgets.browser_row.connect_activated(move |_| {
+            browser_login(&ctx_for_browser);
+        });
+    }
+
+    content.append(&ctx.widgets.waiting_box);
+    let waiting_actions = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .halign(gtk4::Align::Center)
+        .build();
+    let copy = gtk4::Button::with_label(t("Copy Link"));
+    copy.set_tooltip_text(Some(t("Copy the login link to the clipboard")));
+    {
+        let url_label = ctx.widgets.login_url_label.clone();
+        copy.connect_clicked(move |_| {
+            let url = url_label.text().to_string();
+            if url.is_empty() {
+                return;
+            }
+            if let Some(display) = gtk4::gdk::Display::default() {
+                display.clipboard().set_text(&url);
+            }
+        });
+    }
+    waiting_actions.append(&copy);
+    let reopen = gtk4::Button::with_label(t("Open Browser Again"));
+    reopen.set_tooltip_text(Some(t("Open the login page in the browser again")));
+    {
+        let url_label = ctx.widgets.login_url_label.clone();
+        reopen.connect_clicked(move |_| {
+            let url = url_label.text().to_string();
+            if !url.is_empty() {
+                open_login_url(&url);
+            }
+        });
+    }
+    waiting_actions.append(&reopen);
+    let cancel = gtk4::Button::with_label(t("Cancel"));
+    cancel.set_tooltip_text(Some(t("Cancel the browser sign-in")));
+    {
+        let ctx_for_cancel = ctx.clone();
+        cancel.connect_clicked(move |_| {
+            cancel_browser_flow(&ctx_for_cancel);
+            ctx_for_cancel.widgets.waiting_box.set_visible(false);
+        });
+    }
+    waiting_actions.append(&cancel);
+    ctx.widgets.waiting_box.append(&waiting_actions);
 
     let manual_group = libadwaita::PreferencesGroup::builder()
         .title(t("Manual Sign In"))
@@ -504,6 +688,12 @@ fn configure_authentication(ctx: &SetupContext) {
         t("Password or app password")
     });
     ctx.widgets.opencloud_hint.set_visible(opencloud);
+    // The browser flow is Nextcloud-only (OpenCloud has no login/v2 endpoint).
+    if opencloud {
+        cancel_browser_flow(ctx);
+        ctx.widgets.waiting_box.set_visible(false);
+    }
+    ctx.widgets.browser_group.set_visible(!opencloud);
     ctx.widgets.manual_button.set_sensitive(true);
 }
 
@@ -583,6 +773,169 @@ fn manual_login(ctx: &SetupContext) {
             }
         }
     });
+}
+
+// ---------------------------------------------------------------------------
+// Browser sign-in flow (Login Flow v2)
+// ---------------------------------------------------------------------------
+
+/// Open `url` with the user's default browser (`launch_default_for_uri`).
+fn open_login_url(url: &str) {
+    if let Err(error) = AppInfo::launch_default_for_uri(url, None::<&gio::AppLaunchContext>) {
+        eprintln!("Setup: could not open the login URL: {error}");
+    }
+}
+
+/// Cancel the browser flow (timer continuations become no-ops).
+fn cancel_browser_flow(ctx: &SetupContext) {
+    ctx.browser.borrow_mut().cancel();
+}
+
+/// Start the browser sign-in: initiate the flow, open the login URL and let
+/// the polling timer take over. Mirrors the Python `_browser_login`.
+fn browser_login(ctx: &SetupContext) {
+    cancel_browser_flow(ctx);
+    ctx.widgets.auth_error.set_text("");
+    ctx.widgets.login_url_label.set_text("");
+    ctx.widgets.waiting_box.set_visible(true);
+
+    let server = ctx.state.borrow().server.clone();
+    let generation = ctx.browser.borrow().generation;
+    let initiate = gio::spawn_blocking(move || LoginFlowV2::new().initiate(&server));
+
+    let ctx = ctx.clone();
+    glib::spawn_future_local(async move {
+        if ctx.browser.borrow().generation != generation {
+            return;
+        }
+        let start = match initiate.await {
+            Ok(Ok(start)) => start,
+            Ok(Err(error)) => {
+                browser_flow_failed(&ctx, &error);
+                return;
+            }
+            Err(_) => {
+                browser_flow_failed(&ctx, &LoginFlowError::Transport);
+                return;
+            }
+        };
+        if ctx.browser.borrow().generation != generation {
+            return;
+        }
+        ctx.browser.borrow_mut().start = Some(start.clone());
+        open_login_url(&start.login_url);
+        ctx.widgets.login_url_label.set_text(&start.login_url);
+        schedule_browser_poll(&ctx, generation);
+    });
+}
+
+/// Install the recurring poll timer (one source per flow generation).
+fn schedule_browser_poll(ctx: &SetupContext, generation: u64) {
+    let ctx_for_poll = ctx.clone();
+    glib::timeout_add_seconds_local(POLL_INTERVAL_SECONDS, move || {
+        browser_poll_tick(&ctx_for_poll, generation)
+    });
+}
+
+/// One timer tick: decide, issue the poll off-thread and keep waiting.
+fn browser_poll_tick(ctx: &SetupContext, generation: u64) -> ControlFlow {
+    let start = {
+        let mut browser = ctx.browser.borrow_mut();
+        match browser.begin_poll(generation) {
+            PollDecision::Stop => {
+                // The Python flow only stops by itself when the 20-minute
+                // budget runs out; cancellation is user-driven.
+                if browser.poll_count > MAX_POLLS {
+                    drop(browser);
+                    ctx.widgets.waiting_box.set_visible(false);
+                    ctx.widgets
+                        .auth_error
+                        .set_text(t("Browser authorization expired after 20 minutes."));
+                }
+                return ControlFlow::Break;
+            }
+            PollDecision::Skip => return ControlFlow::Continue,
+            PollDecision::Poll => browser.start.clone(),
+        }
+        .expect("begin_poll only issues polls with a live session")
+    };
+
+    let poll = gio::spawn_blocking(move || LoginFlowV2::new().poll(&start));
+    let ctx = ctx.clone();
+    glib::spawn_future_local(async move {
+        ctx.browser.borrow_mut().poll_in_flight = false;
+        if ctx.browser.borrow().generation != generation {
+            return;
+        }
+        match poll.await {
+            Ok(Ok(PollOutcome::Pending)) => {}
+            Ok(Ok(PollOutcome::Authorized(result))) => browser_flow_succeeded(&ctx, result),
+            // The Python ignores transport failures during polling (a flaky
+            // network just skips one round) and so does this driver.
+            Ok(Err(LoginFlowError::Transport)) => {}
+            Ok(Err(error)) => browser_flow_failed(&ctx, &error),
+            Err(_) => eprintln!("Setup: the browser sign-in poll panicked"),
+        }
+    });
+    ControlFlow::Continue
+}
+
+/// The user authorized the app: adopt the credentials and store the secret.
+fn browser_flow_succeeded(ctx: &SetupContext, result: LoginFlowResult) {
+    cancel_browser_flow(ctx);
+    ctx.widgets.waiting_box.set_visible(false);
+    let server = match normalize_server_url(&result.server) {
+        Ok(server) => server,
+        Err(error) => {
+            ctx.widgets.auth_error.set_text(&error.to_string());
+            return;
+        }
+    };
+    {
+        let mut state = ctx.state.borrow_mut();
+        state.server = server.clone();
+        state.username = result.login_name.clone();
+        state.authentication_type = "browser".to_string();
+    }
+    ctx.widgets
+        .auth_error
+        .set_text(t("Saving account securely…"));
+
+    let account_id = account_id(&server, &result.login_name);
+    let app_password = result.app_password;
+    let store = gio::spawn_blocking(move || {
+        CredentialsStore::set(&account_id, &app_password).map_err(|error| error.to_string())
+    });
+
+    let ctx = ctx.clone();
+    glib::spawn_future_local(async move {
+        let stored = store
+            .await
+            .unwrap_or_else(|_| Err("the keyring call panicked".to_string()));
+        match stored {
+            Ok(()) => {
+                ctx.widgets.auth_error.set_text("");
+                ctx.widgets.password_entry.set_text("");
+                ctx.stack.set_visible_child_name("folders");
+            }
+            Err(message) => {
+                ctx.widgets.auth_error.set_text(
+                    &t("Could not store the account password: {message}").replacen(
+                        "{message}",
+                        &message,
+                        1,
+                    ),
+                );
+            }
+        }
+    });
+}
+
+/// The flow failed: cancel it and surface the (translated) error.
+fn browser_flow_failed(ctx: &SetupContext, error: &LoginFlowError) {
+    cancel_browser_flow(ctx);
+    ctx.widgets.waiting_box.set_visible(false);
+    ctx.widgets.auth_error.set_text(&error.message());
 }
 
 /// Discover the OpenCloud spaces in the background and remember the first one.
@@ -1220,6 +1573,15 @@ fn dim_label(text: &str) -> gtk4::Label {
         .build()
 }
 
+/// A wrap-aware centered label (the waiting-box texts).
+fn centered_label(text: &str) -> gtk4::Label {
+    gtk4::Label::builder()
+        .label(text)
+        .wrap(true)
+        .justify(gtk4::Justification::Center)
+        .build()
+}
+
 fn error_label(text: &str) -> gtk4::Label {
     gtk4::Label::builder()
         .label(text)
@@ -1540,6 +1902,82 @@ mod tests {
         reset_locale();
     }
 
+    // ---- browser sign-in state ----------------------------------------------
+
+    fn live_browser_state() -> BrowserFlowState {
+        BrowserFlowState {
+            start: Some(LoginFlowStart {
+                poll_endpoint: "https://cloud.example.com/index.php/login/v2/poll".to_string(),
+                poll_token: "token".to_string(),
+                login_url: "https://cloud.example.com/index.php/login/v2/flow/X".to_string(),
+            }),
+            ..BrowserFlowState::default()
+        }
+    }
+
+    #[test]
+    fn begin_poll_issues_polls_for_the_live_generation() {
+        let mut state = live_browser_state();
+        assert_eq!(state.begin_poll(0), PollDecision::Poll);
+        assert_eq!(state.poll_count, 1);
+        assert!(state.poll_in_flight);
+        // Overlapping ticks are skipped while a poll is in flight.
+        assert_eq!(state.begin_poll(0), PollDecision::Skip);
+        state.poll_in_flight = false;
+        assert_eq!(state.begin_poll(0), PollDecision::Poll);
+        assert_eq!(state.poll_count, 2);
+    }
+
+    #[test]
+    fn begin_poll_stops_for_a_stale_generation() {
+        let mut state = live_browser_state();
+        state.cancel();
+        assert_eq!(state.begin_poll(0), PollDecision::Stop);
+        assert_eq!(state.generation, 1);
+        assert!(state.start.is_none());
+    }
+
+    #[test]
+    fn begin_poll_expires_after_the_twenty_minute_budget() {
+        let mut state = live_browser_state();
+        state.poll_in_flight = false;
+        state.poll_count = MAX_POLLS;
+        assert_eq!(state.begin_poll(0), PollDecision::Stop);
+        assert!(
+            state.start.is_none(),
+            "the session must be dropped on expiry"
+        );
+        // A fresh flow starts counting from zero.
+        let mut fresh = live_browser_state();
+        assert_eq!(fresh.begin_poll(0), PollDecision::Poll);
+        assert_eq!(fresh.poll_count, 1);
+    }
+
+    #[test]
+    fn begin_poll_stops_without_a_session() {
+        let mut state = BrowserFlowState::default();
+        assert_eq!(state.begin_poll(0), PollDecision::Stop);
+    }
+
+    #[test]
+    fn browser_flow_messages_translate_to_spanish() {
+        set_locale(Locale::Spanish);
+        assert_eq!(
+            t("Browser authorization expired after 20 minutes."),
+            "La autorización del navegador caducó tras 20 minutos."
+        );
+        assert_eq!(
+            t("Could not store the account password: {message}").replacen("{message}", "locked", 1),
+            "No se pudo guardar la contraseña de la cuenta: locked"
+        );
+        assert_eq!(
+            t("Browser sign-in was cancelled."),
+            "Se canceló el inicio de sesión con el navegador."
+        );
+        set_locale(Locale::English);
+        reset_locale();
+    }
+
     // ---- GTK smoke --------------------------------------------------------
 
     #[test]
@@ -1559,6 +1997,50 @@ mod tests {
                 window.window().title().unwrap_or_default().to_string(),
                 WINDOW_TITLE
             );
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn browser_sign_in_row_is_present_for_nextcloud() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let dir = tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
+            let widgets = window.widgets();
+            assert_eq!(widgets.browser_row.title().as_str(), "Sign in with browser");
+            assert_eq!(
+                widgets.browser_row.subtitle().unwrap_or_default().as_str(),
+                "Recommended. Supports two-factor authentication."
+            );
+            assert!(widgets.browser_row.is_activatable());
+            assert!(widgets.browser_group.get_visible());
+            assert!(!widgets.waiting_box.get_visible());
+            assert_eq!(widgets.login_url_label.text().as_str(), "");
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn browser_sign_in_row_is_hidden_for_opencloud() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let dir = tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
+            window.configure_authentication_for(Provider::OpenCloud);
+            assert!(!window.widgets().browser_group.get_visible());
+            assert!(!window.widgets().waiting_box.get_visible());
+            // Switching back restores the row.
+            window.configure_authentication_for(Provider::Nextcloud);
+            assert!(window.widgets().browser_group.get_visible());
             reset_locale();
         });
     }

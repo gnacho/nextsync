@@ -5,6 +5,7 @@ pub mod api;
 pub mod command;
 pub mod credentials;
 pub mod driver;
+pub mod login_flow;
 pub mod nextcloudcmd_progress;
 pub mod push;
 pub mod push_protocol;
