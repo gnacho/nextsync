@@ -26,18 +26,21 @@
 //! - **OpenCloud remote folder is optional**: OpenCloud folders mirror a whole
 //!   space by default; the remote field normalizes like Nextcloud's (blank or
 //!   `/` = the space root, which omits the `--remote-folder` flag).
-//! - **OpenCloud credential check**: the same OCS `validate_credentials`
-//!   endpoint is used for both providers (user + app password over HTTP
-//!   Basic). If a real OpenCloud deployment rejects it, the error is surfaced
-//!   as-is; the manual flow stays usable. This is a documented assumption — no
-//!   OpenCloud server was available to validate against.
-//! - **Space discovery**: for OpenCloud the space id is auto-discovered by
-//!   running `opencloudcmd <url>` in query mode (the `opencloud_list_spaces`
-//!   helper) and parsing the printed table (the exact `Short ID | DisplayName
-//!   | ID` layout was verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp`).
-//!   The id is editable per folder in the Add Folder dialog; when none is
-//!   found the folder keeps `space_id: None` (the driver requires a space id,
-//!   so such a folder cannot sync until it is set).
+//! - **OpenCloud credential check**: OpenCloud has no OCS user endpoint, so
+//!   the wizard validates username + app token with a shallow PROPFIND on
+//!   `/remote.php/dav/spaces/` (`NextcloudApi::validate_opencloud_credentials`),
+//!   the WebDAV entry point the OpenCloud docs document for external clients
+//!   (`Basic user:app-token`). 401/403 surface as a rejected-credentials
+//!   error, same as Nextcloud.
+//! - **Space discovery**: for OpenCloud the spaces are listed natively with a
+//!   Depth-1 PROPFIND on the same WebDAV tree
+//!   (`NextcloudApi::list_opencloud_spaces`; id = last href segment, name =
+//!   `<d:displayname>`). The `opencloudcmd <url>` query mode
+//!   (`opencloud_list_spaces`, parsing the `Short ID | DisplayName | ID`
+//!   table verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp`) remains as a
+//!   fallback. The id is editable per folder in the Add Folder dialog; when
+//!   none is found the folder keeps `space_id: None` (the driver requires a
+//!   space id, so such a folder cannot sync until it is set).
 //! - **Not the app's main window**: the Python wizard is the first-run main
 //!   window and quits the application on close. In the rewrite it is a
 //!   secondary window opened from the main window, so closing it does not quit
@@ -713,15 +716,24 @@ fn manual_login(ctx: &SetupContext) {
     ctx.widgets.auth_error.set_text(t("Checking account…"));
 
     let server = ctx.state.borrow().server.clone();
+    let provider = ctx.state.borrow().provider;
     let server_for_validate = server.clone();
     let username_for_validate = username.clone();
     let password_for_validate = password.clone();
     let validate = gio::spawn_blocking(move || {
-        NextcloudApi::new().validate_credentials(
-            &server_for_validate,
-            &username_for_validate,
-            &password_for_validate,
-        )
+        if provider == Provider::OpenCloud {
+            NextcloudApi::new().validate_opencloud_credentials(
+                &server_for_validate,
+                &username_for_validate,
+                &password_for_validate,
+            )
+        } else {
+            NextcloudApi::new().validate_credentials(
+                &server_for_validate,
+                &username_for_validate,
+                &password_for_validate,
+            )
+        }
     });
 
     let ctx = ctx.clone();
@@ -941,14 +953,28 @@ fn browser_flow_failed(ctx: &SetupContext, error: &LoginFlowError) {
 }
 
 /// Discover the OpenCloud spaces in the background and remember the first one.
+///
+/// The native WebDAV listing (`PROPFIND /remote.php/dav/spaces/`) runs first;
+/// the `opencloudcmd` query mode remains as a fallback for servers where the
+/// WebDAV listing is unavailable.
 fn start_space_discovery(ctx: &SetupContext, server: &str, username: &str, password: &str) {
     let server = server.to_string();
     let username = username.to_string();
     let password = password.to_string();
     let discovery = gio::spawn_blocking(move || -> Vec<SpaceInfo> {
-        match opencloud_list_spaces(&server, &username, &password, None) {
-            Ok(output) => parse_spaces_list(&output),
-            Err(_) => Vec::new(),
+        let native = NextcloudApi::new().list_opencloud_spaces(&server, &username, &password);
+        match native {
+            Ok(spaces) => spaces
+                .into_iter()
+                .map(|space| SpaceInfo {
+                    display_name: space.display_name.unwrap_or_else(|| space.id.clone()),
+                    id: space.id,
+                })
+                .collect(),
+            Err(_) => match opencloud_list_spaces(&server, &username, &password, None) {
+                Ok(output) => parse_spaces_list(&output),
+                Err(_) => Vec::new(),
+            },
         }
     });
     let ctx = ctx.clone();
@@ -1215,6 +1241,8 @@ fn start_syncing(ctx: &SetupContext) {
     };
     let account_id = account_id(&server, &username);
     let remote_path = ctx.state.borrow().folders[0].remote_path.clone();
+    let provider = ctx.state.borrow().provider;
+    let space_id = ctx.state.borrow().folders[0].space_id.clone();
     let server_for_probe = server.clone();
     let username_for_probe = username.clone();
     let probe = gio::spawn_blocking(move || -> Result<Option<bool>, ApiError> {
@@ -1226,6 +1254,20 @@ fn start_syncing(ctx: &SetupContext) {
             Ok(Some(password)) => password,
             _ => return Ok(None),
         };
+        if provider == Provider::OpenCloud {
+            // OpenCloud folders mirror a whole space; the Nextcloud files/
+            // tree does not exist there.
+            let Some(space_id) = space_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            else {
+                return Ok(None);
+            };
+            return NextcloudApi::new()
+                .probe_opencloud_space(&server_for_probe, &username_for_probe, &password, space_id)
+                .map(Some);
+        }
         NextcloudApi::new()
             .probe_remote(
                 &server_for_probe,
