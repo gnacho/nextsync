@@ -2214,3 +2214,27 @@ msgstr "Estilo oscuro"
 #: src/ui/settings.rs
 msgid "Desktop Integration"
 msgstr "Integración con el escritorio"
+
+#: src/ui/main_window.rs
+msgid "Move folder to trash?"
+msgstr "¿Mover la carpeta a la papelera?"
+
+#: src/ui/main_window.rs
+msgid ""
+"Remove the synchronization and move the local folder to the trash, or keep "
+"the folder on disk without synchronizing it."
+msgstr ""
+"Quita la sincronización y mueve la carpeta local a la papelera, o conserva "
+"la carpeta en el disco sin sincronizarla."
+
+#: src/ui/main_window.rs
+msgid "Keep Folder"
+msgstr "Conservar carpeta"
+
+#: src/ui/main_window.rs
+msgid "Move Folder to Trash"
+msgstr "Mover carpeta a la papelera"
+
+#: src/ui/main_window.rs
+msgid "The folder could not be moved to the trash."
+msgstr "No se pudo mover la carpeta a la papelera."

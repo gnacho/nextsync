@@ -99,6 +99,26 @@ pub type RemoveFolderCallback = Rc<dyn Fn(&str, &str)>;
 /// Callback invoked when the user wants to edit ignored files.
 pub type EditIgnoredCallback = Rc<dyn Fn()>;
 
+/// What to do with the local folder when its synchronization is removed
+/// (issue #37).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderRemoval {
+    /// Unconfigure only; the local folder stays on disk untouched.
+    Keep,
+    /// Unconfigure and move the local folder to the system trash.
+    Trash,
+}
+
+/// Map a removal-dialog response to the action it stands for. Unknown
+/// responses (including closures) map to `None` and change nothing.
+pub fn folder_removal_for_response(response: &str) -> Option<FolderRemoval> {
+    match response {
+        "keep" => Some(FolderRemoval::Keep),
+        "trash" => Some(FolderRemoval::Trash),
+        _ => None,
+    }
+}
+
 /// Shared holder for the Settings header-button handler, installed after the
 /// window lives in a shared cell.
 pub type SettingsHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
@@ -1193,11 +1213,90 @@ impl MainWindow {
             on_remove_folder: {
                 let weak = self.self_weak.clone();
                 let store = self.config_store.clone();
-                Some(Rc::new(move |account_id, folder_id| {
-                    let _ = store.remove_folder(account_id, folder_id);
-                    if let Some(main) = weak.upgrade() {
-                        main.borrow_mut().refresh_after_config_change();
-                    }
+                let overlay = self.toast_overlay.clone();
+                let logger = self.logger.clone();
+                Some(Rc::new(move |account_id: &str, folder_id: &str| {
+                    let Some(main) = weak.upgrade() else {
+                        return;
+                    };
+                    let main = main.borrow_mut();
+                    // Resolve the folder's local root before anything
+                    // changes so the trash action always sees the path.
+                    let local_root = main
+                        .config
+                        .accounts
+                        .iter()
+                        .find(|account| account.id == account_id)
+                        .and_then(|account| {
+                            account
+                                .folders
+                                .iter()
+                                .find(|folder| folder.id == folder_id)
+                                .map(|folder| folder.local_root.clone())
+                        });
+                    // Issue #37: confirm before removing. "Keep Folder"
+                    // only unconfigures (the previous behavior); "Move
+                    // Folder to Trash" also trashes the local folder.
+                    let dialog = libadwaita::AlertDialog::new(
+                        Some(t("Move folder to trash?")),
+                        Some(t(
+                            "Remove the synchronization and move the local folder to the \
+                             trash, or keep the folder on disk without synchronizing it.",
+                        )),
+                    );
+                    dialog.add_response("keep", t("Keep Folder"));
+                    dialog.add_response("trash", t("Move Folder to Trash"));
+                    dialog.set_response_appearance(
+                        "trash",
+                        libadwaita::ResponseAppearance::Destructive,
+                    );
+                    dialog.set_default_response(Some("keep"));
+                    let store = store.clone();
+                    let weak = weak.clone();
+                    let overlay = overlay.clone();
+                    let logger = logger.clone();
+                    let account_id = account_id.to_string();
+                    let folder_id = folder_id.to_string();
+                    dialog.connect_response(None, move |_dialog, response| {
+                        let Some(action) = folder_removal_for_response(response) else {
+                            return;
+                        };
+                        // The configuration changes identically for both
+                        // answers; only the folder's fate differs.
+                        let _ = store.remove_folder(&account_id, &folder_id);
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow_mut().refresh_after_config_change();
+                        }
+                        if action == FolderRemoval::Trash {
+                            let Some(local_root) = local_root.clone() else {
+                                return;
+                            };
+                            // Trash off the UI thread; a failure surfaces as
+                            // a toast plus a log line (the removal itself
+                            // already succeeded).
+                            let local_root_for_trash = local_root.clone();
+                            let handle = gio::spawn_blocking(move || {
+                                gio::File::for_path(&local_root_for_trash)
+                                    .trash(None::<&gio::Cancellable>)
+                            });
+                            let local_root = local_root.clone();
+                            let logger = logger.clone();
+                            let overlay = overlay.clone();
+                            glib::spawn_future_local(async move {
+                                if let Ok(Err(error)) = handle.await {
+                                    logger.append(&format!(
+                                        "folder removal: could not move {} to the trash: \
+                                         {error}",
+                                        local_root
+                                    ));
+                                    overlay.add_toast(libadwaita::Toast::new(t(
+                                        "The folder could not be moved to the trash.",
+                                    )));
+                                }
+                            });
+                        }
+                    });
+                    dialog.present(Some(main.window.upcast_ref::<gtk4::Widget>()));
                 }))
             },
             on_edit_ignored: {
@@ -1483,6 +1582,49 @@ mod tests {
     fn close_action_hides_with_tray_and_quits_without() {
         assert_eq!(close_action(true), CloseAction::Hide);
         assert_eq!(close_action(false), CloseAction::Quit);
+    }
+
+    #[test]
+    fn folder_removal_responses_map_to_actions() {
+        assert_eq!(
+            folder_removal_for_response("keep"),
+            Some(FolderRemoval::Keep)
+        );
+        assert_eq!(
+            folder_removal_for_response("trash"),
+            Some(FolderRemoval::Trash)
+        );
+        assert_eq!(folder_removal_for_response("other"), None);
+        assert_eq!(folder_removal_for_response(""), None);
+    }
+
+    /// The real GIO trash round-trip for removed folders (issue #37). Like
+    /// the keyring test, it skips when the environment cannot trash (no
+    /// home-owned filesystem); the dialog logic itself is covered by the
+    /// pure response-mapping test above.
+    #[test]
+    fn gio_trash_moves_a_home_directory() {
+        let _env = crate::util::test_env::lock();
+        let Ok(home) = std::env::var("HOME") else {
+            eprintln!("skipped: no HOME to trash within");
+            return;
+        };
+        let dir =
+            std::path::Path::new(&home).join(format!("nextsync-trash-test-{}", std::process::id()));
+        if std::fs::create_dir_all(&dir).is_err() {
+            eprintln!("skipped: could not create the trash test directory");
+            return;
+        }
+        std::fs::write(dir.join("marker.txt"), b"nextsync").unwrap();
+        match gio::File::for_path(&dir).trash(None::<&gio::Cancellable>) {
+            Ok(()) => {
+                assert!(!dir.exists(), "the directory was moved to the trash");
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                eprintln!("skipped: gio trash is unavailable here: {error}");
+            }
+        }
     }
 
     #[test]
