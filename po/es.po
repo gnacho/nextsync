@@ -1893,6 +1893,54 @@ msgstr "La contraseña de tu cuenta o la contraseña de aplicación"
 msgid "Your account user name"
 msgstr "El nombre de usuario de tu cuenta"
 
+#: src/ui/settings.rs
+msgid "Authentication"
+msgstr "Autenticación"
+
+#: src/ui/settings.rs
+msgid "Use Sign in again when the stored credentials are missing or rejected."
+msgstr "Usa Iniciar sesión de nuevo cuando faltan las credenciales guardadas o se rechazan."
+
+#: src/ui/settings.rs
+msgid "Sign in again"
+msgstr "Iniciar sesión de nuevo"
+
+#: src/ui/settings.rs
+msgid "Re-enter the username and password for this account"
+msgstr "Vuelve a escribir el usuario y la contraseña de esta cuenta"
+
+#: src/ui/settings.rs
+msgid "Re-enter credentials without removing the account"
+msgstr "Vuelve a introducir las credenciales sin eliminar la cuenta"
+
+#: src/ui/settings.rs
+msgid "Re-enter the credentials for this account. The previous password is replaced."
+msgstr "Vuelve a introducir las credenciales de esta cuenta. Se sustituye la contraseña anterior."
+
+#: src/ui/settings.rs
+msgid "Username and password are required."
+msgstr "Usuario y contraseña son obligatorios."
+
+#: src/ui/settings.rs
+msgid "Checking credentials…"
+msgstr "Comprobando credenciales…"
+
+#: src/ui/settings.rs
+msgid "Could not save credentials."
+msgstr "No se han podido guardar las credenciales."
+
+#: src/ui/settings.rs
+msgid "Could not update the account."
+msgstr "No se ha podido actualizar la cuenta."
+
+#: src/ui/settings.rs
+msgid "Signed in."
+msgstr "Sesión iniciada."
+
+#: src/ui/settings.rs
+msgid "Could not verify the credentials."
+msgstr "No se han podido verificar las credenciales."
+
 #~ msgid "Connected. Add folders from Settings."
 #~ msgstr "Conectado. Añade carpetas desde Ajustes."
 

@@ -682,6 +682,44 @@ fn build_advanced_page(
     );
     page.add(&diagnostics);
 
+    // Authentication: re-enter credentials without removing the account.
+    let auth_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Authentication"))
+        .description(t(
+            "Use Sign in again when the stored credentials are missing or rejected.",
+        ))
+        .build();
+    let sign_in_again = libadwaita::ActionRow::builder()
+        .title(t("Sign in again"))
+        .subtitle(t("Re-enter the username and password for this account"))
+        .tooltip_text(t("Re-enter credentials without removing the account"))
+        .activatable(true)
+        .build();
+    let auth_icon = gtk4::Image::builder()
+        .icon_name("dialog-password-symbolic")
+        .pixel_size(16)
+        .build();
+    sign_in_again.add_prefix(&auth_icon);
+    let auth_next = gtk4::Image::builder()
+        .icon_name("go-next-symbolic")
+        .pixel_size(16)
+        .build();
+    sign_in_again.add_suffix(&auth_next);
+    let store_for_signin = store.clone();
+    let account_id_for_signin = account_id.to_string();
+    let account_for_signin = account.clone();
+    let window_for_signin = window.clone();
+    sign_in_again.connect_activated(move |_| {
+        present_sign_in_again_dialog(
+            &store_for_signin,
+            &account_id_for_signin,
+            &account_for_signin,
+            &window_for_signin,
+        );
+    });
+    auth_group.add(&sign_in_again);
+    page.add(&auth_group);
+
     // Account removal (typed confirmation).
     let account_group = libadwaita::PreferencesGroup::builder()
         .title(t("Account"))
@@ -1051,7 +1089,7 @@ pub fn present_add_folder_dialog(
     let picker_status = gtk4::Label::builder()
         .xalign(0.0)
         .wrap(true)
-        .css_classes(["dim-label"])
+        .css_classes(["caption"])
         .build();
     entry_box.append(&picker_status);
 
@@ -1209,24 +1247,13 @@ fn populate_remote_picker(
     let handle = gio::spawn_blocking(move || -> RemoteFolderLookup {
         let password = match CredentialsStore::get(&account_id) {
             Ok(Some(password)) => Some(password),
-            Ok(None) => {
-                eprintln!("remote picker: no stored credentials for account {account_id}");
-                None
-            }
-            Err(error) => {
-                eprintln!("remote picker: keyring lookup failed for account {account_id}: {error}");
-                None
-            }
+            Ok(None) => None,
+            Err(_) => None,
         };
         let Some(password) = password else {
             return classify_remote_lookup(None);
         };
         let folders = NextcloudApi::new().list_remote_folders(&server, &username, &password);
-        if let Err(error) = &folders {
-            eprintln!(
-                "remote picker: list_remote_folders failed for account {account_id}: {error}"
-            );
-        }
         classify_remote_lookup(Some((password, folders)))
     });
     glib::spawn_future_local(async move {
@@ -1649,6 +1676,121 @@ fn valid_proxy_url(value: &str) -> bool {
 /// The typed "remove" confirmation matches case-insensitively, like Python.
 fn typed_confirmation_matches(text: &str) -> bool {
     text.trim().eq_ignore_ascii_case("remove")
+}
+
+/// Re-enter the credentials for an account without removing it. The dialog
+/// validates against the server, then stores the new password in the keyring
+/// and updates the login name if it changed. Stays open with an inline error
+/// on failure so the user can retry without losing what they typed.
+fn present_sign_in_again_dialog(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    parent: &libadwaita::PreferencesWindow,
+) {
+    let dialog = libadwaita::AlertDialog::new(
+        Some(t("Sign in again")),
+        Some(t(
+            "Re-enter the credentials for this account. The previous password is replaced.",
+        )),
+    );
+    let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let username = libadwaita::EntryRow::builder().title(t("Username")).build();
+    username.set_text(&account.login_name);
+
+    let password = libadwaita::PasswordEntryRow::new();
+    password.set_title(t("Password"));
+
+    let status = gtk4::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["caption"])
+        .build();
+
+    entry_box.append(&username);
+    entry_box.append(&password);
+    entry_box.append(&status);
+    dialog.set_extra_child(Some(&entry_box));
+
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("signin", t("Sign In"));
+    dialog.set_response_appearance("signin", libadwaita::ResponseAppearance::Suggested);
+    dialog.set_can_close(false);
+
+    let store = store.clone();
+    let account_id = account_id.to_string();
+    let server = account.server_url.clone();
+    let username_w = username.clone();
+    let password_w = password.clone();
+    let status_w = status.clone();
+    let parent_w = parent.clone();
+    dialog.connect_response(None, move |dialog, response| {
+        if response == "cancel" {
+            dialog.force_close();
+            return;
+        }
+        if response != "signin" {
+            return;
+        }
+        let user = username_w.text().to_string();
+        let pass = password_w.text().to_string();
+        if user.is_empty() || pass.is_empty() {
+            status_w.set_text(t("Username and password are required."));
+            return;
+        }
+        status_w.set_text(t("Checking credentials…"));
+
+        let server_c = server.clone();
+        let user_c = user.clone();
+        let pass_c = pass.clone();
+        let handle = gio::spawn_blocking(move || {
+            NextcloudApi::new().validate_credentials(&server_c, &user_c, &pass_c)
+        });
+
+        let store = store.clone();
+        let account_id = account_id.clone();
+        let user_save = user.clone();
+        let pass_save = pass.clone();
+        let status_w2 = status_w.clone();
+        let parent_w2 = parent_w.clone();
+        let dialog_w = dialog.clone();
+        glib::spawn_future_local(async move {
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(_) => {
+                    status_w2.set_text(t("Could not verify the credentials."));
+                    return;
+                }
+            };
+            match result {
+                Ok(_) => {
+                    if let Err(err) = CredentialsStore::set(&account_id, &pass_save) {
+                        status_w2.set_text(&format!("{} {err}", t("Could not save credentials.")));
+                        return;
+                    }
+                    if let Err(err) = persist_account(&store, &account_id, |account| {
+                        account.login_name = user_save.clone();
+                    }) {
+                        status_w2
+                            .set_text(&format!("{} {err}", t("Could not update the account.")));
+                        return;
+                    }
+                    let toast = libadwaita::Toast::new(t("Signed in."));
+                    parent_w2.add_toast(toast);
+                    dialog_w.force_close();
+                }
+                Err(ApiError::AuthRejected) => {
+                    status_w2.set_text(t("Could not authenticate with the server."));
+                }
+                Err(other) => {
+                    status_w2.set_text(&format!("{other}"));
+                }
+            }
+        });
+    });
+
+    dialog.present(Some(parent));
 }
 
 /// The two-step Remove Account flow (issue #35).
