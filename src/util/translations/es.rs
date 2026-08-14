@@ -182,6 +182,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Paused", "En pausa"),
     ("Paused on Battery", "En pausa con batería"),
     ("Power", "Energía"),
+    ("Preferences", "Preferencias"),
     ("Proxy", "Proxy"),
     ("Published the corrected website, source, issue, and changelog links under the canonical repository.", "Se publicaron los enlaces corregidos del sitio web, código fuente, problemas e historial de cambios en el repositorio canónico."),
     ("Push connection", "Conexión push"),

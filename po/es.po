@@ -1077,7 +1077,11 @@ msgstr "Sincronización de archivos de Nextcloud"
 msgid "Settings"
 msgstr "Configuración"
 
-#: src/nextsync/ui/main_window.py:317
+#: src/ui/main_window.rs (hamburger menu)
+msgid "Preferences"
+msgstr "Preferencias"
+
+#: src/ui/main_window.rs:317
 msgid "About"
 msgstr "Acerca de"
 
