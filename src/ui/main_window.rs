@@ -21,7 +21,8 @@ use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{
-    present_add_folder_dialog, ExclusionsDialog, SettingsCallbacks, SettingsWindow,
+    page as settings_page, present_add_folder_dialog, ExclusionsDialog, SettingsCallbacks,
+    SettingsHost, SettingsView,
 };
 use crate::util::i18n::t;
 
@@ -319,7 +320,10 @@ pub struct MainWindow {
     config_store: ConfigStore,
     logger: crate::core::log::LogBuffer,
     active_account_id: Option<String>,
-    settings_window: Option<SettingsWindow>,
+    /// The in-app settings view (official-client style); `None` until opened.
+    settings_view: Option<SettingsView>,
+    /// Outer stack that slides the settings view over the sync view.
+    root_stack: gtk4::Stack,
     setup_window: Option<crate::ui::setup::SetupWindow>,
     log_window: Option<crate::ui::log_view::LogWindow>,
     conflicts_window: Option<crate::ui::conflict_resolver::ConflictResolverWindow>,
@@ -369,21 +373,71 @@ impl MainWindow {
         let title = libadwaita::WindowTitle::new(window_title(), window_subtitle());
         header.set_title_widget(Some(&title));
 
-        let settings_button = gtk4::Button::builder()
-            .icon_name("nextsync-settings-2-symbolic")
+        // Hamburger menu (official-client style): Preferences, Advanced and
+        // About, rendered in-app by sliding the settings view over the sync
+        // view.
+        let hamburger = gtk4::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
             .tooltip_text(t("Settings"))
             .css_classes(["flat"])
             .build();
-        // The handler is installed after construction (the window must exist
-        // inside a shared cell first); until then the button is inert.
-        let settings_handler: SettingsHandler = Rc::new(RefCell::new(None));
-        let handler_for_button = settings_handler.clone();
-        settings_button.connect_clicked(move |_button| {
-            if let Some(handler) = handler_for_button.borrow_mut().as_mut() {
-                handler();
-            }
+        let menu = gio::Menu::new();
+        let sync_item = gio::MenuItem::new(Some(t("Synchronization")), Some("app.sync"));
+        sync_item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
+        menu.append_item(&sync_item);
+        let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
+        preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
+        menu.append_item(&preferences_item);
+        let advanced_item = gio::MenuItem::new(Some(t("Advanced")), Some("app.advanced"));
+        advanced_item.set_icon(&gio::ThemedIcon::new("applications-system-symbolic"));
+        menu.append_item(&advanced_item);
+        let about_item = gio::MenuItem::new(Some(t("About")), Some("app.about"));
+        about_item.set_icon(&gio::ThemedIcon::new("nextsync-info-symbolic"));
+        menu.append_item(&about_item);
+        hamburger.set_menu_model(Some(&menu));
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&{
+            let weak = self_weak.clone();
+            let action = gio::SimpleAction::new("sync", None);
+            action.connect_activate(move |_action, _param| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().show_sync_view();
+                }
+            });
+            action
         });
-        header.pack_end(&settings_button);
+        actions.add_action(&{
+            let weak = self_weak.clone();
+            let action = gio::SimpleAction::new("preferences", None);
+            action.connect_activate(move |_action, _param| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().show_preferences();
+                }
+            });
+            action
+        });
+        actions.add_action(&{
+            let weak = self_weak.clone();
+            let action = gio::SimpleAction::new("advanced", None);
+            action.connect_activate(move |_action, _param| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().show_advanced();
+                }
+            });
+            action
+        });
+        actions.add_action(&{
+            let on_about = on_show_about.clone();
+            let action = gio::SimpleAction::new("about", None);
+            action.connect_activate(move |_action, _param| {
+                if let Some(cb) = &on_about {
+                    cb();
+                }
+            });
+            action
+        });
+        hamburger.insert_action_group("app", Some(&actions));
+        header.pack_start(&hamburger);
 
         let log_button = gtk4::Button::builder()
             .icon_name("view-list-symbolic")
@@ -398,18 +452,6 @@ impl MainWindow {
         });
         header.pack_end(&log_button);
 
-        let about_button = gtk4::Button::builder()
-            .icon_name("nextsync-info-symbolic")
-            .tooltip_text(t("About"))
-            .css_classes(["flat"])
-            .build();
-        let about_cb = on_show_about.clone();
-        about_button.connect_clicked(move |_button| {
-            if let Some(cb) = &about_cb {
-                cb();
-            }
-        });
-        header.pack_end(&about_button);
         toolbar.add_top_bar(&header);
 
         let toast_overlay = libadwaita::ToastOverlay::new();
@@ -452,7 +494,16 @@ impl MainWindow {
 
         split.set_sidebar(Some(&sidebar_page));
         split.set_content(Some(&content_page));
-        toolbar.set_content(Some(&split));
+
+        // Outer stack: the sync view (split) and, slid over it, the in-app
+        // settings view (official-client style).
+        let root_stack = gtk4::Stack::builder()
+            .transition_type(gtk4::StackTransitionType::SlideLeftRight)
+            .build();
+        root_stack.add_named(&split, Some("sync"));
+        root_stack.set_visible_child_name("sync");
+
+        toolbar.set_content(Some(&root_stack));
         window.set_content(Some(&toolbar));
 
         // Close button quits the application outright. The StatusNotifier tray
@@ -467,6 +518,7 @@ impl MainWindow {
             glib::Propagation::Proceed
         });
 
+        let settings_handler: SettingsHandler = Rc::new(RefCell::new(None));
         let mut main = Self {
             window,
             application: application.clone(),
@@ -475,7 +527,8 @@ impl MainWindow {
             config_store,
             logger,
             active_account_id: None,
-            settings_window: None,
+            settings_view: None,
+            root_stack,
             setup_window: None,
             log_window: None,
             conflicts_window: None,
@@ -510,7 +563,7 @@ impl MainWindow {
         &self.window
     }
 
-    /// Wire the Settings header button to open this window's Settings.
+    /// Wire the Settings header button to open this window's Preferences.
     ///
     /// Called once from the launcher once the window lives in a shared cell.
     pub fn install_settings_handler(&mut self, weak: Weak<RefCell<MainWindow>>) {
@@ -518,7 +571,7 @@ impl MainWindow {
         let handler = self.settings_handler.clone();
         *handler.borrow_mut() = Some(Box::new(move || {
             if let Some(main) = weak.upgrade() {
-                main.borrow_mut().show_settings();
+                main.borrow_mut().show_preferences();
             }
         }));
     }
@@ -717,8 +770,20 @@ impl MainWindow {
         self.setup_window = Some(window);
     }
 
-    /// Open (or bring to front) the Settings window for the active account.
-    pub fn show_settings(&mut self) {
+    /// Open the in-app Preferences view (slides over the sync view), building
+    /// it for the active account on first use.
+    pub fn show_preferences(&mut self) {
+        self.show_settings_page(settings_page::GENERAL);
+    }
+
+    /// Open the in-app Advanced page (slides over the sync view).
+    pub fn show_advanced(&mut self) {
+        self.show_settings_page(settings_page::ADVANCED);
+    }
+
+    /// Ensure the settings view exists for the active account and slide to the
+    /// given page.
+    fn show_settings_page(&mut self, page: &str) {
         let Some(account_id) = self.active_account_id.clone() else {
             return;
         };
@@ -731,14 +796,28 @@ impl MainWindow {
         else {
             return;
         };
-        if let Some(window) = &self.settings_window {
-            window.window().present();
-            return;
+        if self.settings_view.is_none() {
+            let host = SettingsHost::new(&self.window, &self.toast_overlay);
+            let callbacks = self.build_settings_callbacks();
+            let view = SettingsView::new(
+                self.config_store.clone(),
+                account,
+                account_id,
+                callbacks,
+                &host,
+            );
+            self.root_stack.add_named(view.widget(), Some("settings"));
+            self.settings_view = Some(view);
         }
-        let callbacks = self.build_settings_callbacks();
-        let window = SettingsWindow::new(self.config_store.clone(), account, account_id, callbacks);
-        window.window().present();
-        self.settings_window = Some(window);
+        if let Some(view) = &self.settings_view {
+            view.show_page(page);
+            self.root_stack.set_visible_child_name("settings");
+        }
+    }
+
+    /// Slide back to the synchronization view from the settings view.
+    fn show_sync_view(&mut self) {
+        self.root_stack.set_visible_child_name("sync");
     }
 
     /// Open the Add Folder dialog for the active account from the main window.
@@ -896,7 +975,19 @@ impl MainWindow {
                 .map(|account| account.id.clone()),
         };
         self.active_account_id = account_id.clone();
+        self.reset_settings_view();
         self.show_account(account_id.as_deref());
+    }
+
+    /// Drop the in-app settings view so the next open rebuilds it for the
+    /// current account/configuration.
+    fn reset_settings_view(&mut self) {
+        if self.settings_view.take().is_some() {
+            if let Some(child) = self.root_stack.child_by_name("settings") {
+                self.root_stack.remove(&child);
+            }
+        }
+        self.root_stack.set_visible_child_name("sync");
     }
 
     fn show_account(&mut self, account_id: Option<&str>) {

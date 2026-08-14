@@ -65,13 +65,49 @@ pub struct SettingsCallbacks {
     pub on_reconfigure: Option<SettingsCallback>,
 }
 
-/// The Settings window: a `PreferencesWindow` with the four pages.
-pub struct SettingsWindow {
-    window: libadwaita::PreferencesWindow,
+/// Where an in-app settings view anchors its dialogs and toasts.
+///
+/// The official-client style keeps preferences inside the main window instead
+/// of a separate `PreferencesWindow`; dialogs present over `parent` and toasts
+/// surface through `toast`. `Clone` is cheap (widget handles).
+#[derive(Clone)]
+pub struct SettingsHost {
+    parent: gtk4::Widget,
+    toast: libadwaita::ToastOverlay,
 }
 
-impl SettingsWindow {
-    /// Build the window for one account.
+impl SettingsHost {
+    /// Anchor over `parent` (the main window) with the given toast overlay.
+    pub fn new(parent: &impl IsA<gtk4::Widget>, toast: &libadwaita::ToastOverlay) -> Self {
+        Self {
+            parent: parent.upcast_ref::<gtk4::Widget>().clone(),
+            toast: toast.clone(),
+        }
+    }
+
+    /// The widget dialogs present over.
+    pub fn parent(&self) -> &gtk4::Widget {
+        &self.parent
+    }
+
+    /// Surface a toast on the anchored overlay.
+    pub fn add_toast(&self, toast: libadwaita::Toast) {
+        self.toast.add_toast(toast);
+    }
+}
+
+/// The in-app settings view: the four preference pages in a `ViewStack` with
+/// a `ViewSwitcherBar`, rendered inside the main window (official-client
+/// style) instead of a separate `PreferencesWindow`. Dialogs and toasts anchor
+/// on the shared [`SettingsHost`].
+pub struct SettingsView {
+    root: libadwaita::ToolbarView,
+    stack: libadwaita::ViewStack,
+    page_names: Vec<String>,
+}
+
+impl SettingsView {
+    /// Build the view for one account.
     ///
     /// `account` is the snapshot used for the initial widget values;
     /// `account_id` is the key every write operation uses against the store.
@@ -80,19 +116,8 @@ impl SettingsWindow {
         account: AccountConfig,
         account_id: String,
         callbacks: SettingsCallbacks,
+        host: &SettingsHost,
     ) -> Self {
-        let window = libadwaita::PreferencesWindow::new();
-        window.set_title(Some(t("Settings")));
-        window.set_default_size(720, 640);
-
-        // PreferencesWindow does not auto-associate with the application and
-        // is held alive by the MainWindow's Rc; wire close-request explicitly
-        // so the X button destroys it as users expect.
-        window.connect_close_request(move |_| {
-            eprintln!("nextsync: settings window close-request");
-            glib::Propagation::Proceed
-        });
-
         // Top-level sections (general/logging/network) come from the current
         // configuration; account-owned settings come from the snapshot.
         let config = config_store.load().unwrap_or_default();
@@ -102,28 +127,21 @@ impl SettingsWindow {
             account_id: account_id.clone(),
             callbacks: callbacks.clone(),
             group: libadwaita::PreferencesGroup::new(),
-            window: window.clone(),
+            host: host.clone(),
             rows: Rc::new(RefCell::new(Vec::new())),
         };
 
         let general = build_general_page(&config_store, &config.general, &folder_ui.group);
-        window.add(&general);
-
         let synchronization = build_sync_page(&config_store, &account_id, &account, &callbacks);
-        window.add(&synchronization);
-
         let network = build_network_page(&config_store, &account, &config.network);
-        window.add(&network);
-
         let advanced = build_advanced_page(
             &config_store,
             &account_id,
             &account,
             &config.logging,
             &callbacks,
-            &window,
+            host,
         );
-        window.add(&advanced);
 
         folder_ui.refresh();
 
@@ -131,17 +149,62 @@ impl SettingsWindow {
         // row (same order as `_build_desktop_integrations` in the Python).
         // They are added once and are NOT tracked in `FolderUi::rows`, so a
         // folder add/remove refresh never destroys them.
-        for row in desktop_integration_rows(&account, &window) {
+        for row in desktop_integration_rows(&account, host) {
             folder_ui.group.add(&row);
         }
 
-        Self { window }
+        let stack = libadwaita::ViewStack::new();
+        let toolbar = libadwaita::ToolbarView::new();
+        let switcher = libadwaita::ViewSwitcherBar::new();
+        switcher.set_stack(Some(&stack));
+        toolbar.add_bottom_bar(&switcher);
+        toolbar.set_content(Some(&stack));
+        let page_names = Vec::new();
+        let mut view = Self {
+            root: toolbar,
+            stack: stack.clone(),
+            page_names,
+        };
+        view.add_page("general", general);
+        view.add_page("synchronization", synchronization);
+        view.add_page("network", network);
+        view.add_page("advanced", advanced);
+        stack.set_visible_child_name("general");
+        view
     }
 
-    /// The underlying window, for presentation.
-    pub fn window(&self) -> &libadwaita::PreferencesWindow {
-        &self.window
+    fn add_page(&mut self, name: &str, page: libadwaita::PreferencesPage) {
+        let title = page.title().to_string();
+        let icon = page.icon_name().unwrap_or_default().to_string();
+        self.stack.add_titled(&page, Some(name), &title);
+        if !icon.is_empty() {
+            self.stack.page(&page).set_icon_name(Some(&icon));
+        }
+        self.page_names.push(name.to_string());
     }
+
+    /// The root widget to embed in the main window.
+    pub fn widget(&self) -> &libadwaita::ToolbarView {
+        &self.root
+    }
+
+    /// Show the page identified by `name` (see [`SettingsPage`] constants).
+    pub fn show_page(&self, name: &str) {
+        self.stack.set_visible_child_name(name);
+    }
+
+    /// The ordered page names, as added.
+    pub fn page_names(&self) -> &[String] {
+        &self.page_names
+    }
+}
+
+/// Stable identifiers for the settings pages.
+pub mod page {
+    pub const GENERAL: &str = "general";
+    pub const SYNCHRONIZATION: &str = "synchronization";
+    pub const NETWORK: &str = "network";
+    pub const ADVANCED: &str = "advanced";
 }
 
 // ---------------------------------------------------------------------------
@@ -490,7 +553,7 @@ fn build_advanced_page(
     account: &AccountConfig,
     logging: &LoggingConfig,
     callbacks: &SettingsCallbacks,
-    window: &libadwaita::PreferencesWindow,
+    host: &SettingsHost,
 ) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("Advanced"))
@@ -708,13 +771,13 @@ fn build_advanced_page(
     let store_for_signin = store.clone();
     let account_id_for_signin = account_id.to_string();
     let account_for_signin = account.clone();
-    let window_for_signin = window.clone();
+    let host_for_signin = host.clone();
     sign_in_again.connect_activated(move |_| {
         present_sign_in_again_dialog(
             &store_for_signin,
             &account_id_for_signin,
             &account_for_signin,
-            &window_for_signin,
+            &host_for_signin,
         );
     });
     auth_group.add(&sign_in_again);
@@ -736,9 +799,9 @@ fn build_advanced_page(
     remove.add_css_class("error");
     let login_name = account.login_name.clone();
     let callbacks = callbacks.clone();
-    let window = window.clone();
+    let host = host.clone();
     remove.connect_activated(move |_| {
-        present_remove_account(&login_name, &window, &callbacks);
+        present_remove_account(&login_name, &host, &callbacks);
     });
     account_group.add(&remove);
     page.add(&account_group);
@@ -904,7 +967,7 @@ struct FolderUi {
     account_id: String,
     callbacks: SettingsCallbacks,
     group: libadwaita::PreferencesGroup,
-    window: libadwaita::PreferencesWindow,
+    host: SettingsHost,
     /// Rows added by [`refresh`](Self::refresh). `PreferencesGroup` keeps an
     /// internal box as its direct child, so only these rows may be removed.
     rows: Rc<RefCell<Vec<gtk4::Widget>>>,
@@ -979,11 +1042,9 @@ impl FolderUi {
 
     /// Present the Add Folder dialog. `previous` and `error` let a failed
     /// attempt re-open with the typed values and an inline message.
-    /// Present the Add Folder dialog. `previous` and `error` let a failed
-    /// attempt re-open with the typed values and an inline message.
     ///
     /// Thin wrapper around the freestanding [`present_add_folder_dialog`]:
-    /// supplies this group's refresh + the window toast from the folder UI's
+    /// supplies this group's refresh + the host toast from the folder UI's
     /// own state so the Settings call site stays a one-liner.
     fn present_add_folder_dialog(&self, previous: Option<(String, String)>, error: Option<String>) {
         let on_folder_added = {
@@ -994,15 +1055,15 @@ impl FolderUi {
             })
         };
         let on_error = {
-            let window = self.window.clone();
+            let host = self.host.clone();
             Rc::new(move |message: String| {
-                window.add_toast(libadwaita::Toast::new(&message));
+                host.add_toast(libadwaita::Toast::new(&message));
             })
         };
         present_add_folder_dialog(
             self.store.clone(),
             self.account_id.clone(),
-            self.window.upcast_ref::<gtk4::Widget>(),
+            self.host.parent(),
             on_folder_added,
             on_error,
             previous,
@@ -1302,7 +1363,7 @@ fn integration_target(account: &AccountConfig) -> Option<&FolderConfig> {
 /// and surfaces a toast.
 fn desktop_integration_rows(
     account: &AccountConfig,
-    window: &libadwaita::PreferencesWindow,
+    host: &SettingsHost,
 ) -> Vec<libadwaita::SwitchRow> {
     let Some(folder) = integration_target(account) else {
         return Vec::new();
@@ -1338,7 +1399,7 @@ fn desktop_integration_rows(
 
     connect_integration_switch(
         &bookmark,
-        window,
+        host,
         {
             let integration = make_integration();
             move |enabled| integration.set_nautilus_bookmark(enabled)
@@ -1350,7 +1411,7 @@ fn desktop_integration_rows(
     );
     connect_integration_switch(
         &shortcut,
-        window,
+        host,
         {
             let integration = make_integration();
             move |enabled| integration.set_desktop_shortcut(enabled)
@@ -1362,7 +1423,7 @@ fn desktop_integration_rows(
     );
     connect_integration_switch(
         &icon,
-        window,
+        host,
         {
             let integration = make_integration();
             move |enabled| integration.set_special_icon(enabled)
@@ -1381,16 +1442,16 @@ fn desktop_integration_rows(
 /// switch already matches, so the re-entry terminates) and toast.
 fn connect_integration_switch(
     row: &libadwaita::SwitchRow,
-    window: &libadwaita::PreferencesWindow,
+    host: &SettingsHost,
     apply: impl Fn(bool) -> bool + 'static,
     read_state: impl Fn() -> bool + 'static,
 ) {
-    let window = window.clone();
+    let host = host.clone();
     row.connect_active_notify(move |row| {
         let desired = row.is_active();
         if !apply(desired) {
             row.set_active(read_state());
-            window.add_toast(libadwaita::Toast::new(t(
+            host.add_toast(libadwaita::Toast::new(t(
                 "The change could not be applied.",
             )));
         }
@@ -1686,7 +1747,7 @@ fn present_sign_in_again_dialog(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
-    parent: &libadwaita::PreferencesWindow,
+    host: &SettingsHost,
 ) {
     let dialog = libadwaita::AlertDialog::new(
         Some(t("Sign in again")),
@@ -1724,7 +1785,7 @@ fn present_sign_in_again_dialog(
     let username_w = username.clone();
     let password_w = password.clone();
     let status_w = status.clone();
-    let parent_w = parent.clone();
+    let parent_w = host.clone();
     dialog.connect_response(None, move |dialog, response| {
         if response == "cancel" {
             dialog.force_close();
@@ -1790,15 +1851,11 @@ fn present_sign_in_again_dialog(
         });
     });
 
-    dialog.present(Some(parent));
+    dialog.present(Some(host.parent()));
 }
 
 /// The two-step Remove Account flow (issue #35).
-fn present_remove_account(
-    login_name: &str,
-    window: &libadwaita::PreferencesWindow,
-    callbacks: &SettingsCallbacks,
-) {
+fn present_remove_account(login_name: &str, host: &SettingsHost, callbacks: &SettingsCallbacks) {
     let dialog = libadwaita::AlertDialog::new(
         Some(t("Remove Nextcloud Account?")),
         Some(t("The account credential will be removed from the password keyring. Your local NextCloud folder and all files inside it will remain untouched.")),
@@ -1808,24 +1865,24 @@ fn present_remove_account(
     dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
 
     let login_name = login_name.to_string();
-    let window_for_response = window.clone();
+    let host_for_response = host.clone();
     let callbacks_for_response = callbacks.clone();
     dialog.connect_response(None, move |_dialog, response| {
         if response == "remove" {
             present_remove_account_step_two(
                 &login_name,
-                &window_for_response,
+                &host_for_response,
                 &callbacks_for_response,
             );
         }
     });
-    dialog.present(Some(window));
+    dialog.present(Some(host.parent()));
 }
 
 /// Second step: the user must type “remove” to proceed.
 fn present_remove_account_step_two(
     login_name: &str,
-    window: &libadwaita::PreferencesWindow,
+    host: &SettingsHost,
     callbacks: &SettingsCallbacks,
 ) {
     let dialog = libadwaita::AlertDialog::new(
@@ -1842,7 +1899,7 @@ fn present_remove_account_step_two(
     dialog.set_response_appearance("remove", libadwaita::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
 
-    let window_for_response = window.clone();
+    let host_for_response = host.clone();
     let callbacks_for_response = callbacks.clone();
     dialog.connect_response(None, move |_dialog, response| {
         if response != "remove" {
@@ -1850,12 +1907,12 @@ fn present_remove_account_step_two(
         }
         if !typed_confirmation_matches(&entry.text()) {
             let toast = libadwaita::Toast::new("Type “remove” to confirm account removal.");
-            window_for_response.add_toast(toast);
+            host_for_response.add_toast(toast);
             return;
         }
         invoke(&callbacks_for_response.on_remove_account);
     });
-    dialog.present(Some(window));
+    dialog.present(Some(host.parent()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2076,33 +2133,45 @@ mod tests {
     fn settings_window_construction_smoke() {
         crate::ui::test_helpers::gtk_smoke(|| {
             // The ambient environment is Spanish (LANG=es_ES.UTF-8); pin the
-            // locale on the GTK worker thread so the title assertion is
-            // deterministic, then verify the window actually localizes.
+            // locale on the GTK worker thread so the assertions are
+            // deterministic, then verify the view actually localizes.
             set_locale(Locale::English);
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
             let account_id = store.add_account(&account).unwrap();
-            let window = SettingsWindow::new(
+            let host = test_host();
+            let view = SettingsView::new(
                 store.clone(),
                 account.clone(),
                 account_id.clone(),
                 SettingsCallbacks::default(),
+                &host,
             );
-            assert_eq!(
-                window.window().title().unwrap_or_default().to_string(),
-                "Settings"
-            );
+            assert_eq!(view.page_names().len(), 4);
+            assert!(view
+                .page_names()
+                .iter()
+                .any(|name| name == crate::ui::settings::page::ADVANCED));
 
             set_locale(Locale::Spanish);
-            let window =
-                SettingsWindow::new(store, account, account_id, SettingsCallbacks::default());
-            assert_eq!(
-                window.window().title().unwrap_or_default().to_string(),
-                "Configuración"
+            let view = SettingsView::new(
+                store,
+                account,
+                account_id,
+                SettingsCallbacks::default(),
+                &host,
             );
+            assert_eq!(view.page_names().len(), 4);
             reset_locale();
         });
+    }
+
+    /// A `SettingsHost` anchored to a bare window + toast overlay for tests.
+    fn test_host() -> SettingsHost {
+        let window = gtk4::Window::new();
+        let toast = libadwaita::ToastOverlay::new();
+        SettingsHost::new(&window, &toast)
     }
 
     /// The three integration switches carry the Python titles/subtitles and
@@ -2111,17 +2180,17 @@ mod tests {
     #[test]
     fn desktop_integration_switches_replicate_the_python_rows() {
         crate::ui::test_helpers::gtk_smoke(|| {
-            let window = libadwaita::PreferencesWindow::new();
+            let host = test_host();
 
             set_locale(Locale::English);
-            let rows = desktop_integration_rows(&sample_account(), &window);
+            let rows = desktop_integration_rows(&sample_account(), &host);
             assert_eq!(rows.len(), 3);
             assert_eq!(rows[0].title().as_str(), "Show in Files sidebar");
             assert_eq!(rows[1].title().as_str(), "Show on Desktop");
             assert_eq!(rows[2].title().as_str(), "Use special folder icon");
 
             set_locale(Locale::Spanish);
-            let rows = desktop_integration_rows(&sample_account(), &window);
+            let rows = desktop_integration_rows(&sample_account(), &host);
             assert_eq!(
                 rows[0].title().as_str(),
                 "Mostrar en la barra lateral de Archivos"
@@ -2137,7 +2206,7 @@ mod tests {
                 folders: Vec::new(),
                 ..sample_account()
             };
-            assert!(desktop_integration_rows(&empty, &window).is_empty());
+            assert!(desktop_integration_rows(&empty, &host).is_empty());
         });
     }
 }

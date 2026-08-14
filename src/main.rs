@@ -156,7 +156,7 @@ fn main() {
                     let weak = weak.clone();
                     move || {
                         if let Some(main) = weak.upgrade() {
-                            main.borrow_mut().show_settings();
+                            main.borrow_mut().show_preferences();
                         }
                     }
                 }),
