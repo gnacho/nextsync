@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.30.0] - 2026-08-14
+
+Corrección del selector de tema para que coincida con el patrón de GNOME Text Editor.
+
+### Cambiado
+- **Selector de tema rediseñado (#27)**: ahora coincide con el patrón de **GNOME Text Editor**. Círculos de 44px sólidos, sistema partido diagonalmente (blanco arriba-izquierda / negro abajo-derecha), claro y oscuro como círculos sólidos, anillo de acento en el seleccionado y check como badge en la esquina inferior derecha.
+
 ## [0.20.0] - 2026-08-14
 
 Iteración de estabilidad y usabilidad: cierre a bandeja, ventana de actividad legible, selector de tema más grande, renombrado de menús, setup sin ventana estirada, revocación de app passwords y notificaciones del servidor. Repo renombrado a `gnacho/nextsync`.
