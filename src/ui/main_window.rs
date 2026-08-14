@@ -547,6 +547,20 @@ impl MainWindow {
         split.set_min_sidebar_width(220.0);
 
         let (sidebar, accounts_list, add_button) = build_sidebar();
+        // Activating a sidebar row presents that account's sync view
+        // (issue #49): the handler resolves the row back to its account id
+        // through the id -> row map kept by `refresh_sidebar`.
+        let weak = self_weak.clone();
+        accounts_list.connect_row_activated(move |_list, row| {
+            if let Some(main) = weak.upgrade() {
+                let mut main = main.borrow_mut();
+                if let Some(account_id) =
+                    account_id_for_row(&main.account_rows, row).map(str::to_string)
+                {
+                    main.present_account(Some(&account_id));
+                }
+            }
+        });
         let sidebar_page = libadwaita::NavigationPage::new(&sidebar, t("Accounts"));
         let add_account_handler: AddAccountHandler = Rc::new(RefCell::new(None));
         let handler_for_add = add_account_handler.clone();
@@ -1112,6 +1126,19 @@ impl MainWindow {
             self.accounts_list.append(&row);
             self.account_rows.insert(account_id, row);
         }
+        // Keep the highlight on the active account across rebuilds so a
+        // refresh never leaves the sidebar without a selection (issue #49).
+        self.select_active_sidebar_row();
+    }
+
+    /// Select the sidebar row of the active account (or none when no
+    /// account is active).
+    fn select_active_sidebar_row(&self) {
+        let row = self
+            .active_account_id
+            .as_ref()
+            .and_then(|account_id| self.account_rows.get(account_id));
+        self.accounts_list.select_row(row);
     }
 
     /// Present the account with the given id (or the first one when `None`).
@@ -1125,6 +1152,7 @@ impl MainWindow {
                 .map(|account| account.id.clone()),
         };
         self.active_account_id = account_id.clone();
+        self.select_active_sidebar_row();
         self.reset_settings_view();
         self.show_account(account_id.as_deref());
     }
@@ -1386,6 +1414,20 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
 /// `cloud.example.com`); the raw URL when it does not parse as expected.
 pub use crate::util::url::server_host;
 
+/// Resolve an activated sidebar row back to its account id through the
+/// id -> row map maintained by [`MainWindow::refresh_sidebar`].
+///
+/// GTK widgets compare by identity (reference-counted objects), so a row
+/// detached by a later refresh no longer matches any entry.
+pub fn account_id_for_row<'a>(
+    rows: &'a std::collections::HashMap<String, gtk4::ListBoxRow>,
+    row: &gtk4::ListBoxRow,
+) -> Option<&'a str> {
+    rows.iter()
+        .find(|(_, candidate)| candidate == &row)
+        .map(|(account_id, _)| account_id.as_str())
+}
+
 /// Build the sidebar: the container, the accounts list and the Add Account
 /// button.
 fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
@@ -1441,6 +1483,114 @@ mod tests {
     fn close_action_hides_with_tray_and_quits_without() {
         assert_eq!(close_action(true), CloseAction::Hide);
         assert_eq!(close_action(false), CloseAction::Quit);
+    }
+
+    #[test]
+    fn account_id_for_row_resolves_rows_by_identity() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let row_a = gtk4::ListBoxRow::new();
+            let row_b = gtk4::ListBoxRow::new();
+            let mut rows = std::collections::HashMap::new();
+            rows.insert("acct-a".to_string(), row_a.clone());
+            rows.insert("acct-b".to_string(), row_b.clone());
+            assert_eq!(account_id_for_row(&rows, &row_a), Some("acct-a"));
+            assert_eq!(account_id_for_row(&rows, &row_b), Some("acct-b"));
+            // A row the sidebar no longer tracks resolves to nothing.
+            let detached = gtk4::ListBoxRow::new();
+            assert_eq!(account_id_for_row(&rows, &detached), None);
+        });
+    }
+
+    /// Activating a sidebar row presents that account, and the selection
+    /// survives a sidebar rebuild (issue #49).
+    #[test]
+    fn sidebar_activation_switches_the_presented_account() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            use crate::storage::config::AccountConfig;
+            let dir = tempfile::tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+
+            let mut account_a = window_account();
+            account_a.folders.clear();
+            account_a.server_url = "https://cloud-a.example.com".to_string();
+            let mut account_b = AccountConfig {
+                id: "acct-window-2".to_string(),
+                server_url: "https://cloud-b.example.com".to_string(),
+                login_name: "bob".to_string(),
+                ..AccountConfig::default()
+            };
+            account_b.folders.clear();
+            let id_a = store.add_account(&account_a).unwrap();
+            let id_b = store.add_account(&account_b).unwrap();
+            account_a.id = id_a.clone();
+            account_b.id = id_b.clone();
+
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let mut manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let config = crate::storage::config::Config {
+                accounts: vec![account_a.clone(), account_b.clone()],
+                ..Default::default()
+            };
+            manager.start(&config);
+            // The activation handler goes through the shared cell, so build
+            // the window with a real weak pointer (what the launcher does).
+            let main = std::rc::Rc::new_cyclic(|weak: &Weak<std::cell::RefCell<MainWindow>>| {
+                std::cell::RefCell::new(MainWindow::new(
+                    &app,
+                    config,
+                    store,
+                    manager,
+                    crate::core::log::LogBuffer::new(),
+                    None,
+                    weak.clone(),
+                ))
+            });
+
+            // Startup presents the first account with its row selected.
+            assert_eq!(
+                main.borrow().active_account_id.as_deref(),
+                Some(id_a.as_str())
+            );
+            assert_eq!(
+                main.borrow().accounts_list.selected_row().as_ref(),
+                main.borrow().account_rows.get(&id_a)
+            );
+
+            // Activating the second row (what a click does) switches the
+            // presented account and the selection.
+            let row_b = main.borrow().account_rows.get(&id_b).unwrap().clone();
+            row_b.activate();
+            assert_eq!(
+                main.borrow().active_account_id.as_deref(),
+                Some(id_b.as_str())
+            );
+            assert_eq!(
+                main.borrow().accounts_list.selected_row().as_ref(),
+                main.borrow().account_rows.get(&id_b)
+            );
+            assert_eq!(
+                main.borrow()
+                    .account_view
+                    .as_ref()
+                    .unwrap()
+                    ._account_runtime
+                    .account
+                    .id,
+                id_b
+            );
+
+            // A sidebar rebuild (refresh after a config change) keeps the
+            // highlight on the active account.
+            main.borrow_mut().refresh_sidebar();
+            assert_eq!(
+                main.borrow().accounts_list.selected_row().as_ref(),
+                main.borrow().account_rows.get(&id_b)
+            );
+        });
     }
 
     #[test]
