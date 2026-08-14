@@ -73,7 +73,11 @@ pub struct KeyringCredentialSource;
 
 impl CredentialSource for KeyringCredentialSource {
     fn lookup(&self, account: &AccountConfig) -> CredentialLookup {
-        match CredentialsStore::get(&account.id) {
+        match CredentialsStore::get_for_account(
+            &account.id,
+            &account.server_url,
+            &account.login_name,
+        ) {
             Ok(Some(password)) => CredentialLookup::Found(password),
             Ok(None) => CredentialLookup::Missing,
             Err(secret_service::Error::Locked) => CredentialLookup::Locked,

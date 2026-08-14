@@ -1216,7 +1216,11 @@ fn start_syncing(ctx: &SetupContext) {
     let server_for_probe = server.clone();
     let username_for_probe = username.clone();
     let probe = gio::spawn_blocking(move || -> Result<Option<bool>, ApiError> {
-        let password = match CredentialsStore::get(&account_id) {
+        let password = match CredentialsStore::get_for_account(
+            &account_id,
+            &server_for_probe,
+            &username_for_probe,
+        ) {
             Ok(Some(password)) => password,
             _ => return Ok(None),
         };

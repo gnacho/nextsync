@@ -84,23 +84,32 @@ fn main() {
             // handle is shared with the runtime, so configuring the clone
             // reaches the running push channel.
             {
-                let push_clients: Vec<(NotifyPushClient, String, String, bool)> = account_manager
-                    .runtimes()
-                    .values()
-                    .filter_map(|runtime| {
-                        runtime.push_client().map(|client| {
-                            (
-                                client,
-                                runtime.account.server_url.clone(),
-                                runtime.account.login_name.clone(),
-                                runtime.account.sync.remote_push_enabled,
-                            )
+                let push_clients: Vec<(NotifyPushClient, String, String, String, bool)> =
+                    account_manager
+                        .runtimes()
+                        .values()
+                        .filter_map(|runtime| {
+                            runtime.push_client().map(|client| {
+                                (
+                                    client,
+                                    runtime.account.id.clone(),
+                                    runtime.account.server_url.clone(),
+                                    runtime.account.login_name.clone(),
+                                    runtime.account.sync.remote_push_enabled,
+                                )
+                            })
                         })
-                    })
-                    .collect();
-                for (client, server, username, enabled) in push_clients {
-                    let keyring_user = username.clone();
-                    let task = gio::spawn_blocking(move || CredentialsStore::get(&keyring_user));
+                        .collect();
+                for (client, account_id, server, username, enabled) in push_clients {
+                    let server_for_lookup = server.clone();
+                    let username_for_lookup = username.clone();
+                    let task = gio::spawn_blocking(move || {
+                        CredentialsStore::get_for_account(
+                            &account_id,
+                            &server_for_lookup,
+                            &username_for_lookup,
+                        )
+                    });
                     glib::spawn_future_local(async move {
                         if let Ok(Ok(Some(password))) = task.await {
                             client.configure(&server, &username, &password, enabled);
