@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.50.0] - 2026-08-15
+
+OpenCloud verificado contra un servidor real: LibreGraph sustituye al raíz WebDAV.
+
+### Corregido
+- **Validación y descubrimiento OpenCloud sobre LibreGraph (#48)**: verificado contra un despliegue real de OpenCloud, el raíz de spaces WebDAV responde 405 a PROPFIND, así que la validación de v0.40.0 no funcionaba en la práctica. La validación ahora lee `GET /graph/v1.0/me` (que además devuelve el nombre para mostrar) y el listado de spaces lee `GET /graph/v1.0/drives`: se conservan el space personal propio y los de proyecto, y se excluyen los personales de otros usuarios y el agregado virtual de compartidos. El probe del primer sync mantiene el PROPFIND sobre la URL concreta del space (responde 207).
+
 ## [0.40.0] - 2026-08-15
 
 OpenCloud sync deja de ser una suposición: la autenticación se verifica contra el endpoint documentado del servidor.
