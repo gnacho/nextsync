@@ -323,23 +323,30 @@ fn reload_conflicts(
 }
 
 /// One conflict row: warning icon, original/date/size caption and the three
-/// resolution buttons.
+/// resolution buttons stacked under the text, so long file names wrap or
+/// ellipsize and the buttons stay on screen at any window width (issue #33).
 fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
     let content = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(8)
         .build();
     content.set_margin_top(8);
     content.set_margin_bottom(8);
     content.set_margin_start(12);
     content.set_margin_end(12);
 
+    let header = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(10)
+        .build();
+
     let icon = gtk4::Image::builder()
         .icon_name("dialog-warning-symbolic")
         .pixel_size(24)
+        .valign(gtk4::Align::Start)
         .build();
-    content.append(&icon);
+    header.append(&icon);
 
     let text = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
@@ -349,7 +356,7 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
     let title = gtk4::Label::builder()
         .label(conflict.name())
         .xalign(0.0)
-        .wrap(false)
+        .wrap(true)
         .build();
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     let subtitle = gtk4::Label::builder()
@@ -363,9 +370,17 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
         .css_classes(["dim-label"])
         .wrap(true)
         .build();
+    subtitle.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     text.append(&title);
     text.append(&subtitle);
-    content.append(&text);
+    header.append(&text);
+    content.append(&header);
+
+    let actions = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .halign(gtk4::Align::End)
+        .build();
 
     let conflict_local = conflict.clone();
     let target_local = target.clone();
@@ -381,7 +396,7 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
             target_local.reload();
         }
     });
-    content.append(&keep_local_button);
+    actions.append(&keep_local_button);
 
     let conflict_remote = conflict.clone();
     let target_remote = target.clone();
@@ -401,7 +416,7 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
             target_remote.reload();
         }
     });
-    content.append(&keep_remote_button);
+    actions.append(&keep_remote_button);
 
     let conflict_open = conflict.clone();
     let open_button = gtk4::Button::builder().icon_name("folder-symbolic").build();
@@ -410,8 +425,9 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
         let file = gio::File::for_path(&conflict_open.path);
         let _ = gio::AppInfo::launch_default_for_uri(&file.uri(), None::<&gio::AppLaunchContext>);
     });
-    content.append(&open_button);
+    actions.append(&open_button);
 
+    content.append(&actions);
     row.set_child(Some(&content));
     row
 }
@@ -442,7 +458,7 @@ fn rebuild_recent(list: &gtk4::ListBox, lines: &[String]) {
     }
 }
 
-/// One Recent row: level icon + (up to two-line) message.
+/// One Recent row: level icon + message using the available width.
 fn recent_row(entry: &ActivityEntry) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::builder()
         .activatable(false)
@@ -459,6 +475,7 @@ fn recent_row(entry: &ActivityEntry) -> gtk4::ListBoxRow {
     let icon = gtk4::Image::builder()
         .icon_name(&entry.icon_name)
         .pixel_size(16)
+        .valign(gtk4::Align::Start)
         .build();
     content.append(&icon);
     let label = gtk4::Label::builder()
@@ -468,7 +485,7 @@ fn recent_row(entry: &ActivityEntry) -> gtk4::ListBoxRow {
         .wrap(true)
         .build();
     label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    label.set_lines(2);
+    label.set_tooltip_text(Some(&entry.message));
     content.append(&label);
     row.set_child(Some(&content));
     row

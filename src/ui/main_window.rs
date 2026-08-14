@@ -10,7 +10,7 @@
 //! Header buttons use the Lucide `settings-2` / `info` symbolic icons
 //! (issue #21).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use libadwaita::prelude::*;
@@ -34,6 +34,29 @@ pub fn window_title() -> &'static str {
 /// Translated window subtitle.
 pub fn window_subtitle() -> &'static str {
     t("Nextcloud file synchronization")
+}
+
+/// What a main-window close-request should do.
+///
+/// With a StatusNotifier tray registered the close hides the window and keeps
+/// the app alive in the background (minimize to tray, issue #34); without one
+/// the close is the only way out and quits the application. The launcher
+/// drives this via [`MainWindow::set_tray_active`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseAction {
+    /// Hide the window, keep the app running in the tray.
+    Hide,
+    /// Quit the application outright.
+    Quit,
+}
+
+/// Decide the close action from whether a tray is registered.
+pub fn close_action(tray_active: bool) -> CloseAction {
+    if tray_active {
+        CloseAction::Hide
+    } else {
+        CloseAction::Quit
+    }
 }
 
 /// Present the deletion-review dialog for a scheduler blocked on a deletion
@@ -405,6 +428,11 @@ pub struct MainWindow {
     settings_handler: SettingsHandler,
     add_account_handler: AddAccountHandler,
     self_weak: Weak<RefCell<MainWindow>>,
+    /// Whether a StatusNotifier tray is registered. When `true`, closing the
+    /// main window hides it instead of quitting (minimize to tray); the tray
+    /// Quit item is the only way to fully exit (issue #34). The launcher sets
+    /// it once the tray is up; without a tray the close keeps quitting.
+    tray_active: Rc<Cell<bool>>,
     _subscription: Option<crate::state::Subscription>,
     // Kept alive while the window exists.
     _sidebar_page: libadwaita::NavigationPage,
@@ -563,16 +591,26 @@ impl MainWindow {
         toolbar.set_content(Some(&root_stack));
         window.set_content(Some(&toolbar));
 
-        // Close button quits the application outright. The StatusNotifier tray
-        // runs on its own thread and would otherwise keep the process alive
-        // after the last window is gone, leaving an invisible app with no way
-        // back in. If a "minimize to tray" pattern is wanted later, this is
-        // the single place to change.
+        // Close button minimizes to tray when a StatusNotifier tray is
+        // registered (the tray Quit item is the only full exit); without a
+        // tray the close keeps quitting the application. `tray_active` is a
+        // shared cell the launcher flips once the tray is up, so the window
+        // close handler always knows the real state.
+        let tray_active = Rc::new(Cell::new(false));
+        let tray_active_for_close = tray_active.clone();
         let app_for_close = application.clone();
-        window.connect_close_request(move |_| {
-            eprintln!("nextsync: main window close-request, quitting application");
-            app_for_close.quit();
-            glib::Propagation::Proceed
+        window.connect_close_request(move |window| {
+            match close_action(tray_active_for_close.get()) {
+                CloseAction::Hide => {
+                    window.set_visible(false);
+                    glib::Propagation::Stop
+                }
+                CloseAction::Quit => {
+                    eprintln!("nextsync: main window close-request, quitting application");
+                    app_for_close.quit();
+                    glib::Propagation::Proceed
+                }
+            }
         });
 
         let settings_handler: SettingsHandler = Rc::new(RefCell::new(None));
@@ -599,6 +637,7 @@ impl MainWindow {
             settings_handler,
             add_account_handler,
             self_weak,
+            tray_active,
             _subscription: None,
             _sidebar_page: sidebar_page,
             _content_page: content_page,
@@ -618,6 +657,16 @@ impl MainWindow {
     /// The underlying window, for presentation and wiring.
     pub fn window(&self) -> &libadwaita::ApplicationWindow {
         &self.window
+    }
+
+    /// Mark the StatusNotifier tray as registered (or not).
+    ///
+    /// Called by the launcher right after a successful tray registration. With
+    /// a tray, closing the main window hides it (minimize to tray) and the
+    /// tray Quit item becomes the only way to exit; without one, closing the
+    /// window keeps quitting the application (issue #34).
+    pub fn set_tray_active(&self, active: bool) {
+        self.tray_active.set(active);
     }
 
     /// Wire the Settings header button to open this window's Preferences.
@@ -1154,8 +1203,8 @@ impl ThemeSelector {
                 background-color: alpha(currentColor, 0.15);
             }
             checkbutton.theme-selector radio {
-                min-width: 26px;
-                min-height: 26px;
+                min-width: 34px;
+                min-height: 34px;
                 border-radius: 9999px;
                 background: white;
                 border: 1px solid alpha(black, 0.4);
@@ -1268,13 +1317,7 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
 
 /// Host part of a server URL (`https://cloud.example.com` ->
 /// `cloud.example.com`); the raw URL when it does not parse as expected.
-pub fn server_host(server_url: &str) -> &str {
-    let trimmed = server_url.trim_end_matches('/');
-    match trimmed.split_once("://") {
-        Some((_scheme, host)) => host,
-        None => trimmed,
-    }
-}
+pub use crate::util::url::server_host;
 
 /// Build the sidebar: the container, the accounts list and the Add Account
 /// button.
@@ -1325,6 +1368,12 @@ mod tests {
         assert_eq!(window_title(), "NextSync");
         assert_eq!(window_subtitle(), "Nextcloud file synchronization");
         reset_locale();
+    }
+
+    #[test]
+    fn close_action_hides_with_tray_and_quits_without() {
+        assert_eq!(close_action(true), CloseAction::Hide);
+        assert_eq!(close_action(false), CloseAction::Quit);
     }
 
     #[test]

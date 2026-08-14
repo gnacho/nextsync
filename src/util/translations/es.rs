@@ -143,6 +143,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Local Folder", "Carpeta local"),
     ("Local folder", "Carpeta local"),
     ("Local interval (minutes)", "Intervalo local (minutos)"),
+    ("Log", "Registro"),
     ("Log folder", "Carpeta de registros"),
     ("Logging", "Registro"),
     ("Login Flow returned HTTP {status}.", "Login Flow devolvió HTTP {status}."),

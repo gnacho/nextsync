@@ -60,6 +60,7 @@ Muchas gracias a ehstbr por iniciar algo tan maravilloso, por tomar las decision
 - **Interfaz nativa de GNOME.** Rust, GTK 4 y Libadwaita.
 - **Credenciales seguras.** Almacenadas a través de Secret Service / GNOME Keyring.
 - **Detección local rápida.** Monitorización recursiva de `inotify` en Linux con coalescencia de eventos.
+- **Menú de bandeja.** Abrir, Configuración, Registro y Salir directamente desde la bandeja; cerrar la ventana mantiene la app funcionando en segundo plano (el item Salir de la bandeja es la única forma de salir del todo).
 - **Guardia de borrado.** Un borrado masivo local bloquea la sincronización antes de que el motor pueda propagarlo, porque los motores CLI no piden confirmación en modo no interactivo.
 - **Privado por diseño.** Sin telemetría, sin analítica, sin informes remotos de fallos.
 

@@ -194,6 +194,9 @@ fn main() {
             let initial = aggregate.snapshot().state;
             match Tray::new(initial, tray_callbacks) {
                 Ok(tray) => {
+                    // Minimize to tray: with a tray registered, closing the
+                    // main window hides it instead of quitting (issue #34).
+                    main_window.borrow().set_tray_active(true);
                     let aggregate = aggregate.clone();
                     let tray_slot_for_sub = tray_slot.clone();
                     let subscription = aggregate.subscribe(move |snapshot: &StateSnapshot| {
