@@ -163,8 +163,10 @@ impl TrayItem {
             let conflicts = self.actions.clone();
             items.push(
                 StandardItem {
-                    // The catalog carries the ellipsis-less msgid.
-                    label: format!("{}…", t("Sync Activity and Conflicts")),
+                    // Separate msgid from the window title ("Sync Activity
+                    // and Conflicts"): renaming the menu item must not change
+                    // the window title (issue #32).
+                    label: t("Log").into(),
                     icon_name: "emblem-synchronizing-symbolic".into(),
                     activate: Box::new(move |_this: &mut Self| {
                         let _ = conflicts.try_send(TrayAction::Conflicts);
@@ -317,15 +319,7 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(
-            labels,
-            vec![
-                "Open NextSync",
-                "Settings",
-                "Sync Activity and Conflicts…",
-                "Quit"
-            ]
-        );
+        assert_eq!(labels, vec!["Open NextSync", "Settings", "Log", "Quit"]);
         reset_locale();
     }
 
@@ -363,7 +357,7 @@ mod tests {
             vec![
                 "Abrir NextSync",
                 "Configuración",
-                "Actividad y conflictos de sincronización…",
+                "Registro",
                 // "Quit" is not in the catalog: English fallback.
                 "Quit"
             ]

@@ -1772,6 +1772,10 @@ msgstr "Sincronizando"
 msgid "Open NextSync"
 msgstr "Abrir NextSync"
 
+#: src/ui/tray.rs (tray menu, issue #32)
+msgid "Log"
+msgstr "Registro"
+
 #: src/nextsync/ui/tray.py:347
 msgid "Quit"
 msgstr ""
