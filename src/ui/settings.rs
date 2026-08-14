@@ -2174,6 +2174,60 @@ mod tests {
         SettingsHost::new(&window, &toast)
     }
 
+    /// The in-app view embeds exactly the four preference pages and switches
+    /// between them in place (issue #10: no separate window anywhere).
+    #[test]
+    fn settings_view_embeds_four_pages_and_switches_in_place() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let dir = tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let account = sample_account();
+            let account_id = store.add_account(&account).unwrap();
+            let view = SettingsView::new(
+                store,
+                account,
+                account_id,
+                SettingsCallbacks::default(),
+                &test_host(),
+            );
+
+            let names: Vec<&str> = view.page_names().iter().map(String::as_str).collect();
+            assert_eq!(
+                names,
+                [
+                    page::GENERAL,
+                    page::SYNCHRONIZATION,
+                    page::NETWORK,
+                    page::ADVANCED
+                ]
+            );
+            for name in view.page_names() {
+                assert!(
+                    view.stack.child_by_name(name).is_some(),
+                    "page {name} must live in the embedded ViewStack"
+                );
+            }
+
+            // The pages switch in place inside the single embedded view.
+            assert_eq!(
+                view.stack.visible_child_name().as_deref(),
+                Some(page::GENERAL)
+            );
+            view.show_page(page::ADVANCED);
+            assert_eq!(
+                view.stack.visible_child_name().as_deref(),
+                Some(page::ADVANCED)
+            );
+            view.show_page(page::SYNCHRONIZATION);
+            assert_eq!(
+                view.stack.visible_child_name().as_deref(),
+                Some(page::SYNCHRONIZATION)
+            );
+            reset_locale();
+        });
+    }
+
     /// The three integration switches carry the Python titles/subtitles and
     /// disappear without folders. Building them only READS the real user
     /// state (gtk-3.0 bookmarks, GIO metadata); nothing is written here.

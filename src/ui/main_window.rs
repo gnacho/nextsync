@@ -342,6 +342,8 @@ pub struct MainWindow {
     // Kept alive while the window exists.
     _sidebar_page: libadwaita::NavigationPage,
     _content_page: libadwaita::NavigationPage,
+    // Kept alive for contract tests (the widget tree also owns a reference).
+    _hamburger: gtk4::MenuButton,
 }
 
 impl MainWindow {
@@ -381,20 +383,7 @@ impl MainWindow {
             .tooltip_text(t("Settings"))
             .css_classes(["flat"])
             .build();
-        let menu = gio::Menu::new();
-        let sync_item = gio::MenuItem::new(Some(t("Synchronization")), Some("app.sync"));
-        sync_item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
-        menu.append_item(&sync_item);
-        let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
-        preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
-        menu.append_item(&preferences_item);
-        let advanced_item = gio::MenuItem::new(Some(t("Advanced")), Some("app.advanced"));
-        advanced_item.set_icon(&gio::ThemedIcon::new("applications-system-symbolic"));
-        menu.append_item(&advanced_item);
-        let about_item = gio::MenuItem::new(Some(t("About")), Some("app.about"));
-        about_item.set_icon(&gio::ThemedIcon::new("nextsync-info-symbolic"));
-        menu.append_item(&about_item);
-        hamburger.set_menu_model(Some(&menu));
+        hamburger.set_menu_model(Some(&hamburger_menu_model()));
         let actions = gio::SimpleActionGroup::new();
         actions.add_action(&{
             let weak = self_weak.clone();
@@ -546,6 +535,7 @@ impl MainWindow {
             _subscription: None,
             _sidebar_page: sidebar_page,
             _content_page: content_page,
+            _hamburger: hamburger.clone(),
         };
         // Install the Settings handler: opening Settings needs the whole
         // window, so it is wired once the shared cell exists.
@@ -1060,6 +1050,29 @@ impl MainWindow {
     }
 }
 
+/// Build the hamburger menu model (official-client style): Synchronization
+/// slides back to the sync view, Preferences/Advanced open the in-app
+/// settings view over it and About keeps its dialog.
+///
+/// Extracted from [`MainWindow::new`] so the menu contract (sections, actions
+/// and icons) is testable without a display.
+fn hamburger_menu_model() -> gio::Menu {
+    let menu = gio::Menu::new();
+    let sync_item = gio::MenuItem::new(Some(t("Synchronization")), Some("app.sync"));
+    sync_item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
+    menu.append_item(&sync_item);
+    let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
+    preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
+    menu.append_item(&preferences_item);
+    let advanced_item = gio::MenuItem::new(Some(t("Advanced")), Some("app.advanced"));
+    advanced_item.set_icon(&gio::ThemedIcon::new("applications-system-symbolic"));
+    menu.append_item(&advanced_item);
+    let about_item = gio::MenuItem::new(Some(t("About")), Some("app.about"));
+    about_item.set_icon(&gio::ThemedIcon::new("nextsync-info-symbolic"));
+    menu.append_item(&about_item);
+    menu
+}
+
 /// Build the sidebar: the container, the accounts list and the Add Account
 /// button.
 fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
@@ -1144,6 +1157,240 @@ mod tests {
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
                 "NextSync"
+            );
+            reset_locale();
+        });
+    }
+
+    /// A one-account configuration for the in-app settings contract tests.
+    fn window_account() -> crate::storage::config::AccountConfig {
+        crate::storage::config::AccountConfig {
+            id: "acct-window-1".to_string(),
+            server_url: "https://cloud.example.com".to_string(),
+            login_name: "alice".to_string(),
+            ..crate::storage::config::AccountConfig::default()
+        }
+    }
+
+    #[test]
+    fn hamburger_menu_offers_the_official_client_sections() {
+        use gio::prelude::MenuModelExt;
+
+        // Read one menu item's label/action/icon attributes.
+        struct ItemAttrs {
+            label: Option<String>,
+            action: Option<String>,
+            has_icon: bool,
+        }
+
+        fn item_attrs(menu: &gio::Menu, index: i32) -> ItemAttrs {
+            let mut attrs = ItemAttrs {
+                label: None,
+                action: None,
+                has_icon: false,
+            };
+            let iter = menu.iterate_item_attributes(index);
+            while let Some((key, value)) = iter.next() {
+                match key.as_str() {
+                    "label" => attrs.label = value.str().map(str::to_string),
+                    "action" => attrs.action = value.str().map(str::to_string),
+                    "icon" => attrs.has_icon = true,
+                    _ => {}
+                }
+            }
+            attrs
+        }
+
+        set_locale(Locale::English);
+        let menu = hamburger_menu_model();
+        assert_eq!(menu.n_items(), 4);
+        let expected: [(&str, &str); 4] = [
+            ("Synchronization", "app.sync"),
+            ("Preferences", "app.preferences"),
+            ("Advanced", "app.advanced"),
+            ("About", "app.about"),
+        ];
+        for (index, (label, action)) in expected.iter().enumerate() {
+            let attrs = item_attrs(&menu, index as i32);
+            assert_eq!(attrs.label.as_deref(), Some(*label), "item {index}");
+            assert_eq!(attrs.action.as_deref(), Some(*action), "item {index}");
+            assert!(attrs.has_icon, "item {index} must carry an icon");
+        }
+
+        // The Spanish catalog covers every menu section (issue #10 renders
+        // the menu in-app, so the labels are user-visible on every launch).
+        set_locale(Locale::Spanish);
+        let menu = hamburger_menu_model();
+        let labels: Vec<String> = (0..menu.n_items())
+            .map(|index| item_attrs(&menu, index).label.expect("label"))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Sincronización".to_string(),
+                "Preferencias".to_string(),
+                "Avanzado".to_string(),
+                "Acerca de".to_string(),
+            ]
+        );
+        reset_locale();
+    }
+
+    #[test]
+    fn outer_stack_slides_the_settings_view_over_sync() {
+        // Must run through the shared GTK test worker (see
+        // `ui::test_helpers`): the assertions build the real window.
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let store = ConfigStore::with_path(
+                std::env::temp_dir().join(format!("nextsync-stack-{}.json", std::process::id())),
+            );
+            let config = Config {
+                accounts: vec![window_account()],
+                ..Config::default()
+            };
+            let mut window = MainWindow::new(
+                &app,
+                config,
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+
+            // One window, one outer stack: the sync page only, until the
+            // settings view slides over it (issue #10 acceptance).
+            assert!(window.about_dialog.is_none());
+            assert_eq!(
+                window.root_stack.transition_type(),
+                gtk4::StackTransitionType::SlideLeftRight
+            );
+            assert!(window.root_stack.child_by_name("sync").is_some());
+            assert!(window.root_stack.child_by_name("settings").is_none());
+            assert_eq!(
+                window.root_stack.visible_child_name().as_deref(),
+                Some("sync")
+            );
+            assert_eq!(
+                window._hamburger.icon_name().as_deref(),
+                Some("open-menu-symbolic")
+            );
+
+            // Preferences slides the in-app settings view in; the stack then
+            // holds exactly the 'sync' and 'settings' pages.
+            window.show_preferences();
+            assert!(window.root_stack.child_by_name("settings").is_some());
+            assert!(window.settings_view.is_some());
+            assert_eq!(
+                window.root_stack.visible_child_name().as_deref(),
+                Some("settings")
+            );
+            window.show_advanced();
+            assert_eq!(
+                window.root_stack.visible_child_name().as_deref(),
+                Some("settings")
+            );
+
+            // Synchronization slides back without dropping the view.
+            window.show_sync_view();
+            assert_eq!(
+                window.root_stack.visible_child_name().as_deref(),
+                Some("sync")
+            );
+            assert!(window.settings_view.is_some());
+
+            // About keeps the dialog presentation (no in-app page for it).
+            window.show_about();
+            assert!(window.about_dialog.is_some());
+            assert!(window.root_stack.child_by_name("settings").is_some());
+
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn reset_settings_view_drops_the_view_on_account_change() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let store = ConfigStore::with_path(
+                std::env::temp_dir().join(format!("nextsync-reset-{}.json", std::process::id())),
+            );
+            let config = Config {
+                accounts: vec![window_account()],
+                ..Config::default()
+            };
+            let mut window = MainWindow::new(
+                &app,
+                config,
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            window.show_preferences();
+            assert!(window.root_stack.child_by_name("settings").is_some());
+
+            // Re-presenting an account drops the embedded view so a stale
+            // account's settings can never come back (issue #10).
+            window.present_account(None);
+            assert!(window.settings_view.is_none());
+            assert!(window.root_stack.child_by_name("settings").is_none());
+            assert_eq!(
+                window.root_stack.visible_child_name().as_deref(),
+                Some("sync")
+            );
+
+            // Re-opening after the reset rebuilds the view cleanly.
+            window.show_preferences();
+            assert!(window.root_stack.child_by_name("settings").is_some());
+            assert!(window.settings_view.is_some());
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn show_settings_without_an_active_account_is_a_noop() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let store = ConfigStore::with_path(
+                std::env::temp_dir().join(format!("nextsync-noop-{}.json", std::process::id())),
+            );
+            let mut window = MainWindow::new(
+                &app,
+                Config::default(),
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            window.show_preferences();
+            window.show_advanced();
+            assert!(window.settings_view.is_none());
+            assert!(window.root_stack.child_by_name("settings").is_none());
+            assert_eq!(
+                window.root_stack.visible_child_name().as_deref(),
+                Some("sync")
             );
             reset_locale();
         });
