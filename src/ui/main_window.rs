@@ -1154,8 +1154,8 @@ impl ThemeSelector {
                 background-color: alpha(currentColor, 0.15);
             }
             checkbutton.theme-selector radio {
-                min-width: 26px;
-                min-height: 26px;
+                min-width: 34px;
+                min-height: 34px;
                 border-radius: 9999px;
                 background: white;
                 border: 1px solid alpha(black, 0.4);
