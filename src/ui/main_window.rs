@@ -955,13 +955,67 @@ impl MainWindow {
     }
 
     /// Remove the active account (config + runtime), then refresh the window.
+    ///
+    /// Issue #28: the server-side app password is revoked best-effort and the
+    /// saved secret is removed from the keyring regardless of the outcome,
+    /// mirroring `application.py`'s `remove_account`. The network call and the
+    /// keyring writes run off the UI thread so an unreachable server never
+    /// blocks the local removal; failures are only logged.
     fn remove_active_account(&mut self) {
         let Some(account_id) = self.active_account_id.clone() else {
+            return;
+        };
+        let Some(account) = self
+            .config
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .cloned()
+        else {
+            let _ = self.config_store.remove_account(&account_id);
+            let _ = self.account_manager.remove(&account_id);
+            self.refresh_after_config_change();
             return;
         };
         let _ = self.config_store.remove_account(&account_id);
         let _ = self.account_manager.remove(&account_id);
         self.refresh_after_config_change();
+
+        // Best-effort cleanup off the UI thread: resolve the stored password,
+        // revoke it on the server, then always drop the keyring entry. The
+        // logger is only touched from the main thread.
+        let logger = self.logger.clone();
+        let task = gio::spawn_blocking(move || {
+            let revoke_error = crate::nextcloud::credentials::CredentialsStore::get_for_account(
+                &account.id,
+                &account.server_url,
+                &account.login_name,
+            )
+            .ok()
+            .flatten()
+            .and_then(|password| {
+                crate::nextcloud::api::NextcloudApi::new()
+                    .revoke_app_password(&account.server_url, &account.login_name, &password)
+                    .err()
+            });
+            let delete_error =
+                crate::nextcloud::credentials::CredentialsStore::delete(&account.id).err();
+            (revoke_error, delete_error)
+        });
+        glib::spawn_future_local(async move {
+            if let Ok((revoke_error, delete_error)) = task.await {
+                if let Some(error) = revoke_error {
+                    logger.append(&format!(
+                        "account removal: could not revoke the app password on the server: {error}"
+                    ));
+                }
+                if let Some(error) = delete_error {
+                    logger.append(&format!(
+                        "account removal: could not clear the saved password: {error}"
+                    ));
+                }
+            }
+        });
     }
 
     /// Refresh the account sidebar from the current configuration.

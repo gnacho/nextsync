@@ -10,6 +10,9 @@
 //!   bodies) to check a folder exists and holds at least one entry.
 //! - [`NextcloudApi::list_remote_folders`]: PROPFIND against the account root
 //!   to list existing top-level folders as normalized paths (`/Documents`).
+//! - [`NextcloudApi::revoke_app_password`]: invalidate the app password used
+//!   for the session (`DELETE /ocs/v2.php/core/apppassword`) when an account is
+//!   removed.
 //! - [`NextcloudApi::notifications`]: list the account's server notifications
 //!   (shares, comments, mentions) for desktop notifications.
 //!
@@ -389,6 +392,33 @@ impl NextcloudApi {
         }
         folders.sort();
         Ok(folders)
+    }
+
+    /// Revoke the app password used for this session.
+    ///
+    /// Port of `revoke_app_password` (`api.py`): a `DELETE` against
+    /// `/ocs/v2.php/core/apppassword` with the account credentials. The server
+    /// invalidates the token currently in use, so a removed account can no
+    /// longer authenticate. 401/403 map to [`ApiError::AuthRejected`].
+    pub fn revoke_app_password(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<(), ApiError> {
+        let url = format!(
+            "{}/ocs/v2.php/core/apppassword",
+            server.trim_end_matches('/')
+        );
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Accept", "application/json"),
+            ("OCS-APIREQUEST", "true"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self.http.request("DELETE", &url, &headers, None)?;
+        map_status(response.status)?;
+        Ok(())
     }
 
     /// List the account's server notifications (issue #31).
@@ -1131,6 +1161,77 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(Failing));
         assert_eq!(
             api.validate_credentials("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::Transport)
+        );
+    }
+
+    // ---- revoke_app_password ----------------------------------------------
+
+    #[test]
+    fn revoke_issues_a_delete_against_core_apppassword() {
+        let http = FakeHttp::new(200, b"");
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.revoke_app_password("https://cloud.example.com", "alice", "secret")
+            .unwrap();
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "DELETE");
+        assert_eq!(header_value(request, "OCS-APIREQUEST"), Some("true"));
+        assert!(header_value(request, "Authorization")
+            .unwrap()
+            .starts_with("Basic "));
+        assert!(request.url.ends_with("/ocs/v2.php/core/apppassword"));
+    }
+
+    #[test]
+    fn revoke_success_is_ok() {
+        for status in [200, 204] {
+            let http = FakeHttp::new(status, b"");
+            let api = NextcloudApi::with_http(Box::new(http));
+            api.revoke_app_password("https://cloud.example.com", "alice", "secret")
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn revoke_auth_rejection_surfaces() {
+        for status in [401, 403] {
+            let http = FakeHttp::new(status, b"");
+            let api = NextcloudApi::with_http(Box::new(http));
+            assert_eq!(
+                api.revoke_app_password("https://cloud.example.com", "alice", "secret"),
+                Err(ApiError::AuthRejected)
+            );
+        }
+    }
+
+    #[test]
+    fn revoke_http_error_surfaces() {
+        let http = FakeHttp::new(500, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.revoke_app_password("https://cloud.example.com", "alice", "secret"),
+            Err(ApiError::Http { status: 500 })
+        );
+    }
+
+    #[test]
+    fn revoke_transport_error_surfaces() {
+        struct Failing;
+        impl HttpClient for Failing {
+            fn request(
+                &self,
+                _method: &str,
+                _url: &str,
+                _headers: &[(&str, &str)],
+                _body: Option<&[u8]>,
+            ) -> Result<HttpResponse, ApiError> {
+                Err(ApiError::Transport)
+            }
+        }
+        let api = NextcloudApi::with_http(Box::new(Failing));
+        assert_eq!(
+            api.revoke_app_password("https://cloud.example.com", "alice", "secret"),
             Err(ApiError::Transport)
         );
     }
