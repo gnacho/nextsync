@@ -2138,3 +2138,19 @@ msgstr "Error de sincronización — consulta el registro"
 
 #~ msgid "Use This Folder"
 #~ msgstr "Usar esta carpeta"
+
+#: src/ui/main_window.rs
+msgid "System"
+msgstr "Sistema"
+
+#: src/ui/main_window.rs
+msgid "Light"
+msgstr "Claro"
+
+#: src/ui/main_window.rs
+msgid "Dark"
+msgstr "Oscuro"
+
+#: src/ui/settings.rs
+msgid "Remove account"
+msgstr "Quitar cuenta"

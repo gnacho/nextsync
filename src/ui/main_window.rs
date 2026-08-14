@@ -374,9 +374,22 @@ impl MainWindow {
         let title = libadwaita::WindowTitle::new(window_title(), window_subtitle());
         header.set_title_widget(Some(&title));
 
-        // Hamburger menu (official-client style): Preferences, Advanced and
-        // About, rendered in-app by sliding the settings view over the sync
-        // view.
+        // gnome-text-editor layout: the back-to-sync button sits at the left
+        // of the header; the hamburger menu sits at the far right, next to
+        // the window close button.
+        let back_button = gtk4::Button::builder()
+            .icon_name("nextsync-undo-2-symbolic")
+            .tooltip_text(t("Synchronization"))
+            .css_classes(["flat"])
+            .build();
+        let back_weak = self_weak.clone();
+        back_button.connect_clicked(move |_button| {
+            if let Some(main) = back_weak.upgrade() {
+                main.borrow_mut().show_sync_view();
+            }
+        });
+        header.pack_start(&back_button);
+
         let hamburger = gtk4::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .tooltip_text(t("Settings"))
@@ -386,30 +399,10 @@ impl MainWindow {
         let actions = gio::SimpleActionGroup::new();
         actions.add_action(&{
             let weak = self_weak.clone();
-            let action = gio::SimpleAction::new("sync", None);
-            action.connect_activate(move |_action, _param| {
-                if let Some(main) = weak.upgrade() {
-                    main.borrow_mut().show_sync_view();
-                }
-            });
-            action
-        });
-        actions.add_action(&{
-            let weak = self_weak.clone();
             let action = gio::SimpleAction::new("preferences", None);
             action.connect_activate(move |_action, _param| {
                 if let Some(main) = weak.upgrade() {
                     main.borrow_mut().show_preferences();
-                }
-            });
-            action
-        });
-        actions.add_action(&{
-            let weak = self_weak.clone();
-            let action = gio::SimpleAction::new("advanced", None);
-            action.connect_activate(move |_action, _param| {
-                if let Some(main) = weak.upgrade() {
-                    main.borrow_mut().show_advanced();
                 }
             });
             action
@@ -424,8 +417,34 @@ impl MainWindow {
             });
             action
         });
+        actions.add_action(&{
+            let weak = self_weak.clone();
+            let store_for_theme = config_store.clone();
+            let current = config.general.color_scheme.clone();
+            let action = gio::SimpleAction::new_stateful(
+                "theme",
+                Some(glib::VariantTy::STRING),
+                &current.to_variant(),
+            );
+            action.connect_activate(move |action, parameter| {
+                let Some(value) = parameter.and_then(|value| value.str()) else {
+                    return;
+                };
+                let scheme = value.to_string();
+                libadwaita::StyleManager::default().set_color_scheme(color_scheme_for(&scheme));
+                action.set_state(&scheme.to_variant());
+                if let Some(main) = weak.upgrade() {
+                    let mut main = main.borrow_mut();
+                    main.config.general.color_scheme = scheme.clone();
+                    let mut persisted = store_for_theme.load().unwrap_or_default();
+                    persisted.general.color_scheme = scheme;
+                    let _ = store_for_theme.save(&persisted);
+                }
+            });
+            action
+        });
         hamburger.insert_action_group("app", Some(&actions));
-        header.pack_start(&hamburger);
+        header.pack_end(&hamburger);
 
         toolbar.add_top_bar(&header);
 
@@ -740,11 +759,6 @@ impl MainWindow {
         self.show_settings_page(settings_page::GENERAL);
     }
 
-    /// Open the in-app Advanced page (slides over the sync view).
-    pub fn show_advanced(&mut self) {
-        self.show_settings_page(settings_page::ADVANCED);
-    }
-
     /// Ensure the settings view exists for the active account and slide to the
     /// given page.
     fn show_settings_page(&mut self, page: &str) {
@@ -1036,21 +1050,40 @@ impl MainWindow {
 ///
 /// Extracted from [`MainWindow::new`] so the menu contract (sections, actions
 /// and icons) is testable without a display.
+/// The header menu (gnome-text-editor style): Preferences and About, plus a
+/// color-scheme radio section (System / Light / Dark).
 fn hamburger_menu_model() -> gio::Menu {
     let menu = gio::Menu::new();
-    let sync_item = gio::MenuItem::new(Some(t("Synchronization")), Some("app.sync"));
-    sync_item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
-    menu.append_item(&sync_item);
     let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
     preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
     menu.append_item(&preferences_item);
-    let advanced_item = gio::MenuItem::new(Some(t("Advanced")), Some("app.advanced"));
-    advanced_item.set_icon(&gio::ThemedIcon::new("applications-system-symbolic"));
-    menu.append_item(&advanced_item);
     let about_item = gio::MenuItem::new(Some(t("About")), Some("app.about"));
     about_item.set_icon(&gio::ThemedIcon::new("nextsync-info-symbolic"));
     menu.append_item(&about_item);
+
+    let theme_section = gio::Menu::new();
+    for (label, value) in [
+        (t("System"), "system"),
+        (t("Light"), "light"),
+        (t("Dark"), "dark"),
+    ] {
+        let item = gio::MenuItem::new(Some(label), None);
+        item.set_action_and_target_value(Some("app.theme"), Some(&value.to_variant()));
+        theme_section.append_item(&item);
+    }
+    menu.append_section(None, &theme_section);
     menu
+}
+
+/// Map the persisted color-scheme preference to a libadwaita color scheme.
+///
+/// Unknown values fall back to following the desktop (`system`).
+pub fn color_scheme_for(preference: &str) -> libadwaita::ColorScheme {
+    match preference {
+        "light" => libadwaita::ColorScheme::ForceLight,
+        "dark" => libadwaita::ColorScheme::ForceDark,
+        _ => libadwaita::ColorScheme::Default,
+    }
 }
 
 /// Build the sidebar: the container, the accounts list and the Add Account
@@ -1183,13 +1216,10 @@ mod tests {
 
         set_locale(Locale::English);
         let menu = hamburger_menu_model();
-        assert_eq!(menu.n_items(), 4);
-        let expected: [(&str, &str); 4] = [
-            ("Synchronization", "app.sync"),
-            ("Preferences", "app.preferences"),
-            ("Advanced", "app.advanced"),
-            ("About", "app.about"),
-        ];
+        // Preferences + About, then the color-scheme section.
+        assert_eq!(menu.n_items(), 3);
+        let expected: [(&str, &str); 2] =
+            [("Preferences", "app.preferences"), ("About", "app.about")];
         for (index, (label, action)) in expected.iter().enumerate() {
             let attrs = item_attrs(&menu, index as i32);
             assert_eq!(attrs.label.as_deref(), Some(*label), "item {index}");
@@ -1197,23 +1227,59 @@ mod tests {
             assert!(attrs.has_icon, "item {index} must carry an icon");
         }
 
-        // The Spanish catalog covers every menu section (issue #10 renders
-        // the menu in-app, so the labels are user-visible on every launch).
+        // The color-scheme section carries radio items with the target value.
+        let theme_section = menu.item_link(2, gio::MENU_LINK_SECTION).expect("section");
+        let expected_theme: [(&str, &str); 3] =
+            [("System", "system"), ("Light", "light"), ("Dark", "dark")];
+        for (index, (label, target)) in expected_theme.iter().enumerate() {
+            let mut found_label = None;
+            let mut found_action = None;
+            let mut found_target = None;
+            let iter = theme_section.iterate_item_attributes(index as i32);
+            while let Some((key, value)) = iter.next() {
+                match key.as_str() {
+                    "label" => found_label = value.str().map(str::to_string),
+                    "action" => found_action = value.str().map(str::to_string),
+                    "target" => found_target = value.str().map(str::to_string),
+                    _ => {}
+                }
+            }
+            assert_eq!(found_label.as_deref(), Some(*label), "theme item {index}");
+            assert_eq!(
+                found_action.as_deref(),
+                Some("app.theme"),
+                "theme items must be radio-style with an action target"
+            );
+            assert_eq!(found_target.as_deref(), Some(*target), "theme item {index}");
+        }
+
+        // The Spanish catalog covers every menu entry (the menu is
+        // user-visible on every launch).
         set_locale(Locale::Spanish);
         let menu = hamburger_menu_model();
-        let labels: Vec<String> = (0..menu.n_items())
+        let labels: Vec<String> = (0..2)
             .map(|index| item_attrs(&menu, index).label.expect("label"))
             .collect();
         assert_eq!(
             labels,
-            vec![
-                "Sincronización".to_string(),
-                "Preferencias".to_string(),
-                "Avanzado".to_string(),
-                "Acerca de".to_string(),
-            ]
+            vec!["Preferencias".to_string(), "Acerca de".to_string(),]
         );
         reset_locale();
+    }
+
+    #[test]
+    fn color_scheme_preference_maps_to_libadwaita() {
+        assert_eq!(color_scheme_for("system"), libadwaita::ColorScheme::Default);
+        assert_eq!(
+            color_scheme_for("light"),
+            libadwaita::ColorScheme::ForceLight
+        );
+        assert_eq!(color_scheme_for("dark"), libadwaita::ColorScheme::ForceDark);
+        // Unknown values follow the desktop.
+        assert_eq!(
+            color_scheme_for("nonsense"),
+            libadwaita::ColorScheme::Default
+        );
     }
 
     #[test]
@@ -1268,11 +1334,6 @@ mod tests {
             window.show_preferences();
             assert!(window.root_stack.child_by_name("settings").is_some());
             assert!(window.settings_view.is_some());
-            assert_eq!(
-                window.root_stack.visible_child_name().as_deref(),
-                Some("settings")
-            );
-            window.show_advanced();
             assert_eq!(
                 window.root_stack.visible_child_name().as_deref(),
                 Some("settings")
@@ -1365,7 +1426,6 @@ mod tests {
                 Weak::new(),
             );
             window.show_preferences();
-            window.show_advanced();
             assert!(window.settings_view.is_none());
             assert!(window.root_stack.child_by_name("settings").is_none());
             assert_eq!(

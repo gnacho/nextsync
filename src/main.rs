@@ -57,11 +57,16 @@ fn main() {
             };
             let config = match config_store.load() {
                 Ok(config) => config,
+
                 Err(error) => {
                     eprintln!("Could not load configuration: {error}");
                     std::process::exit(1);
                 }
             };
+
+            // Apply the persisted color scheme before any window is shown.
+            libadwaita::StyleManager::default()
+                .set_color_scheme(nextsync::ui::color_scheme_for(&config.general.color_scheme));
 
             let source: Rc<RefCell<dyn nextsync::core::debounce::TimeoutSource>> =
                 Rc::new(RefCell::new(GlibTimeoutSource::new()));

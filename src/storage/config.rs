@@ -205,6 +205,14 @@ pub struct RuntimeConfig {
 pub struct GeneralConfig {
     pub autostart: bool,
     pub pause_on_battery: bool,
+    /// Color scheme preference: `"system"`, `"light"` or `"dark"`.
+    #[serde(default = "default_color_scheme")]
+    pub color_scheme: String,
+}
+
+/// Default color scheme (follow the desktop).
+fn default_color_scheme() -> String {
+    "system".to_string()
 }
 
 impl Default for GeneralConfig {
@@ -212,6 +220,7 @@ impl Default for GeneralConfig {
         Self {
             autostart: true,
             pause_on_battery: false,
+            color_scheme: default_color_scheme(),
         }
     }
 }
@@ -988,6 +997,7 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
     GeneralConfig {
         autostart: get_bool(obj, "autostart", true),
         pause_on_battery: get_bool(obj, "pause_on_battery", false),
+        color_scheme: get_string(obj, "color_scheme", &default_color_scheme()),
     }
 }
 
@@ -1156,6 +1166,13 @@ fn get_bool(obj: &Map<String, Value>, key: &str, default: bool) -> bool {
             _ => default,
         },
         _ => default,
+    }
+}
+
+fn get_string(obj: &Map<String, Value>, key: &str, default: &str) -> String {
+    match obj.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        _ => default.to_string(),
     }
 }
 
