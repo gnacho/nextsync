@@ -1902,8 +1902,12 @@ msgid "Go back to the previous step"
 msgstr "Volver al paso anterior"
 
 #: src/ui/setup.rs
-msgid "Optional OpenCloud space identifier"
-msgstr "Identificador opcional del espacio de OpenCloud"
+msgid "No space discovered for this account. Sign in again to retry the discovery."
+msgstr "No se ha descubierto ningún espacio para esta cuenta. Vuelve a iniciar sesión para reintentar el descubrimiento."
+
+#: src/ui/setup.rs
+msgid "No OpenCloud space was discovered for this account. Sign in again to retry the discovery."
+msgstr "No se ha descubierto ningún espacio de OpenCloud para esta cuenta. Vuelve a iniciar sesión para reintentar el descubrimiento."
 
 #: src/ui/main_window.rs
 msgid "Pause or resume synchronization"

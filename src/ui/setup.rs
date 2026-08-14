@@ -38,9 +38,9 @@
 //!   excluded). The `opencloudcmd <url>` query mode
 //!   (`opencloud_list_spaces`, parsing the `Short ID | DisplayName | ID`
 //!   table verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp`) remains as
-//!   a fallback. The id is editable per folder in the Add Folder dialog;
-//!   when none is found the folder keeps `space_id: None` (the driver
-//!   requires a space id, so such a folder cannot sync until it is set).
+//!   a fallback. The id is assigned from the discovery (never editable:
+//!   without a discovered space the Add Folder dialog is blocked with an
+//!   inline error, because the driver requires a space id to sync).
 //! - **Not the app's main window**: the Python wizard is the first-run main
 //!   window and quits the application on close. In the rewrite it is a
 //!   secondary window opened from the main window, so closing it does not quit
@@ -112,7 +112,7 @@ struct WizardState {
     authentication_type: String,
     trust_invalid: bool,
     folders: Vec<WizardFolder>,
-    /// Discovered OpenCloud space id (also editable per folder).
+    /// Discovered OpenCloud space id (assigned to every folder).
     space_id: Option<String>,
 }
 
@@ -986,6 +986,12 @@ fn start_space_discovery(ctx: &SetupContext, server: &str, username: &str, passw
     });
 }
 
+/// Show an inline error on the folders page (used when the Add Folder
+/// dialog cannot even open).
+fn present_folder_error(ctx: &SetupContext, message: &str) {
+    ctx.widgets.folder_error.set_text(message);
+}
+
 fn update_space_label(ctx: &SetupContext, space_id: Option<&str>) {
     match space_id {
         Some(id) => {
@@ -994,7 +1000,7 @@ fn update_space_label(ctx: &SetupContext, space_id: Option<&str>) {
         }
         None => {
             ctx.widgets.space_label.set_text(t(
-                "No space discovered. Enter the space id in the Add Folder dialog.",
+                "No space discovered for this account. Sign in again to retry the discovery.",
             ));
             ctx.widgets.space_label.set_visible(true);
         }
@@ -1006,11 +1012,21 @@ fn update_space_label(ctx: &SetupContext, space_id: Option<&str>) {
 /// response, so errors are shown in the rebuilt dialog).
 fn present_add_folder_dialog(
     ctx: &SetupContext,
-    previous: Option<(String, String, String)>,
+    previous: Option<(String, String)>,
     error: Option<String>,
 ) {
     let opencloud = ctx.state.borrow().provider == Provider::OpenCloud;
-    let (previous_local, previous_remote, previous_space) = previous.unwrap_or_default();
+    let discovered_space = ctx.state.borrow().space_id.clone();
+    if opencloud && discovered_space.is_none() {
+        // The engine requires a space id; without one the folder cannot
+        // sync, so block the dialog instead of accepting a doomed folder.
+        present_folder_error(
+            ctx,
+            t("No OpenCloud space was discovered for this account. Sign in again to retry the discovery."),
+        );
+        return;
+    }
+    let (previous_local, previous_remote) = previous.unwrap_or_default();
     let local_default = if previous_local.is_empty() {
         default_sync_root().to_string_lossy().into_owned()
     } else {
@@ -1049,19 +1065,6 @@ fn present_add_folder_dialog(
     });
     entry_box.append(&remote_entry);
 
-    let space_entry = libadwaita::EntryRow::new();
-    space_entry.set_tooltip_text(Some(t("Optional OpenCloud space identifier")));
-    if opencloud {
-        space_entry.set_title(t("Space ID (optional)"));
-        let space_default = if previous_space.is_empty() {
-            ctx.state.borrow().space_id.clone().unwrap_or_default()
-        } else {
-            previous_space
-        };
-        space_entry.set_text(&space_default);
-        entry_box.append(&space_entry);
-    }
-
     if let Some(message) = error {
         entry_box.append(&error_label(&message));
     }
@@ -1079,9 +1082,14 @@ fn present_add_folder_dialog(
         }
         let local_root = local_entry.text().to_string();
         let remote_text = remote_entry.text().to_string();
-        let space_text = space_entry.text().to_string();
         let provider = ctx.state.borrow().provider;
-        match validate_add_folder(provider, &local_root, &remote_text, &space_text) {
+        let discovered_space = ctx.state.borrow().space_id.clone();
+        match validate_add_folder(
+            provider,
+            &local_root,
+            &remote_text,
+            discovered_space.as_deref(),
+        ) {
             Ok(folder) => {
                 if ctx
                     .state
@@ -1092,7 +1100,7 @@ fn present_add_folder_dialog(
                 {
                     present_add_folder_dialog(
                         &ctx,
-                        Some((local_root, remote_text, space_text)),
+                        Some((local_root, remote_text)),
                         Some(t("This local folder is already added.").to_string()),
                     );
                     return;
@@ -1102,11 +1110,7 @@ fn present_add_folder_dialog(
                 ctx.widgets.folder_error.set_text("");
             }
             Err(message) => {
-                present_add_folder_dialog(
-                    &ctx,
-                    Some((local_root, remote_text, space_text)),
-                    Some(message),
-                );
+                present_add_folder_dialog(&ctx, Some((local_root, remote_text)), Some(message));
             }
         }
     });
@@ -1464,11 +1468,15 @@ fn build_account(
 }
 
 /// Normalize one Add Folder dialog submission into a [`WizardFolder`].
+///
+/// `space_id` is the space discovered for the account (OpenCloud only); it
+/// is not user-editable: without a discovered space the dialog is blocked
+/// upstream, so an `Ok` folder for OpenCloud always carries one.
 fn validate_add_folder(
     provider: Provider,
     local_root: &str,
     remote_text: &str,
-    space_text: &str,
+    space_id: Option<&str>,
 ) -> Result<WizardFolder, String> {
     let root = expanduser(local_root);
     if !root.is_absolute() {
@@ -1476,7 +1484,7 @@ fn validate_add_folder(
     }
     let remote_path = normalize_remote_path(remote_text).map_err(|error| error.to_string())?;
     let space_id = if provider == Provider::OpenCloud {
-        let trimmed = space_text.trim();
+        let trimmed = space_id.unwrap_or("").trim();
         if trimmed.is_empty() {
             None
         } else {
@@ -1814,23 +1822,34 @@ mod tests {
     fn validate_add_folder_normalizes_inputs() {
         set_locale(Locale::English);
         let folder =
-            validate_add_folder(Provider::Nextcloud, "/tmp/nsync-wz", "/Docs/", "").unwrap();
+            validate_add_folder(Provider::Nextcloud, "/tmp/nsync-wz", "/Docs/", None).unwrap();
         assert_eq!(folder.local_root, "/tmp/nsync-wz");
         assert_eq!(folder.remote_path, "/Docs");
         assert_eq!(folder.space_id, None);
-        let error = validate_add_folder(Provider::Nextcloud, "relative", "/", "").unwrap_err();
+        let error = validate_add_folder(Provider::Nextcloud, "relative", "/", None).unwrap_err();
         assert!(error.contains("absolute"));
         reset_locale();
     }
 
     #[test]
-    fn validate_add_folder_keeps_opencloud_space_id() {
-        let folder =
-            validate_add_folder(Provider::OpenCloud, "/tmp/nsync-oc", "/", " space:42 ").unwrap();
+    fn validate_add_folder_keeps_the_discovered_space_id() {
+        let folder = validate_add_folder(
+            Provider::OpenCloud,
+            "/tmp/nsync-oc",
+            "/",
+            Some(" space:42 "),
+        )
+        .unwrap();
         assert_eq!(folder.space_id.as_deref(), Some("space:42"));
         assert_eq!(folder.remote_path, "");
-        let blank = validate_add_folder(Provider::OpenCloud, "/tmp/nsync-oc2", "/", "").unwrap();
-        assert_eq!(blank.space_id, None);
+        let missing =
+            validate_add_folder(Provider::OpenCloud, "/tmp/nsync-oc2", "/", None).unwrap();
+        assert_eq!(missing.space_id, None);
+        // Nextcloud ignores the discovered space entirely.
+        let nextcloud =
+            validate_add_folder(Provider::Nextcloud, "/tmp/nsync-nc", "/", Some("space:42"))
+                .unwrap();
+        assert_eq!(nextcloud.space_id, None);
     }
 
     #[test]
