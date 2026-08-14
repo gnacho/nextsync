@@ -161,17 +161,12 @@ impl AccountView {
                     }))
                 },
             };
-            let format_last_sync: Option<Rc<dyn Fn() -> String>> = {
-                let runtime = folder_runtime.clone();
-                Some(Rc::new(move || {
-                    let value = runtime
-                        .as_ref()
-                        .and_then(|fr| fr.scheduler().delete_alert().map(|_| String::new()))
-                        .unwrap_or_default();
-                    let _ = value;
-                    String::new()
-                }))
-            };
+            // No last-sync caption is rendered (the v0.4.0 folder-focused
+            // redesign dropped it), so no scheduler query here: the row's state
+            // subscription fires synchronously from within SchedulerInner
+            // borrows, and calling back into the scheduler from there would
+            // panic on the already-borrowed RefCell (crash on DeleteReview).
+            let format_last_sync: Option<Rc<dyn Fn() -> String>> = None;
             let is_paused: Option<Rc<dyn Fn() -> bool>> = {
                 let folder_runtime = folder_runtime.clone();
                 Some(Rc::new(move || {
