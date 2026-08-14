@@ -2154,3 +2154,31 @@ msgstr "Oscuro"
 #: src/ui/settings.rs
 msgid "Remove account"
 msgstr "Quitar cuenta"
+
+#: src/ui/settings.rs
+msgid "Show desktop notifications"
+msgstr "Mostrar notificaciones de escritorio"
+
+#: src/ui/settings.rs
+msgid "Authentication and synchronization failures"
+msgstr "Fallo de autenticación y sincronización"
+
+#: src/ui/settings.rs
+msgid "Notifications"
+msgstr "Notificaciones"
+
+#: src/core/notifications.rs
+msgid "The server rejected the account credentials."
+msgstr "El servidor rechazó las credenciales de la cuenta."
+
+#: src/core/notifications.rs
+msgid "The password keyring is locked."
+msgstr "El almacén de contraseñas está bloqueado."
+
+#: src/core/notifications.rs
+msgid "A synchronization failed."
+msgstr "Una sincronización ha fallado."
+
+#: src/core/notifications.rs
+msgid "NextSync"
+msgstr "NextSync"

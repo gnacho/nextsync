@@ -120,6 +120,74 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
+        // Account summary card: login@server, storage used and an all-ok
+        // light driven by the aggregate state. The quota fetch runs off the
+        // UI thread; on any failure the card simply shows no usage line.
+        let summary_row = libadwaita::ActionRow::builder()
+            .title(format!(
+                "{}@{}",
+                account.login_name,
+                server_host(&account.server_url)
+            ))
+            .build();
+        let light = gtk4::Image::builder().pixel_size(14).build();
+        light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
+        summary_row.add_prefix(&light);
+        let usage_label = gtk4::Label::builder()
+            .css_classes(["caption"])
+            .halign(gtk4::Align::End)
+            .build();
+        summary_row.add_suffix(&usage_label);
+        account_list.append(&summary_row);
+        {
+            // Quota fetch: only plain data crosses to the blocking thread;
+            // widget clones are captured in the main-loop continuation.
+            let account_for_quota = account.clone();
+            let handle = gio::spawn_blocking(move || {
+                crate::nextcloud::credentials::CredentialsStore::get_for_account(
+                    &account_for_quota.id,
+                    &account_for_quota.server_url,
+                    &account_for_quota.login_name,
+                )
+                .ok()
+                .flatten()
+                .and_then(|password| {
+                    crate::nextcloud::api::NextcloudApi::new()
+                        .account_summary(
+                            &account_for_quota.server_url,
+                            &account_for_quota.login_name,
+                            &password,
+                        )
+                        .ok()
+                })
+            });
+            let usage_label = usage_label.clone();
+            let summary_row = summary_row.clone();
+            let title_for_check = summary_row.title().to_string();
+            glib::spawn_future_local(async move {
+                let Ok(Some(summary)) = handle.await else {
+                    return;
+                };
+                // The view may have been rebuilt for another account while
+                // the fetch ran; a detached row keeps its title, so compare
+                // against the one captured at fetch start.
+                if summary_row.title() != title_for_check {
+                    return;
+                }
+                let mut parts = Vec::new();
+                if let Some(name) = summary.display_name.clone() {
+                    if !name.is_empty() {
+                        parts.push(name);
+                    }
+                }
+                let usage = summary.usage_label();
+                if !usage.is_empty() {
+                    parts.push(usage);
+                }
+                usage_label.set_text(&parts.join(" · "));
+            });
+        }
+
         let pairs = pair_folder_runtimes(&account.folders, runtime.folders());
         for (folder, folder_runtime) in pairs {
             let local_root = folder.local_root.clone();
@@ -378,7 +446,7 @@ impl MainWindow {
         // of the header; the hamburger menu sits at the far right, next to
         // the window close button.
         let back_button = gtk4::Button::builder()
-            .icon_name("nextsync-undo-2-symbolic")
+            .icon_name("go-previous-symbolic")
             .tooltip_text(t("Synchronization"))
             .css_classes(["flat"])
             .build();
@@ -389,6 +457,51 @@ impl MainWindow {
             }
         });
         header.pack_start(&back_button);
+
+        // Color-scheme switcher (gnome-text-editor style): three circular
+        // buttons — light, system (half-filled) and dark — in a flat group.
+        let scheme_group = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(2)
+            .build();
+        let make_scheme_button = |icon: &str, tooltip: &str, scheme: &'static str| {
+            let button = gtk4::ToggleButton::builder()
+                .icon_name(icon)
+                .tooltip_text(tooltip)
+                .css_classes(["flat", "circular"])
+                .build();
+            let weak = self_weak.clone();
+            let store_for_scheme = config_store.clone();
+            button.connect_toggled(move |button| {
+                if !button.is_active() {
+                    return;
+                }
+                libadwaita::StyleManager::default().set_color_scheme(color_scheme_for(scheme));
+                if let Some(main) = weak.upgrade() {
+                    let mut main = main.borrow_mut();
+                    main.config.general.color_scheme = scheme.to_string();
+                    let mut persisted = store_for_scheme.load().unwrap_or_default();
+                    persisted.general.color_scheme = scheme.to_string();
+                    let _ = store_for_scheme.save(&persisted);
+                }
+            });
+            button
+        };
+        let scheme_light = make_scheme_button("display-brightness-symbolic", t("Light"), "light");
+        let scheme_system =
+            make_scheme_button("nextsync-theme-auto-symbolic", t("System"), "system");
+        let scheme_dark = make_scheme_button("weather-clear-night-symbolic", t("Dark"), "dark");
+        scheme_system.set_group(Some(&scheme_light));
+        scheme_dark.set_group(Some(&scheme_light));
+        match config.general.color_scheme.as_str() {
+            "light" => scheme_light.set_active(true),
+            "dark" => scheme_dark.set_active(true),
+            _ => scheme_system.set_active(true),
+        }
+        scheme_group.append(&scheme_light);
+        scheme_group.append(&scheme_system);
+        scheme_group.append(&scheme_dark);
+        header.pack_end(&scheme_group);
 
         let hamburger = gtk4::MenuButton::builder()
             .icon_name("open-menu-symbolic")
@@ -413,32 +526,6 @@ impl MainWindow {
             action.connect_activate(move |_action, _param| {
                 if let Some(cb) = &on_about {
                     cb();
-                }
-            });
-            action
-        });
-        actions.add_action(&{
-            let weak = self_weak.clone();
-            let store_for_theme = config_store.clone();
-            let current = config.general.color_scheme.clone();
-            let action = gio::SimpleAction::new_stateful(
-                "theme",
-                Some(glib::VariantTy::STRING),
-                &current.to_variant(),
-            );
-            action.connect_activate(move |action, parameter| {
-                let Some(value) = parameter.and_then(|value| value.str()) else {
-                    return;
-                };
-                let scheme = value.to_string();
-                libadwaita::StyleManager::default().set_color_scheme(color_scheme_for(&scheme));
-                action.set_state(&scheme.to_variant());
-                if let Some(main) = weak.upgrade() {
-                    let mut main = main.borrow_mut();
-                    main.config.general.color_scheme = scheme.clone();
-                    let mut persisted = store_for_theme.load().unwrap_or_default();
-                    persisted.general.color_scheme = scheme;
-                    let _ = store_for_theme.save(&persisted);
                 }
             });
             action
@@ -1050,8 +1137,7 @@ impl MainWindow {
 ///
 /// Extracted from [`MainWindow::new`] so the menu contract (sections, actions
 /// and icons) is testable without a display.
-/// The header menu (gnome-text-editor style): Preferences and About, plus a
-/// color-scheme radio section (System / Light / Dark).
+/// The header menu (gnome-text-editor style): Preferences and About.
 fn hamburger_menu_model() -> gio::Menu {
     let menu = gio::Menu::new();
     let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
@@ -1060,18 +1146,6 @@ fn hamburger_menu_model() -> gio::Menu {
     let about_item = gio::MenuItem::new(Some(t("About")), Some("app.about"));
     about_item.set_icon(&gio::ThemedIcon::new("nextsync-info-symbolic"));
     menu.append_item(&about_item);
-
-    let theme_section = gio::Menu::new();
-    for (label, value) in [
-        (t("System"), "system"),
-        (t("Light"), "light"),
-        (t("Dark"), "dark"),
-    ] {
-        let item = gio::MenuItem::new(Some(label), None);
-        item.set_action_and_target_value(Some("app.theme"), Some(&value.to_variant()));
-        theme_section.append_item(&item);
-    }
-    menu.append_section(None, &theme_section);
     menu
 }
 
@@ -1083,6 +1157,35 @@ pub fn color_scheme_for(preference: &str) -> libadwaita::ColorScheme {
         "light" => libadwaita::ColorScheme::ForceLight,
         "dark" => libadwaita::ColorScheme::ForceDark,
         _ => libadwaita::ColorScheme::Default,
+    }
+}
+
+/// The all-ok light icon for the account summary card, from the aggregate
+/// state: green when healthy, amber when paused/offline, red on problems.
+pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
+    use crate::state::AppState;
+    match state {
+        AppState::IdleOk | AppState::IdleManualOnly | AppState::SyncQueued | AppState::Syncing => {
+            "nextsync-status-ok-symbolic"
+        }
+        AppState::PausedUser | AppState::PausedBattery | AppState::Offline => {
+            "nextsync-status-paused-symbolic"
+        }
+        AppState::Error
+        | AppState::AuthRequired
+        | AppState::KeyringLocked
+        | AppState::DeleteReview => "nextsync-status-error-symbolic",
+        AppState::Unconfigured => "nextsync-status-offline-symbolic",
+    }
+}
+
+/// Host part of a server URL (`https://cloud.example.com` ->
+/// `cloud.example.com`); the raw URL when it does not parse as expected.
+pub fn server_host(server_url: &str) -> &str {
+    let trimmed = server_url.trim_end_matches('/');
+    match trimmed.split_once("://") {
+        Some((_scheme, host)) => host,
+        None => trimmed,
     }
 }
 
@@ -1135,6 +1238,48 @@ mod tests {
         assert_eq!(window_title(), "NextSync");
         assert_eq!(window_subtitle(), "Nextcloud file synchronization");
         reset_locale();
+    }
+
+    #[test]
+    fn server_host_strips_scheme_and_trailing_slash() {
+        assert_eq!(
+            server_host("https://cloud.example.com"),
+            "cloud.example.com"
+        );
+        assert_eq!(
+            server_host("https://cloud.example.com/"),
+            "cloud.example.com"
+        );
+        assert_eq!(server_host("cloud.example.com"), "cloud.example.com");
+    }
+
+    #[test]
+    fn summary_light_maps_severity() {
+        use crate::state::AppState;
+        assert_eq!(
+            summary_light_for(AppState::IdleOk),
+            "nextsync-status-ok-symbolic"
+        );
+        assert_eq!(
+            summary_light_for(AppState::Syncing),
+            "nextsync-status-ok-symbolic"
+        );
+        assert_eq!(
+            summary_light_for(AppState::PausedUser),
+            "nextsync-status-paused-symbolic"
+        );
+        assert_eq!(
+            summary_light_for(AppState::Offline),
+            "nextsync-status-paused-symbolic"
+        );
+        assert_eq!(
+            summary_light_for(AppState::Error),
+            "nextsync-status-error-symbolic"
+        );
+        assert_eq!(
+            summary_light_for(AppState::DeleteReview),
+            "nextsync-status-error-symbolic"
+        );
     }
 
     #[test]
@@ -1216,8 +1361,8 @@ mod tests {
 
         set_locale(Locale::English);
         let menu = hamburger_menu_model();
-        // Preferences + About, then the color-scheme section.
-        assert_eq!(menu.n_items(), 3);
+        // Preferences + About — About last.
+        assert_eq!(menu.n_items(), 2);
         let expected: [(&str, &str); 2] =
             [("Preferences", "app.preferences"), ("About", "app.about")];
         for (index, (label, action)) in expected.iter().enumerate() {
@@ -1225,32 +1370,6 @@ mod tests {
             assert_eq!(attrs.label.as_deref(), Some(*label), "item {index}");
             assert_eq!(attrs.action.as_deref(), Some(*action), "item {index}");
             assert!(attrs.has_icon, "item {index} must carry an icon");
-        }
-
-        // The color-scheme section carries radio items with the target value.
-        let theme_section = menu.item_link(2, gio::MENU_LINK_SECTION).expect("section");
-        let expected_theme: [(&str, &str); 3] =
-            [("System", "system"), ("Light", "light"), ("Dark", "dark")];
-        for (index, (label, target)) in expected_theme.iter().enumerate() {
-            let mut found_label = None;
-            let mut found_action = None;
-            let mut found_target = None;
-            let iter = theme_section.iterate_item_attributes(index as i32);
-            while let Some((key, value)) = iter.next() {
-                match key.as_str() {
-                    "label" => found_label = value.str().map(str::to_string),
-                    "action" => found_action = value.str().map(str::to_string),
-                    "target" => found_target = value.str().map(str::to_string),
-                    _ => {}
-                }
-            }
-            assert_eq!(found_label.as_deref(), Some(*label), "theme item {index}");
-            assert_eq!(
-                found_action.as_deref(),
-                Some("app.theme"),
-                "theme items must be radio-style with an action target"
-            );
-            assert_eq!(found_target.as_deref(), Some(*target), "theme item {index}");
         }
 
         // The Spanish catalog covers every menu entry (the menu is

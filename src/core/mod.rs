@@ -10,6 +10,7 @@ pub mod desktop_integration;
 pub mod exclusions;
 pub mod log;
 pub mod network;
+pub mod notifications;
 pub mod power;
 pub mod scheduler;
 pub mod suspend;

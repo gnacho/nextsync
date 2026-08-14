@@ -13,6 +13,7 @@ gio = "0.22"
 glib = { version = "0.22", features = ["futures"] }
 gtk4 = { version = "0.11", features = ["v4_22"] }
 ksni = { version = "0.3", features = ["blocking"] }
+notify-rust = "4"
 libadwaita = { version = "0.9", features = ["v1_5"] }
 notify = "8"
 rand = "0.10"

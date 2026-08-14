@@ -102,6 +102,46 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
+/// Display name plus storage quota for the account summary card.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AccountSummary {
+    /// The server-side display name, when present.
+    pub display_name: Option<String>,
+    /// Storage used, in bytes. `None` when the server reports no quota.
+    pub used: Option<u64>,
+    /// Storage total, in bytes. `None` when unlimited.
+    pub total: Option<u64>,
+}
+
+impl AccountSummary {
+    /// Human-readable usage, e.g. `53.2 GB used · unlimited` or
+    /// `53.2 GB of 100 GB used`.
+    pub fn usage_label(&self) -> String {
+        match (self.used, self.total) {
+            (Some(used), Some(total)) => {
+                format!("{} / {}", format_bytes(used), format_bytes(total))
+            }
+            (Some(used), None) => format!("{} · {}", format_bytes(used), "unlimited"),
+            (None, _) => String::new(),
+        }
+    }
+}
+
+/// Format bytes with binary prefixes (KiB/MiB/GiB), one decimal.
+pub(crate) fn format_bytes(bytes: u64) -> String {
+    const UNIT: f64 = 1024.0;
+    let value = bytes as f64;
+    if value >= UNIT * UNIT * UNIT {
+        format!("{:.1} GiB", value / (UNIT * UNIT * UNIT))
+    } else if value >= UNIT * UNIT {
+        format!("{:.1} MiB", value / (UNIT * UNIT))
+    } else if value >= UNIT {
+        format!("{:.1} KiB", value / UNIT)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Minimal HTTP transport abstraction, mirror of the Python `HttpClient`.
 ///
 /// `request` returns transport failures as `Err(ApiError::Transport)`; every
@@ -174,6 +214,58 @@ impl NextcloudApi {
             .and_then(|name| name.as_str())
             .map(str::to_owned);
         Ok(display_name)
+    }
+
+    /// Account summary from the OCS user endpoint: display name plus quota.
+    ///
+    /// `used`/`total` are bytes; servers with no quota report negative
+    /// values (e.g. `-3`), which map to `None` (render "unlimited").
+    pub fn account_summary(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<AccountSummary, ApiError> {
+        let url = format!(
+            "{}/ocs/v2.php/cloud/user?format=json",
+            server.trim_end_matches('/')
+        );
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Accept", "application/json"),
+            ("OCS-APIREQUEST", "true"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self.http.request("GET", &url, &headers, None)?;
+        map_status(response.status)?;
+        let payload: serde_json::Value =
+            serde_json::from_slice(&response.body).map_err(|_| ApiError::InvalidResponse)?;
+        let data = payload
+            .get("ocs")
+            .and_then(|ocs| ocs.get("data"))
+            .cloned()
+            .unwrap_or_default();
+        let display_name = data
+            .get("display-name")
+            .and_then(|name| name.as_str())
+            .map(str::to_owned);
+        let used = data
+            .get("quota")
+            .and_then(|quota| quota.get("used"))
+            .and_then(|used| used.as_f64())
+            .filter(|used| *used >= 0.0)
+            .map(|used| used as u64);
+        let total = data
+            .get("quota")
+            .and_then(|quota| quota.get("total"))
+            .and_then(|total| total.as_f64())
+            .filter(|total| *total > 0.0)
+            .map(|total| total as u64);
+        Ok(AccountSummary {
+            display_name,
+            used,
+            total,
+        })
     }
 
     /// Create the remote folder (and any missing parents) over WebDAV MKCOL.
@@ -1012,5 +1104,42 @@ mod tests {
         let result = api.list_remote_folders(&base, "alice", "secret");
         assert_eq!(result, Err(ApiError::AuthRejected));
         handle.join().unwrap();
+    }
+    #[test]
+    fn account_summary_parses_quota_and_handles_unlimited() {
+        let body = br#"{"ocs":{"meta":{"status":"ok"},"data":{"display-name":"Alice","quota":{"used":57077043830,"total":-3,"free":-3}}}}"#;
+        let http = FakeHttp::new(200, body);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let summary = api
+            .account_summary("https://cloud.example.com", "alice", "pw")
+            .unwrap();
+        assert_eq!(summary.display_name.as_deref(), Some("Alice"));
+        assert_eq!(summary.used, Some(57077043830));
+        assert_eq!(summary.total, None, "negative total means unlimited");
+        assert!(summary.usage_label().ends_with("· unlimited"));
+        assert!(summary.usage_label().starts_with("53.2 GiB"));
+    }
+
+    #[test]
+    fn usage_label_joins_used_and_total() {
+        let summary = AccountSummary {
+            display_name: None,
+            used: Some(1024 * 1024 * 1024),
+            total: Some(2 * 1024 * 1024 * 1024),
+        };
+        assert_eq!(summary.usage_label(), "1.0 GiB / 2.0 GiB");
+    }
+
+    #[test]
+    fn usage_label_empty_without_quota() {
+        let summary = AccountSummary::default();
+        assert_eq!(summary.usage_label(), "");
+    }
+
+    #[test]
+    fn format_bytes_uses_binary_prefixes() {
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(2048), "2.0 KiB");
+        assert_eq!(format_bytes(1024 * 1024 * 5), "5.0 MiB");
     }
 }
