@@ -82,7 +82,7 @@ Verificado contra origin/main v0.3.0 el 13-Ago-2026:
 ### Fase 0 — Fundaciones del crate
 
 **Task 0.1: Esqueleto del proyecto**
-- Crear: `nextsync-rs/` (o convertir el repo) con `cargo init --name nextsync`.
+- Crear: `nextsync/` (o convertir el repo) con `cargo init --name nextsync`.
 - `Cargo.toml` con las deps del spike (ver Tech Stack).
 - Estructura: `src/main.rs`, `src/state.rs`, `src/core/`, `src/ui/`, `src/nextcloud/`, `src/storage/`, `src/util/`.
 - Tests: `cargo test` compila y corre 1 smoke test.

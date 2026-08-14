@@ -8,7 +8,7 @@
 //! panicking.
 //!
 //! Deviations from the Python (motivated):
-//! - The URLs point at `gnacho/nextsync-rs` (this rewrite) instead of
+//! - The URLs point at `gnacho/nextsync` (this rewrite) instead of
 //!   `gnacho/nextsync-py`.
 //! - `released_at` is kept as the validated UTC text (no `datetime` type in
 //!   std); `released_at_utc_text` formats it exactly like the Python.
@@ -23,9 +23,9 @@ use crate::nextcloud::api::{HttpClient, UreqHttpClient};
 
 /// Canonical version manifest served from the repository's default branch.
 pub const VERSION_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/gnacho/nextsync-rs/main/version.json";
+    "https://raw.githubusercontent.com/gnacho/nextsync/main/version.json";
 /// Human-facing landing page for the latest release.
-pub const RELEASES_URL: &str = "https://github.com/gnacho/nextsync-rs/releases/latest";
+pub const RELEASES_URL: &str = "https://github.com/gnacho/nextsync/releases/latest";
 /// The manifest is tiny; anything larger is rejected before parsing.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_SUMMARY_CHARACTERS: usize = 8_000;
@@ -671,10 +671,10 @@ mod tests {
         assert_eq!(checker.url(), VERSION_MANIFEST_URL);
         assert!(checker
             .url()
-            .contains("raw.githubusercontent.com/gnacho/nextsync-rs"));
+            .contains("raw.githubusercontent.com/gnacho/nextsync"));
         assert_eq!(
             RELEASES_URL,
-            "https://github.com/gnacho/nextsync-rs/releases/latest"
+            "https://github.com/gnacho/nextsync/releases/latest"
         );
         let result = checker.check("0.1.17");
         assert!(result.error.is_none());

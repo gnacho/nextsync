@@ -3,9 +3,9 @@
   <p><strong>Your files, local. Any server, in sync.</strong></p>
   <p>A GNOME-native desktop companion for keeping complete local mirrors of your accounts. Server agnostic, built with Rust, GTK 4, and Libadwaita.</p>
   <p>
-    <a href="https://github.com/gnacho/nextsync-rs">Website</a>
+    <a href="https://github.com/gnacho/nextsync">Website</a>
     ·
-    <a href="https://github.com/gnacho/nextsync-rs/issues">Report an issue</a>
+    <a href="https://github.com/gnacho/nextsync/issues">Report an issue</a>
   </p>
   <p align="center">
     <a href="README.md">English</a> |

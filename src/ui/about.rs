@@ -31,11 +31,11 @@ pub const APPLICATION_ID: &str = "io.github.gnacho.nextsync";
 /// Developer shown in the About dialog and the result dialog footer.
 pub const DEVELOPER_NAME: &str = "gnacho";
 /// Project website / source repository.
-pub const WEBSITE_URL: &str = "https://github.com/gnacho/nextsync-rs";
+pub const WEBSITE_URL: &str = "https://github.com/gnacho/nextsync";
 /// Issue tracker, opened from the About dialog.
-pub const ISSUES_URL: &str = "https://github.com/gnacho/nextsync-rs/issues";
+pub const ISSUES_URL: &str = "https://github.com/gnacho/nextsync/issues";
 /// Full CHANGELOG, opened from the About dialog.
-pub const CHANGELOG_URL: &str = "https://github.com/gnacho/nextsync-rs/blob/main/CHANGELOG.md";
+pub const CHANGELOG_URL: &str = "https://github.com/gnacho/nextsync/blob/main/CHANGELOG.md";
 /// Synthetic URI the About dialog emits when "Check for Updates" is clicked;
 /// the real network request is triggered from `activate-link`.
 pub const CHECK_UPDATES_URI: &str = "nextsync://check-update";
@@ -469,11 +469,11 @@ mod tests {
     #[test]
     fn about_constants_point_at_the_rewrite_repository() {
         assert_eq!(APPLICATION_ID, "io.github.gnacho.nextsync");
-        assert!(WEBSITE_URL.contains("gnacho/nextsync-rs"));
+        assert!(WEBSITE_URL.contains("gnacho/nextsync"));
         assert_eq!(CHECK_UPDATES_URI, "nextsync://check-update");
         assert_eq!(
             RELEASES_URL,
-            "https://github.com/gnacho/nextsync-rs/releases/latest"
+            "https://github.com/gnacho/nextsync/releases/latest"
         );
     }
 
