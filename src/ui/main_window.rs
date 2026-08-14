@@ -141,6 +141,9 @@ pub struct AccountView {
     pub root: gtk4::Box,
     _account_runtime: AccountRuntime,
     _subscription: Option<crate::state::Subscription>,
+    /// Per-folder state subscriptions (used-space refreshes after each
+    /// completed synchronization, issue #43).
+    _folder_subscriptions: Vec<crate::state::Subscription>,
 }
 
 impl AccountView {
@@ -232,6 +235,7 @@ impl AccountView {
         }
 
         let pairs = pair_folder_runtimes(&account.folders, runtime.folders());
+        let mut folder_subscriptions: Vec<crate::state::Subscription> = Vec::new();
         for (folder, folder_runtime) in pairs {
             let local_root = folder.local_root.clone();
             let account_id = account.id.clone();
@@ -291,6 +295,28 @@ impl AccountView {
             let state = folder_runtime.as_ref().map(|fr| fr.state());
             let row =
                 FolderStatusRow::new(folder, state, row_callbacks, format_last_sync, is_paused);
+            // Issue #43: show the folder's local used space, refreshed
+            // whenever a synchronization completes.
+            spawn_local_size_refresh(&row.row, &row.local_size, std::path::Path::new(&local_root));
+            if let Some(fr) = &folder_runtime {
+                let controller = fr.state();
+                let row_for_updates = row.row.clone();
+                let size_for_updates = row.local_size.clone();
+                let local_root_for_updates = std::path::PathBuf::from(local_root.clone());
+                let previous = Rc::new(Cell::new(controller.snapshot().state));
+                let subscription = controller.subscribe(move |snapshot| {
+                    let now = snapshot.state;
+                    let was = previous.replace(now);
+                    if was == AppState::Syncing && now != AppState::Syncing {
+                        spawn_local_size_refresh(
+                            &row_for_updates,
+                            &size_for_updates,
+                            &local_root_for_updates,
+                        );
+                    }
+                });
+                folder_subscriptions.push(subscription);
+            }
             account_list.append(&row.row);
         }
         if account.folders.is_empty() {
@@ -418,8 +444,38 @@ impl AccountView {
             root,
             _account_runtime: account_runtime,
             _subscription: Some(subscription),
+            _folder_subscriptions: folder_subscriptions,
         }
     }
+}
+
+/// Measure a folder's local used space off the UI thread and paint it into
+/// the row's size suffix (issue #43).
+///
+/// Like the quota fetch of the summary card, the row title captured at walk
+/// start guards against the view having been rebuilt for another folder
+/// while the walk ran (detached rows keep their title).
+fn spawn_local_size_refresh(
+    row: &libadwaita::ActionRow,
+    size: &gtk4::Label,
+    local_root: &std::path::Path,
+) {
+    let local_root = local_root.to_path_buf();
+    let title_for_check = row.title().to_string();
+    let handle =
+        gio::spawn_blocking(move || crate::ui::folder_status::local_tree_size(&local_root));
+    let row = row.clone();
+    let size = size.clone();
+    glib::spawn_future_local(async move {
+        let Ok(bytes) = handle.await else {
+            return;
+        };
+        if row.title() != title_for_check {
+            return;
+        }
+        size.set_text(&crate::ui::folder_status::local_size_label(bytes));
+        size.set_visible(true);
+    });
 }
 
 /// The main application window.

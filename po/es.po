@@ -2238,3 +2238,7 @@ msgstr "Mover carpeta a la papelera"
 #: src/ui/main_window.rs
 msgid "The folder could not be moved to the trash."
 msgstr "No se pudo mover la carpeta a la papelera."
+
+#: src/ui/folder_status.rs
+msgid "{size} local"
+msgstr "{size} en local"

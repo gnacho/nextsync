@@ -353,4 +353,5 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("{account}: open NextSync to check the account credential.", "{account}: abre NextSync para comprobar la credencial de la cuenta."),
     ("{count} changes in this release", "{count} cambios en esta versión"),
     ("{count} conflicted copy(ies) found in {folder}.", "Se encontraron {count} copia(s) en conflicto en {folder}."),
+    ("{size} local", "{size} en local"),
 ];
