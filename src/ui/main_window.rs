@@ -15,12 +15,14 @@ use std::rc::{Rc, Weak};
 
 use libadwaita::prelude::*;
 
-use crate::core::account_runtime::{AccountManager, AccountRuntime};
+use crate::core::account_runtime::{AccountManager, AccountRuntime, SchedulerFacade};
 use crate::state::{AppState, StateSnapshot};
 use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
-use crate::ui::settings::{present_add_folder_dialog, SettingsCallbacks, SettingsWindow};
+use crate::ui::settings::{
+    present_add_folder_dialog, ExclusionsDialog, SettingsCallbacks, SettingsWindow,
+};
 use crate::util::i18n::t;
 
 /// Translated window title (also used as a machine-readable page name).
@@ -31,6 +33,38 @@ pub fn window_title() -> &'static str {
 /// Translated window subtitle.
 pub fn window_subtitle() -> &'static str {
     t("Nextcloud file synchronization")
+}
+
+/// Present the deletion-review dialog for a scheduler blocked on a deletion
+/// alert. Keep Paused leaves the account blocked; Restore from Nextcloud
+/// clears the alert and re-downloads the folder; Approve These Deletions Once
+/// lets the run proceed for a single synchronization (the guard re-blocks if
+/// the same mass deletion is still present afterwards).
+fn present_delete_review(scheduler: &SchedulerFacade, parent: &gtk4::Widget) {
+    let Some(alert) = scheduler.delete_alert() else {
+        return;
+    };
+    let detail = if alert.missing_paths.is_empty() {
+        alert.message.clone()
+    } else {
+        let sample: Vec<String> = alert.missing_paths.iter().take(5).cloned().collect();
+        format!("{}\n\n{}", alert.message, sample.join("\n"))
+    };
+    let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&detail));
+    dialog.add_response("keep_paused", t("Keep Paused"));
+    dialog.add_response("restore", t("Restore from Nextcloud"));
+    dialog.add_response("approve", t("Approve These Deletions Once"));
+    dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Suggested);
+    dialog.set_response_appearance("restore", libadwaita::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("keep_paused"));
+
+    let scheduler_for_response = scheduler.clone();
+    dialog.connect_response(None, move |_dialog, response| match response {
+        "restore" => scheduler_for_response.restore_from_server(),
+        "approve" => scheduler_for_response.approve_delete_once(),
+        _ => {}
+    });
+    dialog.present(Some(parent));
 }
 
 /// Callback invoked with the local root of a folder to open it in the file
@@ -210,10 +244,10 @@ impl AccountView {
             .css_classes(["suggested-action", "pill"])
             .build();
         let runtime_for_sync = runtime.clone();
-        sync_button.connect_clicked(move |_button| {
+        sync_button.connect_clicked(move |button| {
             let scheduler = runtime_for_sync.scheduler();
             if scheduler.delete_alert().is_some() {
-                // Review handled at the application level; a no-op here.
+                present_delete_review(&scheduler, button.upcast_ref::<gtk4::Widget>());
                 return;
             }
             scheduler.sync_now();
@@ -355,6 +389,19 @@ impl MainWindow {
             }
         });
         header.pack_end(&settings_button);
+
+        let log_button = gtk4::Button::builder()
+            .icon_name("view-list-symbolic")
+            .tooltip_text(t("Synchronization Log"))
+            .css_classes(["flat"])
+            .build();
+        let log_weak = self_weak.clone();
+        log_button.connect_clicked(move |_button| {
+            if let Some(main) = log_weak.upgrade() {
+                main.borrow_mut().show_log();
+            }
+        });
+        header.pack_end(&log_button);
 
         let about_button = gtk4::Button::builder()
             .icon_name("nextsync-info-symbolic")
@@ -879,8 +926,38 @@ impl MainWindow {
                     None::<&gio::AppLaunchContext>,
                 );
             })),
-            on_remove_folder: None,
-            on_edit_ignored: None,
+            on_remove_folder: {
+                let weak = self.self_weak.clone();
+                let store = self.config_store.clone();
+                Some(Rc::new(move |account_id, folder_id| {
+                    let _ = store.remove_folder(account_id, folder_id);
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().refresh_after_config_change();
+                    }
+                }))
+            },
+            on_edit_ignored: {
+                let weak = self.self_weak.clone();
+                let store = self.config_store.clone();
+                let account_id = account_id.to_string();
+                let window = self.window.clone();
+                Some(Rc::new(move || {
+                    let callbacks = SettingsCallbacks {
+                        on_reconfigure: {
+                            let weak = weak.clone();
+                            Some(Rc::new(move || {
+                                if let Some(main) = weak.upgrade() {
+                                    main.borrow_mut().reconfigure_active_account();
+                                }
+                            }))
+                        },
+                        ..SettingsCallbacks::default()
+                    };
+                    let dialog =
+                        ExclusionsDialog::new(store.clone(), account_id.clone(), callbacks);
+                    dialog.present(Some(window.upcast_ref::<gtk4::Widget>()));
+                }))
+            },
             on_add_folder: {
                 let weak = self.self_weak.clone();
                 Some(Rc::new(move || {
