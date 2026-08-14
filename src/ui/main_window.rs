@@ -99,6 +99,11 @@ pub type RemoveFolderCallback = Rc<dyn Fn(&str, &str)>;
 /// Callback invoked when the user wants to edit ignored files.
 pub type EditIgnoredCallback = Rc<dyn Fn()>;
 
+/// Callback invoked with the account id and image bytes once a fresh
+/// avatar has been fetched and cached (issue #50), so other surfaces
+/// (the sidebar) can repaint.
+pub type AvatarCachedCallback = Rc<dyn Fn(&str, &[u8])>;
+
 /// What to do with the local folder when its synchronization is removed
 /// (issue #37).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +138,8 @@ pub struct AccountCallbacks {
     pub on_edit_ignored: Option<EditIgnoredCallback>,
     /// Invoked when the user clicks the in-view "Add Folder" row.
     pub on_add_folder: Option<Rc<dyn Fn()>>,
+    /// Invoked when a fresh avatar was fetched and cached (issue #50).
+    pub on_avatar_cached: Option<AvatarCachedCallback>,
 }
 
 /// One account rendered as the content of the split view: a list of folder
@@ -170,9 +177,10 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary card: login@server, storage used and an all-ok
-        // light driven by the aggregate state. The quota fetch runs off the
-        // UI thread; on any failure the card simply shows no usage line.
+        // Account summary card: avatar, login@server, storage used and an
+        // all-ok light driven by the aggregate state. The quota and avatar
+        // fetches run off the UI thread; on any failure the card simply
+        // shows no usage line.
         let summary_row = libadwaita::ActionRow::builder()
             .title(format!(
                 "{}@{}",
@@ -180,6 +188,13 @@ impl AccountView {
                 server_host(&account.server_url)
             ))
             .build();
+        // Issue #50: the account avatar leads the card; the initials
+        // fallback covers accounts without one.
+        let avatar = libadwaita::Avatar::new(40, Some(&account.login_name), true);
+        if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
+            paint_avatar(&avatar, &bytes);
+        }
+        summary_row.add_prefix(&avatar);
         let light = gtk4::Image::builder().pixel_size(14).build();
         light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
         summary_row.add_prefix(&light);
@@ -235,6 +250,59 @@ impl AccountView {
                     parts.push(usage);
                 }
                 usage_label.set_text(&parts.join(" · "));
+            });
+        }
+
+        // Avatar fetch (issue #50): the cached copy painted above renders
+        // instantly; the background refresh follows the same row-title
+        // guard as the quota fetch so a rebuilt view never receives a
+        // stale image, caches the bytes for the next startup and notifies
+        // the sidebar.
+        {
+            let account_for_avatar = account.clone();
+            let account_id_for_avatar = account.id.clone();
+            let provider = account.provider;
+            let avatar = avatar.clone();
+            let summary_row = summary_row.clone();
+            let title_for_check = summary_row.title().to_string();
+            let on_avatar_cached = callbacks.on_avatar_cached.clone();
+            let handle = gio::spawn_blocking(move || {
+                crate::nextcloud::credentials::CredentialsStore::get_for_account(
+                    &account_for_avatar.id,
+                    &account_for_avatar.server_url,
+                    &account_for_avatar.login_name,
+                )
+                .ok()
+                .flatten()
+                .and_then(|password| {
+                    crate::nextcloud::api::NextcloudApi::new()
+                        .fetch_avatar(
+                            provider,
+                            &account_for_avatar.server_url,
+                            &account_for_avatar.login_name,
+                            &password,
+                        )
+                        .ok()
+                        .flatten()
+                })
+                .inspect(|bytes| {
+                    // Cache for the next startup and the sidebar (best
+                    // effort: a failed write must not discard a valid
+                    // image); the file write stays on the blocking thread.
+                    let _ = crate::util::avatar_cache::store_avatar(&account_for_avatar.id, bytes);
+                })
+            });
+            glib::spawn_future_local(async move {
+                let Ok(Some(bytes)) = handle.await else {
+                    return;
+                };
+                if summary_row.title() != title_for_check {
+                    return;
+                }
+                paint_avatar(&avatar, &bytes);
+                if let Some(callback) = &on_avatar_cached {
+                    callback(&account_id_for_avatar, &bytes);
+                }
             });
         }
 
@@ -474,6 +542,15 @@ impl AccountView {
     }
 }
 
+/// Paint image bytes onto an avatar widget as a circular custom image
+/// (issue #50), keeping the initials fallback when the bytes do not decode.
+fn paint_avatar(avatar: &libadwaita::Avatar, bytes: &[u8]) {
+    let bytes = glib::Bytes::from(bytes);
+    if let Ok(texture) = gtk4::gdk::Texture::from_bytes(&bytes) {
+        avatar.set_custom_image(Some(&texture));
+    }
+}
+
 /// Measure a folder's local used space off the UI thread and paint it into
 /// the row's size suffix (issue #43).
 ///
@@ -525,6 +602,9 @@ pub struct MainWindow {
     content_stack: gtk4::Stack,
     toast_overlay: libadwaita::ToastOverlay,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
+    /// Sidebar avatar widgets by account id, for avatar repaints (issue
+    /// #50); rebuilt together with the rows.
+    avatar_widgets: std::collections::HashMap<String, libadwaita::Avatar>,
     account_view: Option<AccountView>,
     settings_handler: SettingsHandler,
     add_account_handler: AddAccountHandler,
@@ -748,6 +828,7 @@ impl MainWindow {
             content_stack,
             toast_overlay,
             account_rows: std::collections::HashMap::new(),
+            avatar_widgets: std::collections::HashMap::new(),
             account_view: None,
             settings_handler,
             add_account_handler,
@@ -1186,6 +1267,7 @@ impl MainWindow {
     pub fn refresh_sidebar(&mut self) {
         self.accounts_list.remove_all();
         self.account_rows.clear();
+        self.avatar_widgets.clear();
         for account in &self.config.accounts {
             let row = gtk4::ListBoxRow::builder()
                 .activatable(true)
@@ -1199,10 +1281,12 @@ impl MainWindow {
                 .margin_start(8)
                 .margin_end(8)
                 .build();
-            let avatar = gtk4::Image::builder()
-                .icon_name("avatar-default-symbolic")
-                .pixel_size(28)
-                .build();
+            // Issue #50: the cached account avatar when we have one, the
+            // initials fallback when we do not.
+            let avatar = libadwaita::Avatar::new(28, Some(&account.login_name), true);
+            if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
+                paint_avatar(&avatar, &bytes);
+            }
             box_container.append(&avatar);
             let text = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Vertical)
@@ -1225,7 +1309,8 @@ impl MainWindow {
             row.set_child(Some(&box_container));
             let account_id = account.id.clone();
             self.accounts_list.append(&row);
-            self.account_rows.insert(account_id, row);
+            self.account_rows.insert(account_id.clone(), row);
+            self.avatar_widgets.insert(account_id, avatar);
         }
         // Keep the highlight on the active account across rebuilds so a
         // refresh never leaves the sidebar without a selection (issue #49).
@@ -1415,6 +1500,17 @@ impl MainWindow {
                 Some(Rc::new(move || {
                     if let Some(main) = weak.upgrade() {
                         main.borrow_mut().show_add_folder_dialog();
+                    }
+                }))
+            },
+            on_avatar_cached: {
+                let weak = self.self_weak.clone();
+                Some(Rc::new(move |account_id: &str, bytes: &[u8]| {
+                    if let Some(main) = weak.upgrade() {
+                        let main = main.borrow();
+                        if let Some(avatar) = main.avatar_widgets.get(account_id) {
+                            paint_avatar(avatar, bytes);
+                        }
                     }
                 }))
             },
@@ -1714,6 +1810,74 @@ mod tests {
                 eprintln!("skipped: gio trash is unavailable here: {error}");
             }
         }
+    }
+
+    /// A minimal 1x1 PNG (generated with correct chunk CRCs) used to
+    /// exercise the avatar paint path.
+    const AVATAR_PNG: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+        0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    /// The sidebar shows the cached account avatar (issue #50) and paint
+    /// failures keep the initials fallback.
+    #[test]
+    fn sidebar_avatar_uses_the_cached_image() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let _env = crate::util::test_env::lock();
+            let state = tempfile::tempdir().unwrap();
+            std::env::set_var("XDG_STATE_HOME", state.path());
+            crate::util::avatar_cache::store_avatar("acct-avatar-1", AVATAR_PNG).unwrap();
+
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let mut account = window_account();
+            account.folders.clear();
+            account.id = "acct-avatar-1".to_string();
+            let config = Config {
+                accounts: vec![account],
+                ..Config::default()
+            };
+            let window = MainWindow::new(
+                &app,
+                config,
+                ConfigStore::with_path(
+                    std::env::temp_dir()
+                        .join(format!("nextsync-avatar-{}.json", std::process::id())),
+                ),
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            // The account with a cached avatar paints it on the sidebar.
+            assert!(
+                window
+                    .avatar_widgets
+                    .get("acct-avatar-1")
+                    .unwrap()
+                    .custom_image()
+                    .is_some(),
+                "cached avatar is painted on the sidebar"
+            );
+
+            // Decoding failures keep the initials fallback.
+            let fresh = libadwaita::Avatar::new(28, Some("bob"), true);
+            paint_avatar(&fresh, b"not an image");
+            assert!(fresh.custom_image().is_none());
+            paint_avatar(&fresh, AVATAR_PNG);
+            assert!(fresh.custom_image().is_some());
+
+            std::env::remove_var("XDG_STATE_HOME");
+            reset_locale();
+        });
     }
 
     #[test]
