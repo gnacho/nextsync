@@ -1249,37 +1249,50 @@ impl ThemeSelector {
     /// "system" | "light" | "dark" whenever the active circle changes.
     fn new<F: Fn(&str) + 'static>(active_scheme: &str, on_select: F) -> Self {
         static CSS: &str = r#"
+            /* Match GNOME Text Editor's EditorThemeSelector: the checkbutton
+             * itself is the colored circle (44 px touch target), and the radio
+             * indicator becomes a small check badge at the bottom-right when
+             * the option is selected. */
             checkbutton.theme-selector {
                 min-width: 44px;
                 min-height: 44px;
-                padding: 0;
+                padding: 1px;
                 border-radius: 9999px;
-                background-color: alpha(currentColor, 0.15);
+                background-clip: content-box;
+                box-shadow: inset 0 0 0 1px @borders;
+            }
+            checkbutton.theme-selector.follow {
+                background-image: linear-gradient(to bottom right, #fff 49.99%, #202020 50.01%);
+            }
+            checkbutton.theme-selector.light {
+                background-color: #fff;
+            }
+            checkbutton.theme-selector.dark {
+                background-color: #202020;
+            }
+            checkbutton.theme-selector:hover {
+                box-shadow: inset 0 0 0 1px @borders,
+                            0 0 0 3px alpha(currentColor, 0.2);
+            }
+            checkbutton.theme-selector:checked {
+                box-shadow: inset 0 0 0 2px @theme_selected_bg_color;
             }
             checkbutton.theme-selector radio {
-                min-width: 34px;
-                min-height: 34px;
+                min-width: 12px;
+                min-height: 12px;
+                padding: 2px;
+                border: none;
                 border-radius: 9999px;
-                background: white;
-                border: 1px solid alpha(black, 0.4);
-                box-shadow: 0 1px 2px alpha(black, 0.3);
+                background: none;
+                box-shadow: none;
                 -gtk-icon-source: none;
+                transform: translate(27px, 14px);
                 transition: all 150ms ease;
             }
-            checkbutton.theme-selector.light radio { background: white; }
-            checkbutton.theme-selector.dark radio { background: #1e1e1e; border-color: #444; }
-            checkbutton.theme-selector.follow radio {
-                background: linear-gradient(90deg, white 50%, #1e1e1e 50%);
-            }
-            checkbutton.theme-selector:hover radio { box-shadow: 0 0 0 3px alpha(currentColor, 0.2); }
             checkbutton.theme-selector radio:checked {
                 -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
-                color: @theme_selected_fg_color;
                 background-color: @theme_selected_bg_color;
-                border-color: transparent;
-            }
-            checkbutton.theme-selector.follow radio:checked {
-                background: @theme_selected_bg_color;
+                color: @theme_selected_fg_color;
             }
         "#;
         let provider = gtk4::CssProvider::new();
