@@ -27,20 +27,20 @@
 //!   space by default; the remote field normalizes like Nextcloud's (blank or
 //!   `/` = the space root, which omits the `--remote-folder` flag).
 //! - **OpenCloud credential check**: OpenCloud has no OCS user endpoint, so
-//!   the wizard validates username + app token with a shallow PROPFIND on
-//!   `/remote.php/dav/spaces/` (`NextcloudApi::validate_opencloud_credentials`),
-//!   the WebDAV entry point the OpenCloud docs document for external clients
-//!   (`Basic user:app-token`). 401/403 surface as a rejected-credentials
-//!   error, same as Nextcloud.
-//! - **Space discovery**: for OpenCloud the spaces are listed natively with a
-//!   Depth-1 PROPFIND on the same WebDAV tree
-//!   (`NextcloudApi::list_opencloud_spaces`; id = last href segment, name =
-//!   `<d:displayname>`). The `opencloudcmd <url>` query mode
+//!   the wizard validates username + app token against the LibreGraph API
+//!   (`GET /graph/v1.0/me`, `Basic user:app-token`; verified against a real
+//!   deployment, which also returns the display name). 401/403 surface as a
+//!   rejected-credentials error, same as Nextcloud.
+//! - **Space discovery**: for OpenCloud the spaces are listed through
+//!   LibreGraph (`NextcloudApi::list_opencloud_spaces`, `GET
+//!   /graph/v1.0/drives`; the user's own personal space plus project spaces;
+//!   other users' personal spaces and the virtual shares aggregate are
+//!   excluded). The `opencloudcmd <url>` query mode
 //!   (`opencloud_list_spaces`, parsing the `Short ID | DisplayName | ID`
-//!   table verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp`) remains as a
-//!   fallback. The id is editable per folder in the Add Folder dialog; when
-//!   none is found the folder keeps `space_id: None` (the driver requires a
-//!   space id, so such a folder cannot sync until it is set).
+//!   table verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp`) remains as
+//!   a fallback. The id is editable per folder in the Add Folder dialog;
+//!   when none is found the folder keeps `space_id: None` (the driver
+//!   requires a space id, so such a folder cannot sync until it is set).
 //! - **Not the app's main window**: the Python wizard is the first-run main
 //!   window and quits the application on close. In the rewrite it is a
 //!   secondary window opened from the main window, so closing it does not quit
