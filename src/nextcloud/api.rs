@@ -15,6 +15,13 @@
 //!   removed.
 //! - [`NextcloudApi::notifications`]: list the account's server notifications
 //!   (shares, comments, mentions) for desktop notifications.
+//! - [`NextcloudApi::validate_opencloud_credentials`] /
+//!   [`NextcloudApi::list_opencloud_spaces`] /
+//!   [`NextcloudApi::probe_opencloud_space`]: OpenCloud has no OCS API, so its
+//!   helpers talk to the WebDAV tree the OpenCloud docs document for external
+//!   clients (`/remote.php/dav/spaces/`, `Basic user:app-token`): validation,
+//!   native space listing (id = last href segment, name = `<d:displayname>`)
+//!   and a space probe equivalent to [`NextcloudApi::probe_remote`].
 //!
 //! # HTTP client choice (verified)
 //!
@@ -129,6 +136,15 @@ impl AccountSummary {
     }
 }
 
+/// One OpenCloud space discovered over WebDAV.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenCloudSpace {
+    /// The space id (`--space` argument of `opencloudcmd`, a UUID).
+    pub id: String,
+    /// The space display name (`<d:displayname>`), when the server sends it.
+    pub display_name: Option<String>,
+}
+
 /// One server notification (shares, comments, mentions) from the OCS
 /// notifications endpoint. Only the fields needed for a desktop notification
 /// are parsed.
@@ -182,6 +198,8 @@ struct PropfindEntry {
     href_path: String,
     /// Whether the resource is a collection (`<d:collection/>`).
     is_collection: bool,
+    /// `<d:displayname>` of the first propstat, when present.
+    display_name: Option<String>,
 }
 
 /// Nextcloud HTTP API client (remote folder picker + setup wizard).
@@ -394,6 +412,111 @@ impl NextcloudApi {
         Ok(folders)
     }
 
+    /// Validate OpenCloud credentials (username + app token) against the
+    /// documented WebDAV endpoint for external clients.
+    ///
+    /// OpenCloud keeps the `/remote.php/dav/` tree and authenticates
+    /// `Basic user:app-token` through its app-password authenticator, so a
+    /// shallow PROPFIND on the spaces root is the cheapest verified probe.
+    /// Returns `Ok(None)` (no display-name at this level); 401/403 map to
+    /// [`ApiError::AuthRejected`].
+    pub fn validate_opencloud_credentials(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let url = format!("{}/remote.php/dav/spaces/", server.trim_end_matches('/'));
+        self.spaces_propfind(&url, username, token)?;
+        Ok(None)
+    }
+
+    /// List the spaces the account can synchronize (native WebDAV).
+    ///
+    /// A Depth-1 PROPFIND on `/remote.php/dav/spaces/` returns one
+    /// collection per space; the space id is the last href segment and the
+    /// display name comes from `<d:displayname>` when the server sends it.
+    pub fn list_opencloud_spaces(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Vec<OpenCloudSpace>, ApiError> {
+        let url = format!("{}/remote.php/dav/spaces/", server.trim_end_matches('/'));
+        let root_path = href_path_of(&url).to_owned();
+        let entries = self.spaces_propfind(&url, username, token)?;
+        let mut spaces = Vec::new();
+        for entry in entries {
+            if !entry.is_collection || entry.href_path == root_path {
+                continue;
+            }
+            let id = entry
+                .href_path
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            if id.is_empty() {
+                continue;
+            }
+            spaces.push(OpenCloudSpace {
+                id,
+                display_name: entry.display_name,
+            });
+        }
+        spaces.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(spaces)
+    }
+
+    /// Probe whether an OpenCloud space holds at least one entry.
+    ///
+    /// Mirrors [`NextcloudApi::probe_remote`] for OpenCloud folders, which
+    /// map a whole space (`remote_path` is the optional `--remote-folder`
+    /// subpath handled by the engine, not a WebDAV files/ path).
+    pub fn probe_opencloud_space(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+        space_id: &str,
+    ) -> Result<bool, ApiError> {
+        let space = space_id.trim_matches('/');
+        if space.is_empty() {
+            return Ok(false);
+        }
+        let url = format!(
+            "{}/remote.php/dav/spaces/{space}/",
+            server.trim_end_matches('/')
+        );
+        let space_path = href_path_of(&url).to_owned();
+        let entries = self.spaces_propfind(&url, username, token)?;
+        let children = entries
+            .iter()
+            .filter(|entry| entry.href_path != space_path)
+            .count();
+        Ok(children > 0)
+    }
+
+    /// Shared Depth-1 PROPFIND used by the OpenCloud helpers.
+    fn spaces_propfind(
+        &self,
+        url: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<Vec<PropfindEntry>, ApiError> {
+        let authorization = basic_authorization(username, token);
+        let headers = [
+            ("Depth", "1"),
+            ("Content-Type", "application/xml; charset=utf-8"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self
+            .http
+            .request("PROPFIND", url, &headers, Some(PROPFIND_BODY))?;
+        map_status(response.status)?;
+        parse_multistatus(&response.body)
+    }
+
     /// Revoke the app password used for this session.
     ///
     /// Port of `revoke_app_password` (`api.py`): a `DELETE` against
@@ -574,12 +697,36 @@ fn parse_multistatus(body: &[u8]) -> Result<Vec<PropfindEntry>, ApiError> {
                     .any(|node| node.has_tag_name((DAV_NS, "collection")))
             })
             .unwrap_or(false);
+        let display_name = find_property(response, "displayname")
+            .and_then(|node| node.text())
+            .map(|text| text.trim().to_owned())
+            .filter(|text| !text.is_empty());
         entries.push(PropfindEntry {
             href_path,
             is_collection,
+            display_name,
         });
     }
     Ok(entries)
+}
+
+/// Find a `<d:propstat>/<d:prop>/<d:{name}>` node of a response.
+///
+/// Only the first propstat is inspected (same convention as
+/// [`find_resource_type`]).
+fn find_property<'a, 'input>(response: Node<'a, 'input>, name: &str) -> Option<Node<'a, 'input>> {
+    response
+        .descendants()
+        .find(|node| node.has_tag_name((DAV_NS, "propstat")))
+        .and_then(|propstat| {
+            propstat
+                .descendants()
+                .find(|node| node.has_tag_name((DAV_NS, "prop")))
+        })
+        .and_then(|prop| {
+            prop.descendants()
+                .find(|node| node.has_tag_name((DAV_NS, name)))
+        })
 }
 
 /// Find the `<d:propstat>/<d:prop>/<d:resourcetype>` node of a response.
@@ -776,6 +923,70 @@ mod tests {
 </d:multistatus>"#;
 
     const USER_JSON: &[u8] = br#"{"ocs":{"data":{"id":"alice","display-name":"Alice Example"}}}"#;
+
+    const SPACES_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/spaces/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:resourcetype><d:collection/></d:resourcetype>
+        <d:displayname>alice</d:displayname>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/spaces/9c4b0c8a-3a1d-4b6e-8f2a-111111111111/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/readme.md</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const SPACE_ROOT_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/Documents/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const SPACE_EMPTY_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
 
     /// Deterministic fake transport, mirroring the Python `_FakeHttp`.
     #[derive(Default)]
@@ -1058,6 +1269,118 @@ mod tests {
             api.list_remote_folders("https://cloud.example.com", "alice", "secret"),
             Err(ApiError::InvalidResponse)
         );
+    }
+
+    // ---- OpenCloud credentials / spaces -----------------------------------
+
+    #[test]
+    fn validate_opencloud_hits_the_spaces_webdav_endpoint() {
+        let http = FakeHttp::new(207, SPACES_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.validate_opencloud_credentials("https://cloud.example.com", "alice", "token"),
+            Ok(None)
+        );
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "PROPFIND");
+        assert!(request.url.ends_with("/remote.php/dav/spaces/"));
+        assert_eq!(header_value(request, "Depth"), Some("1"));
+        assert!(header_value(request, "Authorization")
+            .unwrap()
+            .starts_with("Basic "));
+    }
+
+    #[test]
+    fn validate_opencloud_rejects_a_bad_token() {
+        let http = FakeHttp::new(401, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.validate_opencloud_credentials("https://cloud.example.com", "alice", "token"),
+            Err(ApiError::AuthRejected)
+        );
+    }
+
+    #[test]
+    fn validate_opencloud_http_error_surfaces() {
+        let http = FakeHttp::new(500, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.validate_opencloud_credentials("https://cloud.example.com", "alice", "token"),
+            Err(ApiError::Http { status: 500 })
+        );
+    }
+
+    #[test]
+    fn list_opencloud_spaces_returns_collections_with_names() {
+        let http = FakeHttp::new(207, SPACES_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let spaces = api
+            .list_opencloud_spaces("https://cloud.example.com", "alice", "token")
+            .unwrap();
+        assert_eq!(
+            spaces,
+            [
+                OpenCloudSpace {
+                    id: "1284d238-aa92-42ce-bdc4-426446b3c735".to_owned(),
+                    display_name: Some("alice".to_owned()),
+                },
+                OpenCloudSpace {
+                    id: "9c4b0c8a-3a1d-4b6e-8f2a-111111111111".to_owned(),
+                    display_name: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn list_opencloud_spaces_malformed_xml_surfaces() {
+        let http = FakeHttp::new(207, b"not xml");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.list_opencloud_spaces("https://cloud.example.com", "alice", "token"),
+            Err(ApiError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn probe_opencloud_space_counts_children() {
+        let http = FakeHttp::new(207, SPACE_ROOT_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(api
+            .probe_opencloud_space(
+                "https://cloud.example.com",
+                "alice",
+                "token",
+                "1284d238-aa92-42ce-bdc4-426446b3c735"
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn probe_opencloud_empty_space_returns_false() {
+        let http = FakeHttp::new(207, SPACE_EMPTY_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(!api
+            .probe_opencloud_space(
+                "https://cloud.example.com",
+                "alice",
+                "token",
+                "1284d238-aa92-42ce-bdc4-426446b3c735"
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn probe_opencloud_space_without_id_is_false() {
+        let http = FakeHttp::new(207, SPACE_EMPTY_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.probe_opencloud_space("https://cloud.example.com", "alice", "token", ""),
+            Ok(false)
+        );
+        assert!(requests.borrow().is_empty());
     }
 
     #[test]
