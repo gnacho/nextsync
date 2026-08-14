@@ -40,9 +40,13 @@ use std::rc::Rc;
 use libadwaita::prelude::*;
 
 use crate::core::desktop_integration::DesktopIntegration;
+use crate::core::sync_safety::{
+    local_folder_is_empty, review_required, stale_artifact_names, FirstSyncFacts,
+};
 use crate::core::triggers::TriggerSettings;
 use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::credentials::CredentialsStore;
+use crate::nextcloud::driver::Provider;
 use crate::storage::config::{
     default_sync_root, expanduser, remote_path_for, validate_pattern, AccountConfig, Config,
     ConfigError, ConfigStore, FolderConfig, GeneralConfig, LoggingConfig, DEFAULT_PATTERNS,
@@ -1091,20 +1095,22 @@ pub fn present_add_folder_dialog(
         let outcome = if !root.is_absolute() {
             Err(ConfigError::new(t("Choose an absolute local folder.")))
         } else {
-            remote_path_for(&local_root, &remote_text).and_then(|remote| {
-                store_for_response.add_folder(
-                    &account_id_for_response,
-                    &FolderConfig {
-                        id: String::new(),
-                        local_root: root.to_string_lossy().into_owned(),
-                        remote_path: remote,
-                        space_id: None,
-                    },
-                )
-            })
+            remote_path_for(&local_root, &remote_text)
         };
         match outcome {
-            Ok(_) => on_folder_added_for_response(),
+            Ok(remote) => {
+                // Issue #35: probe both sides and review the facts (merge,
+                // previously synchronized folder) before committing.
+                review_then_add_folder(
+                    store_for_response.clone(),
+                    account_id_for_response.clone(),
+                    root.to_string_lossy().into_owned(),
+                    remote,
+                    &parent_for_response,
+                    on_folder_added_for_response.clone(),
+                    on_error_for_response.clone(),
+                );
+            }
             Err(error) => {
                 let message = error.to_string();
                 on_error_for_response(message.clone());
@@ -1124,6 +1130,122 @@ pub fn present_add_folder_dialog(
     });
 
     dialog.present(Some(parent));
+}
+
+/// Probe the folder pair and run the blocking first-sync review (issue #35)
+/// before committing a new folder added through the Add Folder dialog.
+///
+/// The probe mirrors the wizard's: remote emptiness over a shallow WebDAV
+/// PROPFIND (or the OpenCloud space probe, reusing the space of the
+/// account's existing folders when the dialog carried none). Unknown
+/// remote state or missing credentials degrade to a direct add, exactly
+/// like the wizard falls through to `finish_setup`.
+fn review_then_add_folder(
+    store: ConfigStore,
+    account_id: String,
+    local_root: String,
+    remote_path: String,
+    parent: &gtk4::Widget,
+    on_folder_added: Rc<dyn Fn()>,
+    on_error: Rc<dyn Fn(String)>,
+) {
+    let Some(account) = store.account(&account_id).ok().flatten() else {
+        return;
+    };
+    let server = account.server_url.clone();
+    let login = account.login_name.clone();
+    let provider = account.provider;
+    // The Add Folder dialog does not edit spaces; an OpenCloud folder can
+    // only reuse the space already configured for the account.
+    let space_id = if provider == Provider::OpenCloud {
+        account.folders.iter().find_map(|f| f.space_id.clone())
+    } else {
+        None
+    };
+    let remote_for_probe = remote_path.clone();
+    let account_id_for_probe = account_id.clone();
+    let probe = gio::spawn_blocking(move || -> Option<bool> {
+        let password = CredentialsStore::get_for_account(&account_id_for_probe, &server, &login)
+            .ok()
+            .flatten()?;
+        let api = NextcloudApi::new();
+        match provider {
+            Provider::OpenCloud => {
+                let space = space_id?;
+                api.probe_opencloud_space(&server, &login, &password, &space)
+                    .ok()
+            }
+            Provider::Nextcloud => api
+                .probe_remote(&server, &login, &password, &remote_for_probe)
+                .ok(),
+        }
+    });
+
+    let local_root_for_facts = local_root.clone();
+    let parent = parent.clone();
+    let store_for_commit = store.clone();
+    let account_id_for_commit = account_id.clone();
+    let on_folder_added_for_commit = on_folder_added.clone();
+    glib::spawn_future_local(async move {
+        let remote_empty: Option<bool> = match probe.await {
+            Ok(has_children) => has_children.map(|children| !children),
+            Err(_) => None,
+        };
+        let facts = FirstSyncFacts {
+            local_empty: local_folder_is_empty(&local_root_for_facts),
+            remote_empty,
+            journal_names: stale_artifact_names(&expanduser(&local_root_for_facts)),
+        };
+        let commit = {
+            let store = store_for_commit.clone();
+            let account_id = account_id_for_commit.clone();
+            let local_root = local_root_for_facts.clone();
+            let remote_path = remote_path.clone();
+            let on_folder_added = on_folder_added_for_commit.clone();
+            let on_error = on_error.clone();
+            let parent = parent.clone();
+            Rc::new(move |fresh: crate::ui::safety_review::FreshStart| {
+                crate::ui::safety_review::apply_fresh_start(&local_root, fresh);
+                match store.add_folder(
+                    &account_id,
+                    &FolderConfig {
+                        id: String::new(),
+                        local_root: local_root.clone(),
+                        remote_path: remote_path.clone(),
+                        space_id: None,
+                    },
+                ) {
+                    Ok(_) => on_folder_added(),
+                    Err(error) => {
+                        let message = error.to_string();
+                        on_error(message.clone());
+                        present_add_folder_dialog(
+                            store.clone(),
+                            account_id.clone(),
+                            &parent,
+                            on_folder_added.clone(),
+                            on_error.clone(),
+                            Some((local_root.clone(), remote_path.clone())),
+                            Some(message),
+                        );
+                    }
+                }
+            })
+        };
+        if review_required(&facts) {
+            crate::ui::safety_review::present_first_sync_review(
+                &parent,
+                t("Add Folder"),
+                t("Start synchronizing this folder now?"),
+                &facts,
+                t("Cancel"),
+                commit,
+                Rc::new(|| {}),
+            );
+        } else {
+            commit(crate::ui::safety_review::FreshStart::No);
+        }
+    });
 }
 
 /// Present a folder chooser and write the selection into the entry row.

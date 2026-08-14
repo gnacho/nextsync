@@ -114,6 +114,12 @@ struct SchedulerInner {
     keyring_locked: bool,
     delete_alert: Option<DeleteAlert>,
     delete_bypass_once: bool,
+    /// Canonical local root this scheduler reconciles (issue #35): drives
+    /// the overlap-aware permit acquisition and the external-engine scan.
+    local_root: Option<std::path::PathBuf>,
+    /// Where to scan for external engine processes; `None` means the real
+    /// `/proc` (injectable for tests).
+    proc_scan_root: Option<std::path::PathBuf>,
 }
 
 impl Scheduler {
@@ -152,6 +158,8 @@ impl Scheduler {
             keyring_locked: false,
             delete_alert: None,
             delete_bypass_once: false,
+            local_root: None,
+            proc_scan_root: None,
         };
         let inner = Rc::new(RefCell::new(inner));
         {
@@ -201,6 +209,19 @@ impl Scheduler {
     /// guard is a filesystem walk, so it runs inline on the main loop.
     pub fn set_guard(&self, guard: Option<Box<dyn GuardCheck>>) {
         self.inner.borrow_mut().guard = guard;
+    }
+
+    /// Declare the local root this scheduler reconciles (issue #35). The
+    /// root makes the permit acquisition overlap-aware and enables the
+    /// external-engine scan before every run.
+    pub fn set_local_root(&self, local_root: Option<std::path::PathBuf>) {
+        self.inner.borrow_mut().local_root = local_root;
+    }
+
+    /// Override the procfs directory scanned for external engine processes.
+    /// Production leaves this unset (the real `/proc`); tests inject a fake.
+    pub fn set_proc_scan_root(&self, proc_scan_root: Option<std::path::PathBuf>) {
+        self.inner.borrow_mut().proc_scan_root = proc_scan_root;
     }
 
     /// Replace the per-run completion callback (called once per finished run
@@ -419,8 +440,36 @@ impl SchedulerInner {
 
     fn begin_run(&mut self, reasons: Vec<Trigger>) {
         self.preparing = false;
+        // Issue #35: never race an external engine over the same tree. The
+        // scan is a cheap /proc walk; on a hit the run aborts with a clear
+        // error and the triggers stay queued for a later attempt.
+        if let Some(root) = self.local_root.clone() {
+            let engine = match &self.proc_scan_root {
+                Some(directory) => crate::core::proc_scan::find_external_engine_on_root_in(
+                    directory,
+                    std::process::id(),
+                    &root,
+                ),
+                None => crate::core::proc_scan::find_external_engine_on_root(&root),
+            };
+            if let Some(engine) = engine {
+                self.queue.extend(reasons.iter().copied());
+                let message = t(
+                    "Another synchronization engine ({name}) is already running on this folder. Close it and try again.",
+                )
+                .replacen("{name}", &engine, 1);
+                self.state.set(AppState::Error, message);
+                return;
+            }
+        }
         if let Some(permit) = &self.permit {
-            if !permit.try_acquire() {
+            // Issue #35: acquire for the local root when known so another
+            // scheduler on an overlapping folder is queued instead of run.
+            let acquired = match &self.local_root {
+                Some(root) => permit.try_acquire_root(root),
+                None => permit.try_acquire(),
+            };
+            if !acquired {
                 self.queue.extend(reasons.iter().copied());
                 self.state.set(
                     AppState::SyncQueued,
@@ -908,6 +957,68 @@ mod tests {
         run_idle(&source_first);
         assert_eq!(runner_first.0.borrow().start_calls, 1);
 
+        second.request(Trigger::Manual);
+        run_idle(&source_second);
+        assert_eq!(runner_second.0.borrow().start_calls, 0);
+        assert_eq!(second.queue_len(), 1);
+
+        finish(&runner_first, SyncOutcome::Success);
+        // The waiter defers through an idle on the second scheduler.
+        assert_eq!(source_second.borrow().pending(), 1);
+        run_idle(&source_second);
+        assert_eq!(runner_second.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn external_engine_on_the_folder_aborts_the_run_with_a_clear_error() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let folder = tempfile::tempdir().expect("tempdir");
+        scheduler.set_local_root(Some(folder.path().to_path_buf()));
+        let proc = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(proc.path().join("7")).expect("mkdir");
+        let mut cmdline = b"/usr/bin/nextcloudcmd\0".to_vec();
+        cmdline.extend_from_slice(folder.path().to_string_lossy().as_bytes());
+        cmdline.push(0);
+        std::fs::write(proc.path().join("7").join("cmdline"), cmdline).expect("write");
+        scheduler.set_proc_scan_root(Some(proc.path().to_path_buf()));
+
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        // The run never starts; the triggers stay queued and the state
+        // carries the external-engine error.
+        assert_eq!(runner.0.borrow().start_calls, 0);
+        assert_eq!(scheduler.queue_len(), 1);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Error);
+        let message = scheduler.state().snapshot().message.clone();
+        assert!(message.contains("nextcloudcmd"), "message was: {message}");
+    }
+
+    #[test]
+    fn scheduler_without_local_root_ignores_the_engine_scan() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        // No local root declared: the scan never runs even with a live
+        // engine process pointing at some unrelated folder.
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn overlapping_folder_waits_for_the_permit_even_with_free_slots() {
+        let permit = SyncPermit::try_new(2).unwrap();
+        let root = tempfile::tempdir().expect("tempdir");
+        let child = root.path().join("child");
+        let (first, source_first, runner_first) = make_scheduler(Some(permit.clone()));
+        first.set_local_root(Some(root.path().to_path_buf()));
+        let (second, source_second, runner_second) = make_scheduler(Some(permit));
+        second.set_local_root(Some(child));
+
+        first.request(Trigger::Manual);
+        run_idle(&source_first);
+        assert_eq!(runner_first.0.borrow().start_calls, 1);
+
+        // The child folder overlaps the running root: queued, not started,
+        // even though the permit still has a free slot.
         second.request(Trigger::Manual);
         run_idle(&source_second);
         assert_eq!(runner_second.0.borrow().start_calls, 0);

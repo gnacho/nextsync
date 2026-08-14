@@ -2214,3 +2214,27 @@ msgstr "Estilo oscuro"
 #: src/ui/settings.rs
 msgid "Desktop Integration"
 msgstr "Integración con el escritorio"
+
+#: src/core/scheduler.rs
+msgid "Another synchronization engine ({name}) is already running on this folder. Close it and try again."
+msgstr "Otro motor de sincronización ({name}) ya está funcionando en esta carpeta. Ciérralo e inténtalo de nuevo."
+
+#: src/core/sync_safety.rs
+msgid "Both the local folder and the remote folder contain files. Confirm that you want to merge their contents."
+msgstr "Tanto la carpeta local como la remota contienen archivos. Confirma que quieres fusionar su contenido."
+
+#: src/core/sync_safety.rs
+msgid "This folder was synchronized before. Hidden sync journal files were found: {names}. They record what the engine already transferred. Starting fresh moves them to the trash and re-downloads from the server; keeping them resumes the previous sync history."
+msgstr "Esta carpeta se sincronizó anteriormente. Se encontraron archivos ocultos de registro de sincronización: {names}. Registran lo que el motor ya transfirió. Empezar de cero los mueve a la papelera y vuelve a descargar todo del servidor; mantenerlos reanuda el historial de sincronización anterior."
+
+#: src/ui/safety_review.rs
+msgid "Keep Synchronization History"
+msgstr "Mantener el historial de sincronización"
+
+#: src/ui/safety_review.rs
+msgid "Start Fresh"
+msgstr "Empezar de cero"
+
+#: src/ui/settings.rs
+msgid "Start synchronizing this folder now?"
+msgstr "¿Empezar a sincronizar esta carpeta ahora?"

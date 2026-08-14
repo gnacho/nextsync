@@ -60,6 +60,7 @@ use gio::AppInfo;
 use glib::ControlFlow;
 use libadwaita::prelude::*;
 
+use crate::core::sync_safety::local_folder_is_empty;
 use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::command::find_binary;
 use crate::nextcloud::credentials::CredentialsStore;
@@ -1315,21 +1316,52 @@ fn present_first_sync_dialog(
         let state = ctx.state.borrow();
         (state.folders.len(), folders_short_names(&state.folders))
     };
+    // Issue #35: the review also inspects the local roots for engine
+    // journals, so a previously synchronized folder is always confirmed and
+    // a merge of two populated trees is stated explicitly.
+    let journal_names = {
+        let state = ctx.state.borrow();
+        let mut names: Vec<String> = state
+            .folders
+            .iter()
+            .flat_map(|folder| {
+                crate::core::sync_safety::stale_artifact_names(&expanduser(&folder.local_root))
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    let facts = crate::core::sync_safety::FirstSyncFacts {
+        local_empty,
+        remote_empty: Some(remote_empty),
+        journal_names,
+    };
     let body = first_sync_body(&account, count, &folder_label, local_empty, remote_empty);
-    let dialog = libadwaita::AlertDialog::new(Some(t("Start Synchronizing?")), Some(&body));
-    dialog.add_response("back", t("Back to setup"));
-    dialog.add_response("start", t("Start"));
-    dialog.set_response_appearance("start", libadwaita::ResponseAppearance::Suggested);
-    let window = ctx.window.clone();
-    let ctx = ctx.clone();
-    dialog.connect_response(None, move |_dialog, response| {
-        if response == "start" {
-            finish_setup(&ctx);
-        } else {
-            ctx.stack.set_visible_child_name("folders");
+    let local_roots: Vec<String> = ctx
+        .state
+        .borrow()
+        .folders
+        .iter()
+        .map(|folder| folder.local_root.clone())
+        .collect();
+    let ctx_for_decision = ctx.clone();
+    let on_decision = Rc::new(move |fresh: crate::ui::safety_review::FreshStart| {
+        for root in &local_roots {
+            crate::ui::safety_review::apply_fresh_start(root, fresh);
         }
+        finish_setup(&ctx_for_decision);
     });
-    dialog.present(Some(&window));
+    let ctx_for_cancel = ctx.clone();
+    crate::ui::safety_review::present_first_sync_review(
+        ctx.window.upcast_ref::<gtk4::Widget>(),
+        t("Start Synchronizing?"),
+        &body,
+        &facts,
+        t("Back to setup"),
+        on_decision,
+        Rc::new(move || ctx_for_cancel.stack.set_visible_child_name("folders")),
+    );
 }
 
 /// Create the local roots, persist the account and the TLS trust choice, then
@@ -1498,15 +1530,6 @@ fn validate_add_folder(
         remote_path,
         space_id,
     })
-}
-
-/// Whether a local folder exists and is empty; unreadable folders count as
-/// non-empty (mirrors the Python `_local_folder_is_empty`).
-fn local_folder_is_empty(local_root: &str) -> bool {
-    match std::fs::read_dir(expanduser(local_root)) {
-        Ok(mut entries) => entries.next().is_none(),
-        Err(_) => false,
-    }
 }
 
 /// Comma-separated base names of the local folders (Python `", ".join(...)`).

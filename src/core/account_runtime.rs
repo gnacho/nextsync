@@ -213,6 +213,10 @@ impl FolderRuntime {
             sync_permit,
             None,
         );
+        // Issue #35: the scheduler knows which local tree it reconciles so
+        // the permit can queue overlapping folders and the external-engine
+        // scan can guard the same root.
+        scheduler.set_local_root(Some(std::path::PathBuf::from(&folder.local_root)));
         if account.delete_guard.enabled {
             scheduler.set_guard(Some(Box::new(DeleteGuard::for_folder(account, &folder))));
         }
