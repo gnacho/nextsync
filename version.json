@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "mandatory": false,
-  "summary": "First Rust rewrite milestone: folder-focused main window, settings, setup wizard, tray, conflict resolver and i18n.",
+  "summary": "Parity and reliability pass: live sync wired end to end (filesystem watcher, notify_push, per-file progress, activity log), deletion-review dialog, Show Log, and portable release binaries.",
   "changelog": [
-    "Folder-focused main window with per-folder live status and menus.",
-    "Settings window with remote folder picker and typed account removal.",
-    "Setup wizard with Nextcloud and OpenCloud provider selection.",
-    "StatusNotifier tray, sync activity/conflicts window and live log.",
-    "Spanish translation embedded; English fallback."
+    "Filesystem changes now trigger automatic synchronization (per-folder watcher).",
+    "notify_push connects at startup, so remote changes sync instantly instead of polling.",
+    "Live per-file progress and an activity log fed from every finished synchronization.",
+    "Deletion-guard alerts open a review dialog (Keep Paused / Restore / Approve once).",
+    "Show Log button in the header and a complete per-folder menu (Edit ignored files, Remove).",
+    "Release binaries are portable: no host-specific instructions (fixes crashes on CPUs without AVX-512)."
   ],
-  "released_at": "2026-08-13T20:30:00Z"
+  "released_at": "2026-08-14T10:00:00Z"
 }
