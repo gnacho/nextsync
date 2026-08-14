@@ -1941,6 +1941,22 @@ msgstr "Sesión iniciada."
 msgid "Could not verify the credentials."
 msgstr "No se han podido verificar las credenciales."
 
+#: src/core/account_runtime.rs
+msgid "Synchronization completed"
+msgstr "Sincronización completada"
+
+#: src/core/account_runtime.rs
+msgid "Synchronization completed with conflicts"
+msgstr "Sincronización completada con conflictos"
+
+#: src/core/account_runtime.rs
+msgid "Synchronization failed: credentials rejected"
+msgstr "Sincronización fallida: credenciales rechazadas"
+
+#: src/core/scheduler.rs
+msgid "Synchronization failed — view the log"
+msgstr "Error de sincronización — consulta el registro"
+
 #~ msgid "Connected. Add folders from Settings."
 #~ msgstr "Conectado. Añade carpetas desde Ajustes."
 

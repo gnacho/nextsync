@@ -12,6 +12,8 @@ use libadwaita::prelude::*;
 
 use nextsync::core::account_runtime::AccountManager;
 use nextsync::core::debounce::GlibTimeoutSource;
+use nextsync::nextcloud::credentials::CredentialsStore;
+use nextsync::nextcloud::push::NotifyPushClient;
 use nextsync::state::StateSnapshot;
 use nextsync::storage::config::ConfigStore;
 use nextsync::ui::main_window::MainWindow;
@@ -63,11 +65,50 @@ fn main() {
 
             let source: Rc<RefCell<dyn nextsync::core::debounce::TimeoutSource>> =
                 Rc::new(RefCell::new(GlibTimeoutSource::new()));
+            let logger = nextsync::core::log::LogBuffer::new();
             let mut account_manager = AccountManager::new(source);
             account_manager.start(&config);
             let aggregate = account_manager.aggregate_state();
+            // Start the per-folder filesystem watchers and progress forwarders
+            // (main-loop consumers, production only).
+            account_manager.connect_all_glue();
+            // Feed the activity/recent log from every folder's finished runs.
+            for runtime in account_manager.runtimes().values() {
+                runtime.connect_logger(&logger);
+            }
 
-            let logger = nextsync::core::log::LogBuffer::new();
+            // Wire notify_push for every account that has a push client,
+            // resolving the keyring password off the main thread so the
+            // startup stays instant. A locked/missing credential just leaves
+            // the client disabled (remote_interval still polls). The client
+            // handle is shared with the runtime, so configuring the clone
+            // reaches the running push channel.
+            {
+                let push_clients: Vec<(NotifyPushClient, String, String, bool)> = account_manager
+                    .runtimes()
+                    .values()
+                    .filter_map(|runtime| {
+                        runtime.push_client().map(|client| {
+                            (
+                                client,
+                                runtime.account.server_url.clone(),
+                                runtime.account.login_name.clone(),
+                                runtime.account.sync.remote_push_enabled,
+                            )
+                        })
+                    })
+                    .collect();
+                for (client, server, username, enabled) in push_clients {
+                    let keyring_user = username.clone();
+                    let task = gio::spawn_blocking(move || CredentialsStore::get(&keyring_user));
+                    glib::spawn_future_local(async move {
+                        if let Ok(Ok(Some(password))) = task.await {
+                            client.configure(&server, &username, &password, enabled);
+                        }
+                    });
+                }
+            }
+
             // `show_about` lives on `MainWindow`, so it needs the shared cell
             // that does not exist until the `Rc` is built. `new_cyclic` hands
             // us a `Weak` during construction so the header-button callback can
