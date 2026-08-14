@@ -20,12 +20,14 @@ use std::rc::Rc;
 
 use crate::core::debounce::TimeoutSource;
 use crate::core::delete_guard::DeleteGuard;
+use crate::core::exclusions::ExclusionMatcher;
 use crate::core::network::NetworkWatcher;
 use crate::core::power::PowerWatcher;
 use crate::core::scheduler::{DeleteAlert, Scheduler, SyncRunner};
 use crate::core::suspend::SuspendWatcher;
 use crate::core::sync_permit::SyncPermit;
 use crate::core::triggers::Trigger;
+use crate::core::watcher::{FsWatcher, WatcherEvent};
 use crate::nextcloud::push::{remote_push_supported, NotifyPushClient};
 use crate::nextcloud::sync_engine::{SyncEngine, SyncProgress};
 use crate::state::{AggregateStateController, AppState, PushState, StateController};
@@ -150,19 +152,25 @@ pub struct FolderRuntime {
     scheduler: Scheduler,
     timers: crate::core::scheduler::SyncTimers,
     progress_rx: Option<async_channel::Receiver<SyncProgress>>,
+    /// Live filesystem watcher feeding `Trigger::LocalInotify`, when enabled.
+    ///
+    /// The watcher itself is moved into [`Self::watcher_task`]'s closure (it
+    /// is not `Clone`); the task owns it and keeps it alive.
+    watcher_task: Option<glib::JoinHandle<()>>,
 }
 
 impl Clone for FolderRuntime {
     fn clone(&self) -> Self {
         // The clone keeps the live state and scheduler (shared by Rc); the
-        // interval timers are rebuilt unarmed and the progress receiver is not
-        // moved — the original runtime owns it.
+        // interval timers are rebuilt unarmed, the progress receiver and the
+        // watcher task are not moved — the original runtime owns them.
         Self {
             folder: self.folder.clone(),
             state: self.state.clone(),
             scheduler: self.scheduler.clone(),
             timers: self.scheduler.timers(),
             progress_rx: None,
+            watcher_task: None,
         }
     }
 }
@@ -204,7 +212,47 @@ impl FolderRuntime {
             scheduler,
             timers,
             progress_rx,
+            watcher_task: None,
         }
+    }
+
+    /// Start the filesystem watcher for this folder, when local inotify is
+    /// enabled, and forward its events to the scheduler on the main loop.
+    ///
+    /// Must be called once from the thread owning the main context (the app
+    /// startup, never inside unit tests). `local_root` must exist; when it
+    /// does not, the watcher is skipped (the scheduler still works through
+    /// intervals/push/manual). `Change` events request a [`Trigger::LocalInotify`]
+    /// sync; a degraded watcher is rebuilt through [`FsWatcher::rescan`], which
+    /// re-registers the tree and emits a [`WatcherEvent::Rescan`].
+    pub fn connect_watcher(&mut self, account: &AccountConfig) {
+        if !account.sync.local_inotify_enabled {
+            return;
+        }
+        let matcher = ExclusionMatcher::new(
+            account.sync.exclude_patterns.clone(),
+            account.sync.exclude_patterns_enabled,
+        );
+        let Ok((watcher, receiver)) = FsWatcher::start(&self.folder.local_root, matcher) else {
+            // Folder not present yet (or backend unavailable): skip silently;
+            // the scheduler still runs through the other triggers.
+            return;
+        };
+        let scheduler = self.scheduler.clone();
+        let task = glib::spawn_future_local(async move {
+            let mut watcher = watcher;
+            while let Ok(event) = receiver.recv().await {
+                match event {
+                    WatcherEvent::Change(_) | WatcherEvent::Rescan => {
+                        scheduler.request(Trigger::LocalInotify);
+                    }
+                    WatcherEvent::Degraded(_) => {
+                        watcher.rescan();
+                    }
+                }
+            }
+        });
+        self.watcher_task = Some(task);
     }
 
     /// Forward parsed progress events to `state` on the GLib main loop.
@@ -312,6 +360,23 @@ impl NeutralScheduler {
 pub enum SchedulerFacade {
     Real(Scheduler),
     Neutral(NeutralScheduler),
+}
+
+/// One activity-log line for a finished run, translated to the active locale.
+pub fn outcome_log_line(outcome: &crate::core::scheduler::SyncOutcome) -> &'static str {
+    match outcome {
+        crate::core::scheduler::SyncOutcome::Success => t("Synchronization completed"),
+        crate::core::scheduler::SyncOutcome::Conflict => {
+            t("Synchronization completed with conflicts")
+        }
+        crate::core::scheduler::SyncOutcome::AuthFailed => {
+            t("Synchronization failed: credentials rejected")
+        }
+        crate::core::scheduler::SyncOutcome::KeyringLocked => {
+            t("Synchronization blocked: password keyring is locked")
+        }
+        crate::core::scheduler::SyncOutcome::Failed => t("Synchronization failed — view the log"),
+    }
 }
 
 impl SchedulerFacade {
@@ -469,6 +534,27 @@ impl AccountRuntime {
         self.push.clone()
     }
 
+    /// Connect an activity logger to every folder scheduler: one line per
+    /// finished run with its outcome. The logger is shared (`LogBuffer` is
+    /// `Clone` over a shared buffer), so the UI recent/log views see the same
+    /// lines the engine writes.
+    pub fn connect_logger(&self, logger: &crate::core::log::LogBuffer) {
+        let account_label = self.account.id.clone();
+        for runtime in self.folders.values() {
+            let account_label = account_label.clone();
+            let folder_id = runtime.folder.id.clone();
+            let logger = logger.clone();
+            runtime
+                .scheduler()
+                .set_on_completed(Some(Box::new(move |outcome| {
+                    logger.append(&format!(
+                        "{account_label}/{folder_id}: {}",
+                        outcome_log_line(outcome)
+                    ));
+                })));
+        }
+    }
+
     /// The latest notify_push state and message reported by the client.
     pub fn push_state(&self) -> Option<(PushState, String)> {
         self.targets.borrow().push_state.clone()
@@ -517,6 +603,21 @@ impl AccountRuntime {
         } = (self.watcher_factory)();
         let push = self.default_push();
         self.mount(network, power, suspend, push);
+    }
+
+    /// Wire the GLib main-loop consumers for every folder runtime: the local
+    /// filesystem watcher and the live progress forwarder.
+    ///
+    /// Production only: called by the app after [`Self::start`], on the thread
+    /// owning the main context. The unit tests drive the runtimes through
+    /// [`start_without_watchers`](Self::start_without_watchers) and never call
+    /// this, so they stay deterministic without a GLib loop.
+    pub fn connect_glue(&mut self) {
+        let account = self.account.clone();
+        for runtime in self.folders.values_mut() {
+            runtime.connect_watcher(&account);
+            runtime.connect_progress();
+        }
     }
 
     /// Wire callbacks to the given watchers, start them and keep them for
@@ -676,10 +777,24 @@ impl AccountManager {
 
     /// Start a runtime for every account in the configuration. The global
     /// `general.pause_on_battery` preference is captured for the runtimes.
+    ///
+    /// This wires the system watchers (network/power/suspend) but NOT the
+    /// per-folder GLib consumers; call [`connect_all_glue`](Self::connect_all_glue)
+    /// from the main thread afterwards to start the filesystem watchers and
+    /// the progress forwarders.
     pub fn start(&mut self, config: &Config) {
         self.pause_on_battery = config.general.pause_on_battery;
         for account in config.accounts.clone() {
             self.ensure_runtime(account);
+        }
+    }
+
+    /// Start the per-folder GLib main-loop consumers (filesystem watchers and
+    /// progress forwarders) for every account runtime. Must be called from the
+    /// thread owning the main context (the app startup), never in tests.
+    pub fn connect_all_glue(&mut self) {
+        for runtime in self.runtimes.values_mut() {
+            runtime.connect_glue();
         }
     }
 
@@ -1381,5 +1496,33 @@ mod tests {
         // `on_file_notification` callback runs in production.
         runtime.simulate_remote_push();
         assert!(source.borrow().pending() >= 1);
+    }
+
+    // ---- activity log wiring ----------------------------------------------
+
+    #[test]
+    fn outcome_log_line_covers_every_outcome_in_english_and_spanish() {
+        use crate::core::scheduler::SyncOutcome;
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
+        for outcome in [
+            SyncOutcome::Success,
+            SyncOutcome::Conflict,
+            SyncOutcome::AuthFailed,
+            SyncOutcome::KeyringLocked,
+            SyncOutcome::Failed,
+        ] {
+            let line = outcome_log_line(&outcome);
+            assert!(!line.is_empty(), "English label for {outcome:?}");
+            assert!(
+                line.starts_with("Synchronization"),
+                "EN line for {outcome:?}"
+            );
+        }
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::Spanish);
+        assert_eq!(
+            outcome_log_line(&SyncOutcome::Success),
+            "Sincronización completada"
+        );
+        crate::util::i18n::reset_locale();
     }
 }

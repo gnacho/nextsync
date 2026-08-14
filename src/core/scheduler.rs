@@ -203,6 +203,12 @@ impl Scheduler {
         self.inner.borrow_mut().guard = guard;
     }
 
+    /// Replace the per-run completion callback (called once per finished run
+    /// with its outcome). Used by the app to feed the activity log.
+    pub fn set_on_completed(&self, on_completed: Option<CompletedCallback>) {
+        self.inner.borrow_mut().on_completed = on_completed;
+    }
+
     /// Approve one synchronization despite a deletion alert.
     pub fn approve_delete_once(&self) {
         self.inner.borrow_mut().approve_delete_once();
@@ -1079,6 +1085,36 @@ mod tests {
         run_idle(&source);
         finish(&runner, SyncOutcome::Conflict);
         assert_eq!(*completed.borrow(), vec![SyncOutcome::Conflict]);
+    }
+
+    #[test]
+    fn set_on_completed_replaces_the_callback() {
+        crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
+        let source = fake_source();
+        let source_dyn: Rc<RefCell<dyn TimeoutSource>> = source.clone();
+        let runner = FakeRunner::default();
+        let first = Rc::new(RefCell::new(Vec::new()));
+        let second = Rc::new(RefCell::new(Vec::new()));
+        let scheduler = Scheduler::new(
+            StateController::new(AppState::IdleOk),
+            auto_settings(),
+            Box::new(runner.clone()),
+            source_dyn,
+            None,
+            Some(Box::new({
+                let first = Rc::clone(&first);
+                move |outcome: &SyncOutcome| first.borrow_mut().push(*outcome)
+            })),
+        );
+        scheduler.set_on_completed(Some(Box::new({
+            let second = Rc::clone(&second);
+            move |outcome: &SyncOutcome| second.borrow_mut().push(*outcome)
+        })));
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(*first.borrow(), Vec::<SyncOutcome>::new());
+        assert_eq!(*second.borrow(), vec![SyncOutcome::Success]);
     }
 
     #[test]
