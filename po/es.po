@@ -2270,3 +2270,11 @@ msgstr "Termina a las"
 #: src/ui/settings.rs
 msgid "Quiet Hours"
 msgstr "Horario de silencio"
+
+#: src/ui/tray.rs
+msgid "Pause Everything"
+msgstr "Pausar todo"
+
+#: src/ui/tray.rs
+msgid "Resume Everything"
+msgstr "Reanudar todo"

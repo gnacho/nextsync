@@ -52,6 +52,8 @@ pub enum TrayAction {
     Settings,
     /// Open the activity/conflicts window.
     Conflicts,
+    /// Pause or resume every account at once (issue #42).
+    PauseAll(bool),
     /// Quit the application.
     Quit,
 }
@@ -65,6 +67,11 @@ pub struct TrayCallbacks {
     pub open_settings: Rc<dyn Fn()>,
     /// Open the activity/conflicts window (optional; hides the menu item).
     pub open_conflicts: Option<Rc<dyn Fn()>>,
+    /// Pause or resume every account (issue #42). Receives the desired
+    /// state: `true` pauses.
+    pub pause_all: Rc<dyn Fn(bool)>,
+    /// Whether every account is currently paused (drives the menu label).
+    pub all_paused: Rc<dyn Fn() -> bool>,
     /// Quit the application.
     pub quit: Rc<dyn Fn()>,
 }
@@ -99,9 +106,8 @@ pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
     }
 }
 
-/// Number of items in the tray menu (Open, Settings, Quit), mirroring the
-/// Python layout `(1, 7, 8)`.
-pub const MENU_ITEM_COUNT: usize = 4;
+/// Number of items in the tray menu (Open, Settings, Log, Pause, Quit).
+pub const MENU_ITEM_COUNT: usize = 5;
 
 /// The StatusNotifier item. Only `Send` data lives here, satisfying the
 /// `ksni::Tray` bound; user actions leave through the [`TrayAction`] channel.
@@ -109,6 +115,8 @@ struct TrayItem {
     state: AppState,
     presentation: TrayPresentation,
     show_conflicts: bool,
+    /// Whether every account is paused (pause/resume-all label, issue #42).
+    all_paused: bool,
     actions: Sender<TrayAction>,
 }
 
@@ -118,6 +126,7 @@ impl TrayItem {
             state,
             presentation: presentation_for(state),
             show_conflicts,
+            all_paused: false,
             actions,
         }
     }
@@ -126,6 +135,12 @@ impl TrayItem {
     fn apply_state(&mut self, state: AppState) {
         self.state = state;
         self.presentation = presentation_for(state);
+    }
+
+    /// Record whether every account is paused (drives the pause/resume menu
+    /// label, issue #42).
+    fn set_all_paused(&mut self, paused: bool) {
+        self.all_paused = paused;
     }
 
     /// The menu items: Open, Settings, Conflicts (when wired) and Quit,
@@ -176,6 +191,26 @@ impl TrayItem {
                 .into(),
             );
         }
+        // Pause/resume every account at once (issue #42). The label asks for
+        // the action that is currently NOT active.
+        let pause = self.actions.clone();
+        let label = if self.all_paused {
+            t("Resume Everything")
+        } else {
+            t("Pause Everything")
+        };
+        items.push(
+            StandardItem {
+                label: label.into(),
+                icon_name: "media-playback-pause-symbolic".into(),
+                activate: Box::new(move |this: &mut Self| {
+                    let next = !this.all_paused;
+                    let _ = pause.try_send(TrayAction::PauseAll(next));
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
         items.push(
             StandardItem {
                 label: t("Quit").into(),
@@ -271,6 +306,12 @@ impl Tray {
         let _ = self.handle.update(|item| item.apply_state(state));
     }
 
+    /// Record whether every account is paused so the tray menu shows the
+    /// right pause/resume-all label (issue #42).
+    pub fn update_all_paused(&mut self, paused: bool) {
+        let _ = self.handle.update(|item| item.set_all_paused(paused));
+    }
+
     /// Number of menu items (Open, Settings, [Conflicts], Quit).
     pub fn menu_items(&self) -> usize {
         self.handle
@@ -290,6 +331,9 @@ async fn dispatch(receiver: async_channel::Receiver<TrayAction>, callbacks: Tray
                     open_conflicts();
                 }
             }
+            TrayAction::PauseAll(paused) => {
+                (callbacks.pause_all)(paused);
+            }
             TrayAction::Quit => (callbacks.quit)(),
         }
     }
@@ -307,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_has_four_items_when_conflicts_is_wired() {
+    fn menu_has_five_items_when_conflicts_is_wired() {
         set_locale(Locale::English);
         let (item, _rx) = item_with(AppState::IdleOk);
         let menu = item.build_menu();
@@ -319,7 +363,16 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(labels, vec!["Open NextSync", "Settings", "Log", "Quit"]);
+        assert_eq!(
+            labels,
+            vec![
+                "Open NextSync",
+                "Settings",
+                "Log",
+                "Pause Everything",
+                "Quit"
+            ]
+        );
         reset_locale();
     }
 
@@ -336,7 +389,28 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(labels, vec!["Open NextSync", "Settings", "Quit"]);
+        assert_eq!(
+            labels,
+            vec!["Open NextSync", "Settings", "Pause Everything", "Quit"]
+        );
+        reset_locale();
+    }
+
+    #[test]
+    fn menu_pause_label_flips_when_everything_is_paused() {
+        set_locale(Locale::English);
+        let (mut item, _rx) = item_with(AppState::PausedUser);
+        item.set_all_paused(true);
+        let menu = item.build_menu();
+        let labels: Vec<&str> = menu
+            .iter()
+            .map(|entry| match entry {
+                MenuItem::Standard(standard) => standard.label.as_str(),
+                _ => panic!("unexpected menu item type"),
+            })
+            .collect();
+        assert!(labels.contains(&"Resume Everything"));
+        assert!(!labels.contains(&"Pause Everything"));
         reset_locale();
     }
 
@@ -358,6 +432,7 @@ mod tests {
                 "Abrir NextSync",
                 "Configuración",
                 "Registro",
+                "Pausar todo",
                 // "Quit" is not in the catalog: English fallback.
                 "Quit"
             ]
@@ -378,6 +453,7 @@ mod tests {
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Open);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Settings);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Conflicts);
+        assert_eq!(rx.try_recv().unwrap(), TrayAction::PauseAll(true));
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Quit);
         assert!(rx.try_recv().is_err(), "no extra actions should be sent");
     }
