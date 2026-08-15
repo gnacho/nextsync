@@ -653,8 +653,6 @@ pub struct MainWindow {
     tray_active: Rc<Cell<bool>>,
     /// Whether every account is paused (pause/resume all, issue #42).
     all_paused: Cell<bool>,
-    /// Header button toggling every account's pause state (issue #42).
-    pause_all_button: Option<gtk4::Button>,
     /// Fired when the global pause state changes (issue #42).
     on_pause_all_changed: Option<Rc<dyn Fn(bool)>>,
     _subscription: Option<crate::state::Subscription>,
@@ -759,23 +757,6 @@ impl MainWindow {
             action
         });
         hamburger.insert_action_group("app", Some(&actions));
-        // Pause/resume every account at once (issue #42), left of the
-        // hamburger.
-        let pause_all_button = gtk4::Button::builder()
-            .icon_name("media-playback-pause-symbolic")
-            .tooltip_text(t("Pause Everything"))
-            .css_classes(["flat"])
-            .build();
-        {
-            let weak = self_weak.clone();
-            pause_all_button.connect_clicked(move |_button| {
-                if let Some(main) = weak.upgrade() {
-                    let next = !main.borrow().all_accounts_paused();
-                    main.borrow_mut().set_all_accounts_paused(next);
-                }
-            });
-        }
-        header.pack_end(&pause_all_button);
         header.pack_end(&hamburger);
 
         toolbar.add_top_bar(&header);
@@ -895,7 +876,6 @@ impl MainWindow {
             self_weak,
             tray_active,
             all_paused: Cell::new(false),
-            pause_all_button: Some(pause_all_button.clone()),
             on_pause_all_changed: None,
             _subscription: None,
             _sidebar_page: sidebar_page,
@@ -938,18 +918,6 @@ impl MainWindow {
             }
         }
         self.all_paused.set(paused);
-        if let Some(button) = &self.pause_all_button {
-            button.set_icon_name(if paused {
-                "media-playback-start-symbolic"
-            } else {
-                "media-playback-pause-symbolic"
-            });
-            button.set_tooltip_text(Some(if paused {
-                t("Resume Everything")
-            } else {
-                t("Pause Everything")
-            }));
-        }
         if let Some(on_change) = &self.on_pause_all_changed {
             on_change(paused);
         }
