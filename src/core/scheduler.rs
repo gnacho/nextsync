@@ -114,14 +114,12 @@ struct SchedulerInner {
     keyring_locked: bool,
     delete_alert: Option<DeleteAlert>,
     delete_bypass_once: bool,
-<<<<<<< HEAD
     /// Canonical local root this scheduler reconciles (issue #35): drives
     /// the overlap-aware permit acquisition and the external-engine scan.
     local_root: Option<std::path::PathBuf>,
     /// Where to scan for external engine processes; `None` means the real
     /// `/proc` (injectable for tests).
     proc_scan_root: Option<std::path::PathBuf>,
-=======
     /// Skip syncs while the connection is metered (issue #40).
     skip_metered: bool,
     /// Whether the current connection is metered (issue #40).
@@ -133,7 +131,6 @@ struct SchedulerInner {
     /// Quiet-hours window in local time; blocks new runs inside it
     /// (issue #45).
     quiet_hours: Option<(String, String)>,
->>>>>>> feat/39-47-control
 }
 
 impl Scheduler {
@@ -172,16 +169,13 @@ impl Scheduler {
             keyring_locked: false,
             delete_alert: None,
             delete_bypass_once: false,
-<<<<<<< HEAD
             local_root: None,
             proc_scan_root: None,
-=======
             skip_metered: true,
             metered: false,
             allowed_ssids: Vec::new(),
             active_ssid: None,
             quiet_hours: None,
->>>>>>> feat/39-47-control
         };
         let inner = Rc::new(RefCell::new(inner));
         {
