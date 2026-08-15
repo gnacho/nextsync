@@ -115,6 +115,9 @@ pub type OpenFolderCallback = Rc<dyn Fn(&str)>;
 pub type RemoveFolderCallback = Rc<dyn Fn(&str, &str)>;
 /// Callback invoked when the user wants to edit ignored files.
 pub type EditIgnoredCallback = Rc<dyn Fn()>;
+/// Callback invoked with the account and folder ids to preview pending
+/// local changes (issue #46).
+pub type PendingChangesCallback = Rc<dyn Fn(&str, &str)>;
 
 /// Shared holder for the Settings header-button handler, installed after the
 /// window lives in a shared cell.
@@ -130,6 +133,8 @@ pub struct AccountCallbacks {
     pub on_edit_ignored: Option<EditIgnoredCallback>,
     /// Invoked when the user clicks the in-view "Add Folder" row.
     pub on_add_folder: Option<Rc<dyn Fn()>>,
+    /// Invoked when the user opens the per-folder pending-changes view.
+    pub on_pending_changes: Option<PendingChangesCallback>,
 }
 
 /// One account rendered as the content of the split view: a list of folder
@@ -261,6 +266,16 @@ impl AccountView {
                 },
                 on_remove: {
                     let cb = callbacks.on_remove_folder.clone();
+                    let folder_id = folder.id.clone();
+                    let account_id = account_id.clone();
+                    Some(Rc::new(move || {
+                        if let Some(cb) = &cb {
+                            cb(&account_id, &folder_id);
+                        }
+                    }))
+                },
+                on_pending_changes: {
+                    let cb = callbacks.on_pending_changes.clone();
                     let folder_id = folder.id.clone();
                     let account_id = account_id.clone();
                     Some(Rc::new(move || {
@@ -1222,6 +1237,28 @@ impl MainWindow {
                     if let Some(main) = weak.upgrade() {
                         main.borrow_mut().show_add_folder_dialog();
                     }
+                }))
+            },
+            on_pending_changes: {
+                let store = self.config_store.clone();
+                let window = self.window.clone();
+                Some(Rc::new(move |account_id, folder_id| {
+                    let Some(account) = store.account(account_id).ok().flatten() else {
+                        return;
+                    };
+                    let Some(folder) = account
+                        .folders
+                        .iter()
+                        .find(|folder| folder.id == folder_id)
+                        .cloned()
+                    else {
+                        return;
+                    };
+                    crate::ui::pending_changes::present_pending_changes(
+                        &account,
+                        &folder,
+                        window.upcast_ref::<gtk4::Widget>(),
+                    );
                 }))
             },
         };

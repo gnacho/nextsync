@@ -11,6 +11,7 @@ pub mod exclusions;
 pub mod log;
 pub mod network;
 pub mod notifications;
+pub mod pending_changes;
 pub mod power;
 pub mod proc_scan;
 pub mod scheduler;

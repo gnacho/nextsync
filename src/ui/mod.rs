@@ -6,6 +6,7 @@ pub mod conflict_resolver;
 pub mod folder_status;
 pub mod main_window;
 pub use main_window::color_scheme_for;
+pub mod pending_changes;
 pub mod safety_review;
 pub mod server_trash;
 pub mod settings;

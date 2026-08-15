@@ -2294,3 +2294,35 @@ msgstr "Los elementos que no se pudieron restaurar permanecen en la papelera del
 #: src/ui/main_window.rs
 msgid "Restore from server trash…"
 msgstr "Restaurar de la papelera del servidor…"
+
+#: src/ui/folder_status.rs
+msgid "Pending changes…"
+msgstr "Cambios pendientes…"
+
+#: src/ui/pending_changes.rs
+msgid "Pending Changes"
+msgstr "Cambios pendientes"
+
+#: src/ui/pending_changes.rs
+msgid "New"
+msgstr "Nuevo"
+
+#: src/ui/pending_changes.rs
+msgid "Changed"
+msgstr "Modificado"
+
+#: src/ui/pending_changes.rs
+msgid "Deleted"
+msgstr "Eliminado"
+
+#: src/ui/pending_changes.rs
+msgid "No pending local changes since the last synchronization."
+msgstr "No hay cambios locales pendientes desde la última sincronización."
+
+#: src/ui/pending_changes.rs
+msgid "Local changes since the last synchronization, compared against the local tree and the synchronization journal. Remote changes are not included."
+msgstr "Cambios locales desde la última sincronización, comparando el árbol local con el registro de sincronización. Los cambios remotos no se incluyen."
+
+#: src/ui/pending_changes.rs
+msgid "This folder has no synchronization journal yet, so every local file counts as new. Remote changes are not included."
+msgstr "Esta carpeta aún no tiene registro de sincronización, así que cada archivo local cuenta como nuevo. Los cambios remotos no se incluyen."

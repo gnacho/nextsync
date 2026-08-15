@@ -84,6 +84,7 @@ package() {
         nextsync-info-symbolic
         nextsync-settings-2-symbolic
         nextsync-theme-auto-symbolic
+        nextsync-list-checks-symbolic
     )
     for icon in "${symbolic[@]}"; do
         install -Dm644 "data/icons/$icon.svg" \
