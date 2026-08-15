@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.60.0] - 2026-08-15
+
+### Corregido
+- **El panel "Ajustes de la cuenta" ya se despliega (#63)**: el panel usaba un ScrolledWindow anidado cuyo layout podía colapsar al alternarlo; ahora es un Revealer (desliza hacia abajo) que arranca oculto y se abre/cierra de forma fiable al pulsar la fila.
+- **El panel está traducido al español**: todas las etiquetas (Ajustes de la cuenta, Conexión, Servidor, proxy, certificados) están en el catálogo es_ES; se limpiaron msgids duplicados.
+
 ## [0.58.0] - 2026-08-15
 
 ### Corregido
