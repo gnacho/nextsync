@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.68.0] - 2026-08-15
+
+### Cambiado
+- **Resumen de cuenta en texto plano (#65)**: avatar, nombre de usuario, luz de estado y espacio usado, sin fondo de botón; la luz se actualiza en vivo.
+- **"Añadir carpeta" es un botón (#66)** junto al resumen; los botones "Sincronizar ahora" y "Pausar sincronización" desaparecen de la vista de cuenta (la sincronización es automática y pausar vive en la bandeja).
+- **Panel de cuenta mínimo (#67)**: fuera el grupo Servidor y los interruptores de integración de escritorio (eliminados de toda la app); Conexión, Autenticación y Quitar cuenta con sus descripciones.
+- **"Deletion Guard" traducido**: "Protección contra borrados" (tenía la cadena vacía en el catálogo).
+
 ## [0.66.0] - 2026-08-15
 
 ### Corregido
