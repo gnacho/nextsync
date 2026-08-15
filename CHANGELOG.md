@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.76.0] - 2026-08-15
+
+### Cambiado
+- **Sin textos explicativos**: los tooltips y descripciones de grupo que solo repetían lo obvio desaparecen; filas y grupos con solo su título (los tooltips de acción se mantienen).
+
 ## [0.74.0] - 2026-08-15
 
 ### Cambiado
