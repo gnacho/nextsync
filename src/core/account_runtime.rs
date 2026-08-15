@@ -1046,6 +1046,12 @@ mod tests {
         fn is_available(&self) -> bool {
             self.inner.borrow().available
         }
+        fn is_metered(&self) -> bool {
+            false
+        }
+        fn wifi_ssid(&self) -> Option<String> {
+            None
+        }
         fn subscribe(&self, callback: Rc<dyn Fn(bool)>) -> u64 {
             self.inner.borrow_mut().callback = Some(callback);
             1

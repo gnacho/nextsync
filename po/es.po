@@ -2238,3 +2238,15 @@ msgstr "Wi-Fi"
 #: src/ui/settings.rs
 msgid "Transfers"
 msgstr "Transferencias"
+
+#: src/core/scheduler.rs
+msgid "Waiting for an unmetered network connection"
+msgstr "Esperando una conexión de red sin límite de datos"
+
+#: src/core/scheduler.rs
+msgid "Waiting for an allowed Wi-Fi network"
+msgstr "Esperando una red Wi-Fi permitida"
+
+#: src/core/scheduler.rs
+msgid "Quiet hours: synchronization is suspended"
+msgstr "Horario de silencio: la sincronización está suspendida"
