@@ -34,18 +34,6 @@ pub fn build_account_settings_panel(
     page.set_margin_start(12);
     page.set_margin_end(12);
 
-    // Server (read-only).
-    let server_group = libadwaita::PreferencesGroup::builder()
-        .title(t("Server"))
-        .build();
-    server_group.add(
-        &libadwaita::ActionRow::builder()
-            .title(account.server_url.as_str())
-            .subtitle(account.login_name.as_str())
-            .build(),
-    );
-    page.add(&server_group);
-
     // Connection: per-account proxy + TLS trust (issue #56).
     let connection = libadwaita::PreferencesGroup::builder()
         .title(t("Connection"))

@@ -1381,7 +1381,7 @@ msgstr "Salida detallada de sincronización"
 
 #: src/nextsync/ui/settings.py:567
 msgid "Deletion Guard"
-msgstr ""
+msgstr "Protección contra borrados"
 
 #: src/nextsync/ui/settings.py:569
 msgid ""

@@ -34,12 +34,10 @@
 //!   private validator in `storage::config`.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use libadwaita::prelude::*;
 
-use crate::core::desktop_integration::DesktopIntegration;
 use crate::core::sync_safety::{
     local_folder_is_empty, review_required, stale_artifact_names, FirstSyncFacts,
 };
@@ -413,7 +411,7 @@ pub(crate) fn sync_option_groups(
     account_id: &str,
     account: &AccountConfig,
     callbacks: &SettingsCallbacks,
-    host: &SettingsHost,
+    _host: &SettingsHost,
 ) -> Vec<libadwaita::PreferencesGroup> {
     let sync = &account.sync;
     let mut groups: Vec<libadwaita::PreferencesGroup> = Vec::new();
@@ -521,19 +519,6 @@ pub(crate) fn sync_option_groups(
     );
     reliability.add(&retries);
     groups.push(reliability);
-
-    // Desktop integration (restored by user decision, issue #25): targets
-    // the account's first folder, like the Python's `_build_desktop_integrations`.
-    let integration_rows = desktop_integration_rows(account, host);
-    if !integration_rows.is_empty() {
-        let integration_group = libadwaita::PreferencesGroup::builder()
-            .title(t("Desktop Integration"))
-            .build();
-        for row in &integration_rows {
-            integration_group.add(row);
-        }
-        groups.push(integration_group);
-    }
 
     let widgets = SyncWidgets {
         banner,
@@ -2155,118 +2140,6 @@ fn present_remove_account_step_two(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-/// The folder the desktop integration switches target: the account's first
-/// folder (the Python used the "active" folder; the rewrite has none).
-fn integration_target(account: &AccountConfig) -> Option<&FolderConfig> {
-    account.folders.first()
-}
-
-/// Build the three desktop integration switches for the first folder of the
-/// account, replicating `_build_desktop_integrations`: "Show in Files
-/// sidebar" (Nautilus bookmark), "Show on Desktop" (shortcut) and "Use
-/// special folder icon". Returns an empty list when the account has no
-/// folders (the Python also hides the rows in that case).
-///
-/// Each switch applies its [`DesktopIntegration`] setter on toggle; a `false`
-/// result (e.g. a missing icon asset) reverts the switch to the real state
-/// and surfaces a toast.
-fn desktop_integration_rows(
-    account: &AccountConfig,
-    host: &SettingsHost,
-) -> Vec<libadwaita::SwitchRow> {
-    let Some(folder) = integration_target(account) else {
-        return Vec::new();
-    };
-    let local_root = folder.local_root.clone();
-    // One instance per closure: `DesktopIntegration` is not `Clone`, and each
-    // instance is a cheap paths-only struct over the same real XDG dirs.
-    let make_integration =
-        || DesktopIntegration::new(PathBuf::from(local_root.clone()), None, None);
-    let state = make_integration().state();
-
-    let bookmark = libadwaita::SwitchRow::builder()
-        .title(t("Show in Files sidebar"))
-        .subtitle(t(
-            "Adds the synchronized folder to the file manager sidebar.",
-        ))
-        .active(state.nautilus_bookmark)
-        .build();
-    let shortcut = libadwaita::SwitchRow::builder()
-        .title(t("Show on Desktop"))
-        .subtitle(t(
-            "Creates a link to the synchronized folder on the desktop.",
-        ))
-        .active(state.desktop_shortcut)
-        .build();
-    let icon = libadwaita::SwitchRow::builder()
-        .title(t("Use special folder icon"))
-        .subtitle(t(
-            "Identifies the synchronized folder and its shortcuts in Files.",
-        ))
-        .active(state.special_icon)
-        .build();
-
-    connect_integration_switch(
-        &bookmark,
-        host,
-        {
-            let integration = make_integration();
-            move |enabled| integration.set_nautilus_bookmark(enabled)
-        },
-        {
-            let integration = make_integration();
-            move || integration.state().nautilus_bookmark
-        },
-    );
-    connect_integration_switch(
-        &shortcut,
-        host,
-        {
-            let integration = make_integration();
-            move |enabled| integration.set_desktop_shortcut(enabled)
-        },
-        {
-            let integration = make_integration();
-            move || integration.state().desktop_shortcut
-        },
-    );
-    connect_integration_switch(
-        &icon,
-        host,
-        {
-            let integration = make_integration();
-            move |enabled| integration.set_special_icon(enabled)
-        },
-        {
-            let integration = make_integration();
-            move || integration.state().special_icon
-        },
-    );
-
-    vec![bookmark, shortcut, icon]
-}
-
-/// Wire one integration switch: apply the setter on toggle and, when it
-/// reports `false`, revert to the real state (a no-op notification when the
-/// switch already matches, so the re-entry terminates) and toast.
-fn connect_integration_switch(
-    row: &libadwaita::SwitchRow,
-    host: &SettingsHost,
-    apply: impl Fn(bool) -> bool + 'static,
-    read_state: impl Fn() -> bool + 'static,
-) {
-    let host = host.clone();
-    row.connect_active_notify(move |row| {
-        let desired = row.is_active();
-        if !apply(desired) {
-            row.set_active(read_state());
-            host.add_toast(libadwaita::Toast::new(t(
-                "The change could not be applied.",
-            )));
-        }
-    });
-}
 
 /// Export the full configuration to a user-chosen JSON file (issue #47).
 fn export_configuration(store: &ConfigStore) {

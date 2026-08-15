@@ -104,6 +104,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Dark style", "Estilo oscuro"),
     ("Deleted", "Eliminado"),
     ("Deleted files can be restored to their original location. The retention window depends on the server settings.", "Los archivos eliminados se pueden restaurar a su ubicación original. La ventana de conservación depende de la configuración del servidor."),
+    ("Deletion Guard", "Protección contra borrados"),
     ("Desktop Integration", "Integración con el escritorio"),
     ("Desktop Technologies", "Tecnologías de escritorio"),
     ("Detailed synchronization output", "Salida detallada de sincronización"),

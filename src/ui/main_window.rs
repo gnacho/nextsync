@@ -15,9 +15,9 @@ use std::rc::{Rc, Weak};
 
 use libadwaita::prelude::*;
 
-use crate::core::account_runtime::{AccountManager, AccountRuntime, SchedulerFacade};
+use crate::core::account_runtime::{AccountManager, AccountRuntime};
 use crate::state::{AppState, StateSnapshot};
-use crate::storage::config::{AccountConfig, Config, ConfigStore};
+use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{
@@ -68,46 +68,6 @@ pub fn close_action(tray_active: bool) -> CloseAction {
 /// Issue #38: Nextcloud accounts additionally get a server trash browser
 /// that lists what the server kept and can restore everything (OpenCloud
 /// has no documented trashbin, so the entry point stays hidden there).
-fn present_delete_review(
-    scheduler: &SchedulerFacade,
-    account: &AccountConfig,
-    parent: &gtk4::Widget,
-) {
-    let Some(alert) = scheduler.delete_alert() else {
-        return;
-    };
-    let detail = if alert.missing_paths.is_empty() {
-        alert.message.clone()
-    } else {
-        let sample: Vec<String> = alert.missing_paths.iter().take(5).cloned().collect();
-        format!("{}\n\n{}", alert.message, sample.join("\n"))
-    };
-    let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&detail));
-    dialog.add_response("keep_paused", t("Keep Paused"));
-    if crate::ui::server_trash::trash_supported(account) {
-        dialog.add_response("trash", t("Restore from server trash…"));
-    }
-    dialog.add_response("restore", t("Restore from Nextcloud"));
-    dialog.add_response("approve", t("Approve These Deletions Once"));
-    dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Suggested);
-    dialog.set_response_appearance("restore", libadwaita::ResponseAppearance::Destructive);
-    dialog.set_default_response(Some("keep_paused"));
-
-    let scheduler_for_response = scheduler.clone();
-    let account_for_trash = account.clone();
-    let parent_for_trash = parent.clone();
-    dialog.connect_response(None, move |_dialog, response| match response {
-        "restore" => scheduler_for_response.restore_from_server(),
-        "approve" => scheduler_for_response.approve_delete_once(),
-        "trash" => crate::ui::server_trash::present_server_trash(
-            &account_for_trash,
-            parent_for_trash.upcast_ref::<gtk4::Widget>(),
-        ),
-        _ => {}
-    });
-    dialog.present(Some(parent));
-}
-
 /// Callback invoked with the local root of a folder to open it in the file
 /// manager.
 pub type OpenFolderCallback = Rc<dyn Fn(&str)>;
@@ -208,12 +168,13 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary card: the account avatar, a "connected" state and
-        // the storage used; the login@host details live in the sidebar and
-        // the account settings panel. The quota and avatar fetches run off
-        // the UI thread; on any failure the card simply shows no usage line.
-        let summary_row = libadwaita::ActionRow::builder()
-            .title(t("Connected"))
+        // Account summary as plain text (issues #64/#65): avatar, the user
+        // name, the state light and the storage usage, with an Add Folder
+        // button beside them. No boxed/button background.
+        let summary_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(10)
+            .margin_bottom(4)
             .build();
         // Issue #50: the account avatar leads the card; the initials
         // fallback covers accounts without one.
@@ -221,16 +182,40 @@ impl AccountView {
         if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
             paint_avatar(&avatar, &bytes);
         }
-        summary_row.add_prefix(&avatar);
+        summary_box.append(&avatar);
         let light = gtk4::Image::builder().pixel_size(14).build();
         light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
-        summary_row.add_prefix(&light);
-        let usage_label = gtk4::Label::builder()
-            .css_classes(["caption"])
-            .halign(gtk4::Align::End)
+        summary_box.append(&light);
+        // The name doubles as the anti-race guard for the background quota
+        // and avatar fetches (same pattern the boxed row used).
+        let name_label = gtk4::Label::builder()
+            .label(&account.login_name)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .css_classes(["heading"])
             .build();
-        summary_row.add_suffix(&usage_label);
-        account_list.append(&summary_row);
+        summary_box.append(&name_label);
+        let usage_label = gtk4::Label::builder()
+            .css_classes(["dim-label", "caption"])
+            .halign(gtk4::Align::End)
+            .hexpand(true)
+            .build();
+        summary_box.append(&usage_label);
+        // Add Folder as a real button next to the summary (issue #66).
+        if let Some(on_add_folder) = &callbacks.on_add_folder {
+            let add_button = gtk4::Button::builder()
+                .label(t("Add Folder"))
+                .tooltip_text(t("Add a local folder to synchronize with this account"))
+                .css_classes(["pill"])
+                .valign(gtk4::Align::Center)
+                .build();
+            let on_add_folder = on_add_folder.clone();
+            add_button.connect_clicked(move |_| {
+                on_add_folder();
+            });
+            summary_box.append(&add_button);
+        }
+        root.append(&summary_box);
         {
             // Quota fetch: only plain data crosses to the blocking thread;
             // widget clones are captured in the main-loop continuation.
@@ -254,8 +239,8 @@ impl AccountView {
                 })
             });
             let usage_label = usage_label.clone();
-            let summary_row = summary_row.clone();
-            let title_for_check = summary_row.title().to_string();
+            let name_label = name_label.clone();
+            let title_for_check = name_label.text().to_string();
             glib::spawn_future_local(async move {
                 let Ok(Some(summary)) = handle.await else {
                     return;
@@ -263,7 +248,7 @@ impl AccountView {
                 // The view may have been rebuilt for another account while
                 // the fetch ran; a detached row keeps its title, so compare
                 // against the one captured at fetch start.
-                if summary_row.title() != title_for_check {
+                if name_label.text() != title_for_check {
                     return;
                 }
                 let mut parts = Vec::new();
@@ -290,8 +275,8 @@ impl AccountView {
             let account_id_for_avatar = account.id.clone();
             let provider = account.provider;
             let avatar = avatar.clone();
-            let summary_row = summary_row.clone();
-            let title_for_check = summary_row.title().to_string();
+            let name_label = name_label.clone();
+            let title_for_check = name_label.text().to_string();
             let on_avatar_cached = callbacks.on_avatar_cached.clone();
             let handle = gio::spawn_blocking(move || {
                 crate::nextcloud::credentials::CredentialsStore::get_for_account(
@@ -323,7 +308,7 @@ impl AccountView {
                 let Ok(Some(bytes)) = handle.await else {
                     return;
                 };
-                if summary_row.title() != title_for_check {
+                if name_label.text() != title_for_check {
                     return;
                 }
                 paint_avatar(&avatar, &bytes);
@@ -462,117 +447,14 @@ impl AccountView {
             account_list.append(&row);
         }
 
-        // "Add Folder" entry point directly from the account view, so the
-        // user does not have to open Settings to add a folder. It opens the
-        // same dialog the Settings Synchronization page uses.
-        if let Some(on_add_folder) = &callbacks.on_add_folder {
-            let add_row = libadwaita::ActionRow::builder()
-                .title(t("Add Folder"))
-                .subtitle(t("Mirror another local folder from this account"))
-                .tooltip_text(t("Add a local folder to synchronize with this account"))
-                .activatable(true)
-                .build();
-            let add_icon = gtk4::Image::builder()
-                .icon_name("list-add-symbolic")
-                .pixel_size(16)
-                .build();
-            add_row.add_prefix(&add_icon);
-            let next = gtk4::Image::builder()
-                .icon_name("go-next-symbolic")
-                .pixel_size(16)
-                .build();
-            add_row.add_suffix(&next);
-            let on_add_folder = on_add_folder.clone();
-            add_row.connect_activated(move |_| {
-                on_add_folder();
-            });
-            account_list.append(&add_row);
-        }
         root.append(&account_list);
 
-        // Sync Now / Pause buttons.
-        let buttons = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .homogeneous(true)
-            .build();
-
-        let sync_content = libadwaita::ButtonContent::builder()
-            .label(t("Sync Now"))
-            .icon_name("emblem-synchronizing-symbolic")
-            .build();
-        let sync_button = gtk4::Button::builder()
-            .child(&sync_content)
-            .tooltip_text(t("Synchronize this account now"))
-            .css_classes(["suggested-action", "pill"])
-            .build();
-        let runtime_for_sync = runtime.clone();
-        let account_for_review = account.clone();
-        sync_button.connect_clicked(move |button| {
-            let scheduler = runtime_for_sync.scheduler();
-            if scheduler.delete_alert().is_some() {
-                present_delete_review(
-                    &scheduler,
-                    &account_for_review,
-                    button.upcast_ref::<gtk4::Widget>(),
-                );
-                return;
-            }
-            scheduler.sync_now();
-        });
-        buttons.append(&sync_button);
-
-        let pause_content = libadwaita::ButtonContent::builder()
-            .label(t("Pause Sync"))
-            .icon_name("media-playback-pause-symbolic")
-            .build();
-        let pause_button = gtk4::Button::builder()
-            .child(&pause_content)
-            .tooltip_text(t("Pause or resume synchronization"))
-            .css_classes(["pill"])
-            .build();
-        let runtime_for_pause = runtime.clone();
-        pause_button.connect_clicked(move |_button| {
-            let scheduler = runtime_for_pause.scheduler();
-            scheduler.set_paused(!scheduler.user_paused());
-        });
-        buttons.append(&pause_button);
-        root.append(&buttons);
-
-        // Live update of the Sync / Pause button labels from the account state.
+        // Live update of the summary state light from the account state
+        // (the Sync/Pause buttons are gone; the light carries the state).
         let aggregate = runtime.state();
-        let sync_content = sync_content.clone();
-        let pause_content = pause_content.clone();
+        let light = light.clone();
         let subscription = aggregate.subscribe(move |snapshot: &StateSnapshot| {
-            let paused = snapshot.state == AppState::PausedUser;
-            pause_content.set_label(if paused {
-                t("Resume Sync")
-            } else {
-                t("Pause Sync")
-            });
-            pause_content.set_icon_name(if paused {
-                "media-playback-start-symbolic"
-            } else {
-                "media-playback-pause-symbolic"
-            });
-            match snapshot.state {
-                AppState::DeleteReview => {
-                    sync_content.set_label(t("Review Deletions"));
-                    sync_content.set_icon_name("security-high-symbolic");
-                }
-                AppState::KeyringLocked => {
-                    sync_content.set_label(t("Unlock Password Keyring"));
-                    sync_content.set_icon_name("changes-prevent-symbolic");
-                }
-                _ => {
-                    let once = matches!(
-                        snapshot.state,
-                        AppState::PausedUser | AppState::PausedBattery
-                    );
-                    sync_content.set_label(if once { t("Sync Once") } else { t("Sync Now") });
-                    sync_content.set_icon_name("emblem-synchronizing-symbolic");
-                }
-            }
+            light.set_icon_name(Some(summary_light_for(snapshot.state)));
         });
 
         Self {
