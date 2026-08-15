@@ -2,6 +2,15 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.66.0] - 2026-08-15
+
+### Corregido
+- **Sincronización al arrancar y al añadir carpetas**: cada carpeta pide una sincronización inicial al montar los watchers (y al añadirla en caliente), de modo que los árboles se comparan desde el primer momento; el estado "Aún no se ha sincronizado" ya no se queda pegado hasta una ejecución manual.
+- **El botón "Ajustes de la cuenta" muestra icono Y texto**: un botón plano de etiqueta-o-icono solo renderiza uno; ahora lleva ambos.
+
+### Cambiado
+- **Panel de cuenta compacto**: solo servidor, conexión (proxy/certificados), iniciar sesión de nuevo y quitar cuenta. Las opciones de sincronización (disparadores, exclusiones, fiabilidad, guard de borrado, salida detallada) vuelven a Preferencias como página "Sincronización"; el desplegable deja de ser gigante.
+
 ## [0.64.0] - 2026-08-15
 
 ### Corregido
