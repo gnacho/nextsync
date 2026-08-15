@@ -2,7 +2,7 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
-## [0.70.0] - 2026-08-15
+## [0.72.0] - 2026-08-15
 
 ### Cambiado
 - **Icono de sincronizado en verde (#61/#62)**: la carpeta sincronizada muestra un check verde (color de éxito sobre el emblema ok); mientras sincroniza, solo se ve el spinner girando (fuera el emblema estático).
@@ -88,7 +88,7 @@ OpenCloud: las carpetas remotas ya se crean solas.
 ### Corregido
 - **Las carpetas remotas de OpenCloud se crean antes de sincronizar (#55)**: configurar una carpeta cuyo subdirectorio remoto no existía fallaba en silencio (`opencloudcmd` no crea carpetas y el ensurer excluía OpenCloud). Verificado contra un servidor real: MKCOL sobre el árbol WebDAV de spaces responde 201, así que ahora el ensurer crea el subdirectorio segmento a segmento bajo el space (raíz del space = no-op), igual que hace para Nextcloud.
 
-## [0.70.0] - 2026-08-15
+## [0.72.0] - 2026-08-15
 
 Ronda de limpieza de interfaz tras el uso real de la v0.60.0.
 
