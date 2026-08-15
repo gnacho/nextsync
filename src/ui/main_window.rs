@@ -648,6 +648,11 @@ pub struct MainWindow {
     /// #50); rebuilt together with the rows.
     avatar_widgets: std::collections::HashMap<String, libadwaita::Avatar>,
     account_view: Option<AccountView>,
+    /// The account-settings revealer for the current account, kept for
+    /// tests and live inspection (issue #63).
+    account_settings_panel: Option<gtk4::Revealer>,
+    /// The Account settings toggle button (issue #63).
+    account_settings_toggle: Option<gtk4::Button>,
     settings_handler: SettingsHandler,
     add_account_handler: AddAccountHandler,
     self_weak: Weak<RefCell<MainWindow>>,
@@ -873,6 +878,8 @@ impl MainWindow {
             account_rows: std::collections::HashMap::new(),
             avatar_widgets: std::collections::HashMap::new(),
             account_view: None,
+            account_settings_panel: None,
+            account_settings_toggle: None,
             settings_handler,
             add_account_handler,
             self_weak,
@@ -1631,31 +1638,25 @@ impl MainWindow {
                 &settings_callbacks,
                 &host,
             );
-            let toggle = libadwaita::ActionRow::builder()
-                .title(t("Account settings"))
-                .subtitle(t(
+            let toggle = gtk4::Button::builder()
+                .label(t("Account settings"))
+                .tooltip_text(t(
                     "Server, proxy and synchronization options for this account",
                 ))
-                .activatable(true)
+                .css_classes(["flat"])
+                .halign(gtk4::Align::Fill)
                 .build();
-            let gear = gtk4::Image::builder()
-                .icon_name("preferences-system-symbolic")
-                .pixel_size(16)
-                .build();
-            toggle.add_prefix(&gear);
-            let chevron = gtk4::Image::builder()
-                .icon_name("go-next-symbolic")
-                .pixel_size(16)
-                .build();
-            toggle.add_suffix(&chevron);
+            toggle.set_icon_name("preferences-system-symbolic");
             {
                 let panel = panel.clone();
-                toggle.connect_activated(move |_| {
+                toggle.connect_clicked(move |_| {
                     panel.set_reveal_child(!panel.is_child_revealed());
                 });
             }
             view.append_widget(&toggle);
             view.append_widget(&panel);
+            self.account_settings_panel = Some(panel.clone());
+            self.account_settings_toggle = Some(toggle.clone());
         }
 
         self.content_stack.add_named(&view.root, Some("account"));
@@ -1764,6 +1765,7 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
 mod tests {
     use super::*;
     use crate::util::i18n::{reset_locale, set_locale, Locale};
+    use crate::util::url::server_host;
 
     #[test]
     fn window_constants_are_stable() {
@@ -2354,6 +2356,65 @@ mod tests {
                 view._account_runtime.account.folders.is_empty(),
                 "removed folder disappears without restart"
             );
+        });
+    }
+
+    #[test]
+    fn account_settings_toggle_reveals_the_panel() {
+        // The Account settings row must open the panel when activated
+        // (issue #63). The panel and row live in the account view built at
+        // construction; we activate the row through the shared cell and check
+        // the revealer flips.
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let store = ConfigStore::with_path(std::env::temp_dir().join(format!(
+                "nextsync-settings-toggle-{}.json",
+                std::process::id()
+            )));
+            let config = Config {
+                accounts: vec![window_account()],
+                ..Config::default()
+            };
+            let mut manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            manager.start(&config);
+            let window = MainWindow::new(
+                &app,
+                config,
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+
+            let revealer = window
+                .account_settings_panel
+                .as_ref()
+                .expect("account settings panel built at construction");
+            let toggle = window
+                .account_settings_toggle
+                .as_ref()
+                .expect("account settings toggle built");
+            assert!(!revealer.is_child_revealed(), "panel starts hidden");
+
+            // Clicking the button reveals the panel (issue #63).
+            toggle.emit_clicked();
+            assert!(
+                revealer.is_child_revealed(),
+                "clicking the button reveals the panel"
+            );
+            // A second click hides it again.
+            toggle.emit_clicked();
+            assert!(
+                !revealer.is_child_revealed(),
+                "a second click hides the panel"
+            );
+            reset_locale();
         });
     }
 }
