@@ -713,28 +713,9 @@ impl MainWindow {
             .tooltip_text(t("Settings"))
             .css_classes(["flat"])
             .build();
-        // gnome-text-editor pattern: a popover whose first section is the
-        // custom CSS-circle theme selector, followed by the regular items.
-        let popover = gtk4::PopoverMenu::builder()
-            .menu_model(&hamburger_menu_model())
-            .halign(gtk4::Align::Start)
-            .build();
-        {
-            let weak = self_weak.clone();
-            let store_for_scheme = config_store.clone();
-            let selector = ThemeSelector::new(&config.general.color_scheme, move |scheme| {
-                libadwaita::StyleManager::default().set_color_scheme(color_scheme_for(scheme));
-                if let Some(main) = weak.upgrade() {
-                    let mut main = main.borrow_mut();
-                    main.config.general.color_scheme = scheme.to_string();
-                    let mut persisted = store_for_scheme.load().unwrap_or_default();
-                    persisted.general.color_scheme = scheme.to_string();
-                    let _ = store_for_scheme.save(&persisted);
-                }
-            });
-            popover.add_child(&selector.widget, "theme");
-        }
-        hamburger.set_popover(Some(&popover));
+        // The menu opens as a plain popover; the app always follows the
+        // system color scheme (issue #53).
+        hamburger.set_menu_model(Some(&hamburger_menu_model()));
         let actions = gio::SimpleActionGroup::new();
         actions.add_action(&{
             let weak = self_weak.clone();
@@ -1623,15 +1604,9 @@ impl MainWindow {
 ///
 /// Extracted from [`MainWindow::new`] so the menu contract (sections, actions
 /// and icons) is testable without a display.
-/// The header menu model: a custom `theme` section (see [`ThemeSelector`])
-/// plus Preferences and About — About last.
+/// The header menu model: Preferences and About — About last.
 fn hamburger_menu_model() -> gio::Menu {
     let menu = gio::Menu::new();
-    let theme_section = gio::Menu::new();
-    let theme_item = gio::MenuItem::new(None, None);
-    theme_item.set_attribute_value("custom", Some(&"theme".to_variant()));
-    theme_section.append_item(&theme_item);
-    menu.append_section(None, &theme_section);
     let items = gio::Menu::new();
     let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
     preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
@@ -1641,133 +1616,6 @@ fn hamburger_menu_model() -> gio::Menu {
     items.append_item(&about_item);
     menu.append_section(None, &items);
     menu
-}
-
-/// CSS-drawn circle theme selector (the gnome-text-editor `EditorThemeSelector`
-/// pattern): three GtkCheckButtons with `.theme-selector` classes — follow
-/// (half-filled), light (white) and dark (black) — with a check overlay on
-/// the active one. Order follows gnome-text-editor: system · light · dark.
-struct ThemeSelector {
-    widget: gtk4::Box,
-}
-
-impl ThemeSelector {
-    /// Build the selector for the persisted scheme; `on_select` fires with
-    /// "system" | "light" | "dark" whenever the active circle changes.
-    fn new<F: Fn(&str) + 'static>(active_scheme: &str, on_select: F) -> Self {
-        static CSS: &str = r#"
-            /* Match GNOME Text Editor's EditorThemeSelector: the checkbutton
-             * itself is the colored circle (44 px touch target), and the radio
-             * indicator becomes a small check badge at the bottom-right when
-             * the option is selected. */
-            checkbutton.theme-selector {
-                min-width: 44px;
-                min-height: 44px;
-                padding: 1px;
-                border-radius: 9999px;
-                background-clip: content-box;
-                box-shadow: inset 0 0 0 1px @borders;
-            }
-            checkbutton.theme-selector.follow {
-                background-image: linear-gradient(to bottom right, #fff 49.99%, #202020 50.01%);
-            }
-            checkbutton.theme-selector.light {
-                background-color: #fff;
-            }
-            checkbutton.theme-selector.dark {
-                background-color: #202020;
-            }
-            checkbutton.theme-selector:hover {
-                box-shadow: inset 0 0 0 1px @borders,
-                            0 0 0 3px alpha(currentColor, 0.2);
-            }
-            checkbutton.theme-selector:checked {
-                box-shadow: inset 0 0 0 2px @theme_selected_bg_color;
-            }
-            checkbutton.theme-selector radio {
-                min-width: 12px;
-                min-height: 12px;
-                padding: 2px;
-                border: none;
-                border-radius: 9999px;
-                background: none;
-                box-shadow: none;
-                -gtk-icon-source: none;
-                transform: translate(27px, 14px);
-                transition: all 150ms ease;
-            }
-            checkbutton.theme-selector radio:checked {
-                -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
-                background-color: @theme_selected_bg_color;
-                color: @theme_selected_fg_color;
-            }
-        "#;
-        let provider = gtk4::CssProvider::new();
-        #[allow(deprecated)]
-        provider.load_from_data(CSS);
-        gtk4::style_context_add_provider_for_display(
-            &gtk4::gdk::Display::default().expect("display"),
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-
-        let widget = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .margin_top(10)
-            .margin_bottom(6)
-            .hexpand(true)
-            .build();
-
-        let make_circle = |style_class: &'static str,
-                           tooltip: &str,
-                           _scheme: &'static str,
-                           group: Option<&gtk4::CheckButton>| {
-            let button = gtk4::CheckButton::builder()
-                .css_classes(["theme-selector", style_class])
-                .tooltip_text(tooltip)
-                .halign(gtk4::Align::Center)
-                .hexpand(true)
-                .focus_on_click(false)
-                .build();
-            if let Some(group) = group {
-                button.set_group(Some(group));
-            }
-            button
-        };
-        let follow = make_circle("follow", t("Follow system style"), "system", None);
-        let light = make_circle("light", t("Light style"), "light", Some(&follow));
-        let dark = make_circle("dark", t("Dark style"), "dark", Some(&follow));
-        match active_scheme {
-            "light" => light.set_active(true),
-            "dark" => dark.set_active(true),
-            _ => follow.set_active(true),
-        }
-        let on_select = std::rc::Rc::new(on_select);
-        widget.append(&follow);
-        widget.append(&light);
-        widget.append(&dark);
-        for (button, scheme) in [(follow, "system"), (light, "light"), (dark, "dark")] {
-            let on_select = on_select.clone();
-            button.connect_toggled(move |button| {
-                if button.is_active() {
-                    on_select(scheme);
-                }
-            });
-        }
-        Self { widget }
-    }
-}
-
-/// Map the persisted color-scheme preference to a libadwaita color scheme.
-///
-/// Unknown values fall back to following the desktop (`system`).
-pub fn color_scheme_for(preference: &str) -> libadwaita::ColorScheme {
-    match preference {
-        "light" => libadwaita::ColorScheme::ForceLight,
-        "dark" => libadwaita::ColorScheme::ForceDark,
-        _ => libadwaita::ColorScheme::Default,
-    }
 }
 
 /// The all-ok light icon for the account summary card, from the aggregate
@@ -2179,23 +2027,9 @@ mod tests {
 
         set_locale(Locale::English);
         let menu = hamburger_menu_model();
-        // Custom theme section first, then Preferences + About — About last.
-        assert_eq!(menu.n_items(), 2);
-        let theme_section = menu
-            .item_link(0, gio::MENU_LINK_SECTION)
-            .expect("theme section");
-        let mut custom = None;
-        let iter = theme_section.iterate_item_attributes(0);
-        while let Some((key, value)) = iter.next() {
-            if key == "custom" {
-                custom = value.str().map(str::to_string);
-            }
-        }
-        assert_eq!(
-            custom.as_deref(),
-            Some("theme"),
-            "first section is the custom theme selector"
-        );
+        // Preferences + About — About last (the theme selector is gone,
+        // the app always follows the system; issue #53).
+        assert_eq!(menu.n_items(), 1);
         let expected: [(&str, &str); 2] =
             [("Preferences", "app.preferences"), ("About", "app.about")];
         let _ = &expected;
@@ -2204,7 +2038,7 @@ mod tests {
         set_locale(Locale::Spanish);
         let menu = hamburger_menu_model();
         let items_section = menu
-            .item_link(1, gio::MENU_LINK_SECTION)
+            .item_link(0, gio::MENU_LINK_SECTION)
             .expect("items section");
         let labels: Vec<String> = (0..2)
             .map(|index| {
@@ -2223,21 +2057,6 @@ mod tests {
             vec!["Preferencias".to_string(), "Acerca de".to_string(),]
         );
         reset_locale();
-    }
-
-    #[test]
-    fn color_scheme_preference_maps_to_libadwaita() {
-        assert_eq!(color_scheme_for("system"), libadwaita::ColorScheme::Default);
-        assert_eq!(
-            color_scheme_for("light"),
-            libadwaita::ColorScheme::ForceLight
-        );
-        assert_eq!(color_scheme_for("dark"), libadwaita::ColorScheme::ForceDark);
-        // Unknown values follow the desktop.
-        assert_eq!(
-            color_scheme_for("nonsense"),
-            libadwaita::ColorScheme::Default
-        );
     }
 
     #[test]
