@@ -538,25 +538,101 @@ fn build_network_page(
         .active(network.trust_invalid_certificates)
         .build();
 
+    let impact = libadwaita::SwitchRow::builder()
+        .title(t("Reduce transfer impact"))
+        .subtitle(t(
+            "Runs the sync engine with idle IO priority and low CPU priority so transfers do not saturate the machine. It is a priority hint, not a speed limit.",
+        ))
+        .active(network.reduce_transfer_impact)
+        .build();
+
+    let ssids = libadwaita::EntryRow::new();
+    ssids.set_title(t("Only sync on these Wi-Fi networks"));
+    ssids.set_text(network.allowed_ssids.as_deref().unwrap_or(""));
+    ssids.set_show_apply_button(true);
+    ssids.set_tooltip_text(Some(t(
+        "Comma-separated network names. Leave empty to sync on any network.",
+    )));
+
     {
         let store = store.clone();
         let proxy_guard = proxy.clone();
         let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
         proxy.connect_apply(move |_| {
-            save_network(&store, &proxy_guard, &trust_guard);
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
         });
     }
     {
         let store = store.clone();
         let proxy_guard = proxy.clone();
         let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
         trust.connect_active_notify(move |_| {
-            save_network(&store, &proxy_guard, &trust_guard);
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let proxy_guard = proxy.clone();
+        let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
+        impact.connect_active_notify(move |_| {
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let proxy_guard = proxy.clone();
+        let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
+        ssids.connect_apply(move |_| {
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
         });
     }
 
     proxy_group.add(&proxy);
     page.add(&proxy_group);
+
+    let wifi = libadwaita::PreferencesGroup::builder()
+        .title(t("Wi-Fi"))
+        .build();
+    wifi.add(&ssids);
+    page.add(&wifi);
+
+    let transfers = libadwaita::PreferencesGroup::builder()
+        .title(t("Transfers"))
+        .build();
+    transfers.add(&impact);
+    page.add(&transfers);
 
     let tls = libadwaita::PreferencesGroup::builder()
         .title(t("TLS"))
@@ -943,13 +1019,20 @@ fn save_delete_guard(
     }
 }
 
-fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libadwaita::SwitchRow) {
+fn save_network(
+    store: &ConfigStore,
+    proxy: &libadwaita::EntryRow,
+    trust: &libadwaita::SwitchRow,
+    impact: &libadwaita::SwitchRow,
+    ssids: &libadwaita::EntryRow,
+) {
     let value = proxy.text().trim().to_string();
     if !value.is_empty() && !valid_proxy_url(&value) {
         proxy.set_title(t("Invalid HTTP proxy URL"));
         proxy.add_css_class("error");
         return;
     }
+    let ssid_value = ssids.text().trim().to_string();
     if let Err(error) = persist_config(store, |config| {
         config.network.custom_proxy = if value.is_empty() {
             None
@@ -957,6 +1040,12 @@ fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libad
             Some(value.clone())
         };
         config.network.trust_invalid_certificates = trust.is_active();
+        config.network.reduce_transfer_impact = impact.is_active();
+        config.network.allowed_ssids = if ssid_value.is_empty() {
+            None
+        } else {
+            Some(ssid_value.clone())
+        };
     }) {
         eprintln!("Settings: could not save network settings: {error}");
         return;

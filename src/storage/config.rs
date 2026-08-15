@@ -266,6 +266,15 @@ impl Default for LoggingConfig {
 pub struct NetworkConfig {
     pub custom_proxy: Option<String>,
     pub trust_invalid_certificates: bool,
+    /// Whether sync processes run with reduced IO/CPU priority
+    /// (`ionice -c 3` + `nice -n 10`) so transfers do not saturate the
+    /// machine (issue #39). It is a priority hint, not a bandwidth cap.
+    #[serde(default)]
+    pub reduce_transfer_impact: bool,
+    /// Wi-Fi SSIDs synchronization is restricted to (comma separated).
+    /// Empty or `None` means any network (issue #41).
+    #[serde(default)]
+    pub allowed_ssids: Option<String>,
 }
 
 /// Normalize a Nextcloud server URL: scheme lowered, no embedded credentials,
@@ -1059,6 +1068,11 @@ fn validate_network(raw: Option<&Value>) -> Result<NetworkConfig, ConfigError> {
     Ok(NetworkConfig {
         custom_proxy,
         trust_invalid_certificates: get_bool(obj, "trust_invalid_certificates", false),
+        reduce_transfer_impact: get_bool(obj, "reduce_transfer_impact", false),
+        allowed_ssids: match obj.get("allowed_ssids") {
+            Some(Value::String(text)) if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        },
     })
 }
 

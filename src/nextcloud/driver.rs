@@ -407,6 +407,8 @@ mod tests {
         ctx.network = NetworkConfig {
             custom_proxy: Some("http://proxy:8080".to_string()),
             trust_invalid_certificates: true,
+            reduce_transfer_impact: false,
+            allowed_ssids: None,
         };
         ctx.retries = 7;
         ctx.exclude_file = Some(PathBuf::from("/tmp/excludes.lst"));
@@ -482,6 +484,8 @@ mod tests {
         ctx.network = NetworkConfig {
             custom_proxy: Some("http://proxy:8080".to_string()),
             trust_invalid_certificates: true,
+            reduce_transfer_impact: false,
+            allowed_ssids: None,
         };
         let spec = OpenCloudDriver.build_command(&ctx).expect("build succeeds");
         assert!(!spec.argv.iter().any(|arg| arg == "--httpproxy"));

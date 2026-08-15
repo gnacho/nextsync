@@ -316,7 +316,11 @@ fn engine_thread(
         Ok(spec) => spec,
         Err(_) => return EngineRun::Direct(SyncOutcome::Failed),
     };
-    let mut command = spec.to_command();
+    let mut command = if inputs.network.reduce_transfer_impact {
+        spec.to_command_low_impact()
+    } else {
+        spec.to_command()
+    };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match command.spawn() {
         Ok(child) => child,

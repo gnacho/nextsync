@@ -2214,3 +2214,27 @@ msgstr "Estilo oscuro"
 #: src/ui/settings.rs
 msgid "Desktop Integration"
 msgstr "Integración con el escritorio"
+
+#: src/ui/settings.rs
+msgid "Reduce transfer impact"
+msgstr "Reducir el impacto de las transferencias"
+
+#: src/ui/settings.rs
+msgid "Runs the sync engine with idle IO priority and low CPU priority so transfers do not saturate the machine. It is a priority hint, not a speed limit."
+msgstr "Ejecuta el motor de sincronización con prioridad de E/S inactiva y baja prioridad de CPU para que las transferencias no saturën la máquina. Es una indicación de prioridad, no un límite de velocidad."
+
+#: src/ui/settings.rs
+msgid "Only sync on these Wi-Fi networks"
+msgstr "Sincronizar solo en estas redes Wi-Fi"
+
+#: src/ui/settings.rs
+msgid "Comma-separated network names. Leave empty to sync on any network."
+msgstr "Nombres de red separados por comas. Déjalo vacío para sincronizar en cualquier red."
+
+#: src/ui/settings.rs
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+#: src/ui/settings.rs
+msgid "Transfers"
+msgstr "Transferencias"
