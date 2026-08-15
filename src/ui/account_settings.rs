@@ -15,8 +15,12 @@ use crate::ui::settings::{
 };
 use crate::util::i18n::t;
 
-/// Build the account settings panel widget (a vertical box of preference
-/// groups). The caller toggles its visibility below the folder list.
+/// Build the account settings panel widget. The caller toggles its
+/// visibility below the folder list.
+///
+/// The preference groups need a [`libadwaita::PreferencesPage`] container to
+/// render with the boxed-list styling; a bare box of groups looks broken, so
+/// the page is wrapped in a scroll window here.
 pub fn build_account_settings_panel(
     store: &ConfigStore,
     account: &AccountConfig,
@@ -24,7 +28,11 @@ pub fn build_account_settings_panel(
     callbacks: &SettingsCallbacks,
     host: &SettingsHost,
 ) -> gtk4::Box {
-    let box_container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    let page = libadwaita::PreferencesPage::new();
+    page.set_margin_top(12);
+    page.set_margin_bottom(12);
+    page.set_margin_start(12);
+    page.set_margin_end(12);
 
     // Server (read-only).
     let server_group = libadwaita::PreferencesGroup::builder()
@@ -36,7 +44,7 @@ pub fn build_account_settings_panel(
             .subtitle(account.login_name.as_str())
             .build(),
     );
-    box_container.append(&server_group);
+    page.add(&server_group);
 
     // Connection: per-account proxy + TLS trust (issue #56).
     let connection = libadwaita::PreferencesGroup::builder()
@@ -76,27 +84,35 @@ pub fn build_account_settings_panel(
     }
     connection.add(&proxy);
     connection.add(&trust);
-    box_container.append(&connection);
+    page.add(&connection);
 
     // Synchronization options (account-owned).
     for group in sync_option_groups(store, account_id, account, callbacks, host) {
-        box_container.append(&group);
+        page.add(&group);
     }
 
     // Detailed output (account-owned).
     let detailed_group = libadwaita::PreferencesGroup::new();
     detailed_group.add(&detailed_output_row(store, account_id, callbacks, account));
-    box_container.append(&detailed_group);
+    page.add(&detailed_group);
 
     // Deletion guard (account-owned).
-    box_container.append(&deletion_guard_group(store, account_id, account));
+    page.add(&deletion_guard_group(store, account_id, account));
 
     // Authentication + account removal (account-owned).
     for group in account_action_groups(store, account_id, account, callbacks, host) {
-        box_container.append(&group);
+        page.add(&group);
     }
 
-    box_container
+    // Scrollable wrapper so the panel works in any window height.
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroller.set_child(Some(&page));
+    scroller.set_vexpand(true);
+
+    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    root.append(&scroller);
+    root
 }
 
 #[cfg(test)]
@@ -129,13 +145,18 @@ mod tests {
                     &libadwaita::ToastOverlay::new(),
                 ),
             );
-            // The panel hosts the server + connection groups plus the shared
-            // account option groups; it builds without panicking.
+            // The panel is a scrollable wrapper around a PreferencesPage
+            // holding the server and connection groups; it must build
+            // without panicking and expose a real page.
             let children = panel.observe_children();
-            let count = children.n_items();
+            assert_eq!(children.n_items(), 1, "one scroll window wrapper");
+            let child = children.item(0).unwrap();
+            let scroller = child
+                .downcast::<gtk4::ScrolledWindow>()
+                .expect("the wrapper is a ScrolledWindow");
             assert!(
-                count >= 2,
-                "expected at least the server and connection groups, got {count}"
+                scroller.child().is_some(),
+                "the scroller hosts the PreferencesPage"
             );
             reset_locale();
         });

@@ -1418,6 +1418,7 @@ fn review_then_add_folder(
     let remote_for_probe = remote_path.clone();
     let account_id_for_probe = account_id.clone();
     // Issue #36: the probe also estimates the remote size.
+    let space_id_for_probe = space_id.clone();
     let probe = gio::spawn_blocking(move || -> Option<(bool, Option<u64>)> {
         let password = CredentialsStore::get_for_account(&account_id_for_probe, &server, &login)
             .ok()
@@ -1425,7 +1426,7 @@ fn review_then_add_folder(
         let api = NextcloudApi::new();
         match provider {
             Provider::OpenCloud => {
-                let space = space_id?;
+                let space = space_id_for_probe?;
                 let size = api
                     .opencloud_space_size(&server, &login, &password, &space)
                     .ok()
@@ -1473,6 +1474,7 @@ fn review_then_add_folder(
             let account_id = account_id_for_commit.clone();
             let local_root = local_root_for_facts.clone();
             let remote_path = remote_path.clone();
+            let space_id = space_id.clone();
             let on_folder_added = on_folder_added_for_commit.clone();
             let on_error = on_error.clone();
             let parent = parent.clone();
@@ -1484,7 +1486,7 @@ fn review_then_add_folder(
                         id: String::new(),
                         local_root: local_root.clone(),
                         remote_path: remote_path.clone(),
-                        space_id: None,
+                        space_id: space_id.clone(),
                         size_confirmed: oversized,
                     },
                 ) {
