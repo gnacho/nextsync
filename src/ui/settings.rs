@@ -185,7 +185,7 @@ impl SettingsView {
     /// Whether the bottom page switcher is revealed (issue #51: it must
     /// always be, or the non-visible pages are unreachable).
     pub fn switcher_revealed(&self) -> bool {
-        self.switcher.reveals_child()
+        self.switcher.property::<bool>("reveal")
     }
 
     /// Show the page identified by `name` (see [`SettingsPage`] constants).
