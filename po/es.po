@@ -2441,7 +2441,6 @@ msgstr "Exportar configuración"
 msgid "Import configuration"
 msgstr "Importar configuración"
 
-
 #: src/ui/setup.rs
 msgid "App Token"
 msgstr "Token de aplicación"
@@ -2465,3 +2464,11 @@ msgstr "Aún no sincronizado"
 #: src/ui/main_window.rs
 msgid "Connected"
 msgstr "Conectado"
+
+#: src/ui/main_window.rs
+msgid "Account settings"
+msgstr "Ajustes de la cuenta"
+
+#: src/ui/account_settings.rs
+msgid "Connection"
+msgstr "Conexión"

@@ -15,19 +15,20 @@ use crate::ui::settings::{
 };
 use crate::util::i18n::t;
 
-/// Build the account settings panel widget. The caller toggles its
-/// visibility below the folder list.
+/// Build the account settings panel widget. The caller toggles it below the
+/// folder list.
 ///
 /// The preference groups need a [`libadwaita::PreferencesPage`] container to
-/// render with the boxed-list styling; a bare box of groups looks broken, so
-/// the page is wrapped in a scroll window here.
+/// render with the boxed-list styling; the page is wrapped in a
+/// [`libadwaita::Revealer`] so the caller can animate it open/closed without
+/// the layout collapsing (a nested scrolled window was fragile).
 pub fn build_account_settings_panel(
     store: &ConfigStore,
     account: &AccountConfig,
     account_id: &str,
     callbacks: &SettingsCallbacks,
     host: &SettingsHost,
-) -> gtk4::Box {
+) -> gtk4::Revealer {
     let page = libadwaita::PreferencesPage::new();
     page.set_margin_top(12);
     page.set_margin_bottom(12);
@@ -104,15 +105,13 @@ pub fn build_account_settings_panel(
         page.add(&group);
     }
 
-    // Scrollable wrapper so the panel works in any window height.
-    let scroller = gtk4::ScrolledWindow::new();
-    scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroller.set_child(Some(&page));
-    scroller.set_vexpand(true);
-
-    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    root.append(&scroller);
-    root
+    // Revealer wrapper: animates the panel open/closed and keeps the layout
+    // correct when hidden (issue #63).
+    let revealer = gtk4::Revealer::new();
+    revealer.set_child(Some(&page));
+    revealer.set_reveal_child(false);
+    revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+    revealer
 }
 
 #[cfg(test)]
@@ -145,18 +144,16 @@ mod tests {
                     &libadwaita::ToastOverlay::new(),
                 ),
             );
-            // The panel is a scrollable wrapper around a PreferencesPage
-            // holding the server and connection groups; it must build
-            // without panicking and expose a real page.
-            let children = panel.observe_children();
-            assert_eq!(children.n_items(), 1, "one scroll window wrapper");
-            let child = children.item(0).unwrap();
-            let scroller = child
-                .downcast::<gtk4::ScrolledWindow>()
-                .expect("the wrapper is a ScrolledWindow");
+            // The panel is a Revealer wrapping a PreferencesPage holding
+            // the server and connection groups; it must build without
+            // panicking, start hidden, and toggle open.
+            assert!(!panel.is_child_revealed(), "the panel starts hidden");
+            panel.set_reveal_child(true);
+            assert!(panel.is_child_revealed());
+            let child = panel.child().expect("a child");
             assert!(
-                scroller.child().is_some(),
-                "the scroller hosts the PreferencesPage"
+                child.downcast::<libadwaita::PreferencesPage>().is_ok(),
+                "the revealer hosts the PreferencesPage"
             );
             reset_locale();
         });

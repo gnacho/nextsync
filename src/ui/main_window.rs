@@ -1631,7 +1631,6 @@ impl MainWindow {
                 &settings_callbacks,
                 &host,
             );
-            panel.set_visible(false);
             let toggle = libadwaita::ActionRow::builder()
                 .title(t("Account settings"))
                 .subtitle(t(
@@ -1652,7 +1651,7 @@ impl MainWindow {
             {
                 let panel = panel.clone();
                 toggle.connect_activated(move |_| {
-                    panel.set_visible(!panel.is_visible());
+                    panel.set_reveal_child(!panel.is_child_revealed());
                 });
             }
             view.append_widget(&toggle);
