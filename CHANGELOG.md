@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.56.0] - 2026-08-15
+
+### Cambiado
+- **Labels de inicio de sesión más claros**: el botón de la página de carpetas ahora dice "Iniciar sesión" en vez de "Revisar configuración"; en OpenCloud el campo de contraseña se llama "Token de aplicación" y muestra una burbuja de información explicando que el token se crea en la web del servidor (App Tokens) y que la contraseña de la cuenta no vale ahí.
+
 ## [0.54.0] - 2026-08-15
 
 ### Cambiado
