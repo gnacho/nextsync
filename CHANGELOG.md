@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.74.0] - 2026-08-15
+
+### Cambiado
+- **Textos explicativos en burbujas (#68)**: los subtítulos largos de las filas pasan a tooltips (una línea por fila); las acciones obvias (iniciar sesión de nuevo, quitar cuenta) pierden la explicación.
+- **Vista de cuenta reordenada (#69)**: primero las carpetas, debajo el resumen unificado (icono verde, nombre del servidor, GB usados) con el botón Añadir carpeta, y debajo los ajustes de la cuenta. Sin avatar ni usuario en el resumen (viven en la barra lateral).
+- **Agregar cuenta en el menú principal (#70)**: el botón + desaparece de la barra lateral; el menú hamburguesa abre el flujo (proveedor, servidor, credenciales, carpetas).
+- **Ventana sin subtítulo (#71)**: fuera "Sincronización de archivos para GNOME"; el About describe "A lightweight desktop synchronizer for your files."
+
 ## [0.72.0] - 2026-08-15
 
 ### Cambiado
