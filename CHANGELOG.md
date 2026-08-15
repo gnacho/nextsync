@@ -2,6 +2,17 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.90.0] - 2026-08-15
+
+Ajustes separados: lo de cada cuenta, en la ventana principal; lo global, en Preferencias.
+
+### Cambiado
+- **Panel de ajustes por cuenta (#56)**: la ventana principal gana una fila "Ajustes de la cuenta" bajo las carpetas sincronizadas que despliega las preferencias propias de la cuenta: servidor, proxy y confianza TLS, opciones de sincronización (cambios locales/remotos, exclusiones, reintentos), integración de escritorio, guard de borrado, salida detallada, autenticación ("Sign in again") y eliminación de la cuenta.
+- **Preferencias solo globales (#56)**: la vista de Preferencias queda con General (arranque, notificaciones, horario de silencio), Red (allowlist Wi-Fi, impacto de transferencia) y Avanzado (logging, umbral de tamaño, copia de seguridad).
+
+### Corregido
+- **El proxy y la confianza TLS sí llegan al motor (#56)**: la producción creaba los runtimes con una configuración de red por defecto, así que el proxy configurado nunca se aplicaba. Proxy y trust pasan a ser campos por cuenta (con el valor global como respaldo) y la red efectiva se plumba a cada ejecución del motor, refrescada en caliente al cambiar los ajustes.
+
 ## [0.80.0] - 2026-08-15
 
 OpenCloud: las carpetas remotas ya se crean solas.

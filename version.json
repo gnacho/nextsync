@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.80.0",
+  "version": "0.90.0",
   "mandatory": false,
   "summary": "Parity and reliability pass: live sync wired end to end (filesystem watcher, notify_push, per-file progress, activity log), deletion-review dialog, Show Log, and portable release binaries.",
   "changelog": [
