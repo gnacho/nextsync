@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.64.0] - 2026-08-15
+
+### Corregido
+- **El botón "Ajustes de la cuenta" ya abre el panel (#63)**: la fila era una ActionRow suelta (fuera de una lista), que en producción no emitía `activated` al hacer clic físico aunque funcionaba programáticamente. Ahora es un `gtk4::Button` con `connect_clicked`, que recibe el clic de forma fiable y alterna el panel.
+
 ## [0.62.0] - 2026-08-15
 
 ### Corregido
