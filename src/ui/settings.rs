@@ -118,10 +118,8 @@ impl SettingsView {
     /// `account_id` is the key every write operation uses against the store.
     pub fn new(
         config_store: ConfigStore,
-        account: AccountConfig,
-        account_id: String,
         callbacks: SettingsCallbacks,
-        host: &SettingsHost,
+        _host: &SettingsHost,
     ) -> Self {
         // Top-level sections (general/logging/network) come from the current
         // configuration; account-owned settings come from the snapshot.
@@ -131,17 +129,8 @@ impl SettingsView {
         // removed from Settings by user decision (issue #18): the sync view
         // owns it, so the settings pages never duplicate it.
         let general = build_general_page(&config_store, &config.general);
-        let synchronization =
-            build_sync_page(&config_store, &account_id, &account, &callbacks, host);
-        let network = build_network_page(&config_store, &account, &config.network);
-        let advanced = build_advanced_page(
-            &config_store,
-            &account_id,
-            &account,
-            &config.logging,
-            &callbacks,
-            host,
-        );
+        let network = build_network_page(&config_store, &config.network);
+        let advanced = build_advanced_page(&config_store, &config.logging, &callbacks);
 
         let stack = libadwaita::ViewStack::new();
         let toolbar = libadwaita::ToolbarView::new();
@@ -160,7 +149,6 @@ impl SettingsView {
             page_names,
         };
         view.add_page("general", general);
-        view.add_page("synchronization", synchronization);
         view.add_page("network", network);
         view.add_page("advanced", advanced);
         stack.set_visible_child_name("general");
@@ -202,7 +190,6 @@ impl SettingsView {
 /// Stable identifiers for the settings pages.
 pub mod page {
     pub const GENERAL: &str = "general";
-    pub const SYNCHRONIZATION: &str = "synchronization";
     pub const NETWORK: &str = "network";
     pub const ADVANCED: &str = "advanced";
 }
@@ -412,18 +399,18 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
 
 /// Synchronization page: the manual-only banner, the four trigger switches,
 /// exclusions and reliability.
-fn build_sync_page(
+/// Build the per-account synchronization option groups (issue #56): they
+/// are shared by the account settings panel in the main window and were
+/// the former Synchronization page.
+pub(crate) fn sync_option_groups(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
     callbacks: &SettingsCallbacks,
     host: &SettingsHost,
-) -> libadwaita::PreferencesPage {
+) -> Vec<libadwaita::PreferencesGroup> {
     let sync = &account.sync;
-    let page = libadwaita::PreferencesPage::builder()
-        .title(t("Synchronization"))
-        .icon_name("emblem-synchronizing-symbolic")
-        .build();
+    let mut groups: Vec<libadwaita::PreferencesGroup> = Vec::new();
 
     let manual_group = libadwaita::PreferencesGroup::new();
     let banner = libadwaita::Banner::new(t(
@@ -433,7 +420,7 @@ fn build_sync_page(
         sync,
     )));
     manual_group.add(&banner);
-    page.add(&manual_group);
+    groups.push(manual_group);
 
     let local = libadwaita::PreferencesGroup::builder()
         .title(t("Local Changes"))
@@ -457,7 +444,7 @@ fn build_sync_page(
     local.add(&inotify);
     local.add(&local_timer);
     local.add(&local_minutes);
-    page.add(&local);
+    groups.push(local);
 
     let remote = libadwaita::PreferencesGroup::builder()
         .title(t("Remote Changes"))
@@ -482,7 +469,7 @@ fn build_sync_page(
     remote.add(&push);
     remote.add(&remote_timer);
     remote.add(&remote_minutes);
-    page.add(&remote);
+    groups.push(remote);
 
     let excluded = libadwaita::PreferencesGroup::builder()
         .title(t("Excluded Files"))
@@ -515,7 +502,7 @@ fn build_sync_page(
         });
     }
     excluded.add(&edit_row);
-    page.add(&excluded);
+    groups.push(excluded);
 
     let reliability = libadwaita::PreferencesGroup::builder()
         .title(t("Reliability"))
@@ -527,40 +514,7 @@ fn build_sync_page(
         sync.max_sync_retries as f64,
     );
     reliability.add(&retries);
-    page.add(&reliability);
-
-    // Folder-size confirmation (issue #36): its own group so it never
-    // collides with the per-account trigger settings above. The threshold
-    // is a general setting; `0` disables the check.
-    let size_group = libadwaita::PreferencesGroup::builder()
-        .title(t("Folder Size Confirmation"))
-        .build();
-    let threshold_mb = store
-        .load()
-        .map(|config| config.general.size_confirm_threshold_mb)
-        .unwrap_or(500);
-    let size_row = spin_row(
-        t("Ask before syncing folders larger than"),
-        0.0,
-        1_000_000.0,
-        threshold_mb as f64,
-    );
-    let unit = gtk4::Label::new(Some(t("MB")));
-    unit.set_valign(gtk4::Align::Center);
-    size_row.add_suffix(&unit);
-    size_group.add(&size_row);
-    page.add(&size_group);
-    {
-        let store = store.clone();
-        size_row.connect_value_notify(move |row| {
-            let megabytes = row.value() as i64;
-            if let Err(error) = persist_config(&store, |config| {
-                config.general.size_confirm_threshold_mb = megabytes;
-            }) {
-                eprintln!("Settings: could not save the size threshold: {error}");
-            }
-        });
-    }
+    groups.push(reliability);
 
     // Desktop integration (restored by user decision, issue #25): targets
     // the account's first folder, like the Python's `_build_desktop_integrations`.
@@ -572,7 +526,7 @@ fn build_sync_page(
         for row in &integration_rows {
             integration_group.add(row);
         }
-        page.add(&integration_group);
+        groups.push(integration_group);
     }
 
     let widgets = SyncWidgets {
@@ -661,45 +615,50 @@ fn build_sync_page(
     }
 
     let _ = widgets;
-    page
+    groups
 }
 
-/// Network page: server/login read-only row, custom proxy and TLS trust.
+/// Global folder-size confirmation threshold (issue #36 / #56): `0` disables.
+pub(crate) fn size_confirmation_group(store: &ConfigStore) -> libadwaita::PreferencesGroup {
+    let size_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Folder Size Confirmation"))
+        .build();
+    let threshold_mb = store
+        .load()
+        .map(|config| config.general.size_confirm_threshold_mb)
+        .unwrap_or(500);
+    let size_row = spin_row(
+        t("Ask before syncing folders larger than"),
+        0.0,
+        1_000_000.0,
+        threshold_mb as f64,
+    );
+    let unit = gtk4::Label::new(Some(t("MB")));
+    unit.set_valign(gtk4::Align::Center);
+    size_row.add_suffix(&unit);
+    size_group.add(&size_row);
+    let store = store.clone();
+    size_row.connect_value_notify(move |row| {
+        let megabytes = row.value() as i64;
+        if let Err(error) = persist_config(&store, |config| {
+            config.general.size_confirm_threshold_mb = megabytes;
+        }) {
+            eprintln!("Settings: could not save the size threshold: {error}");
+        }
+    });
+    size_group
+}
+
+/// Network page: global network-wide settings (Wi-Fi allowlist and transfer
+/// impact, issue #56). The proxy and TLS trust moved to the per-account
+/// panel in the main window.
 fn build_network_page(
     store: &ConfigStore,
-    account: &AccountConfig,
     network: &crate::storage::config::NetworkConfig,
 ) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("Network"))
         .icon_name("network-wired-symbolic")
-        .build();
-
-    let server = libadwaita::PreferencesGroup::builder()
-        .title(t("Server"))
-        .build();
-    server.add(
-        &libadwaita::ActionRow::builder()
-            .title(account.server_url.as_str())
-            .subtitle(account.login_name.as_str())
-            .build(),
-    );
-    page.add(&server);
-
-    let proxy_group = libadwaita::PreferencesGroup::builder()
-        .title(t("Proxy"))
-        .build();
-    let proxy = libadwaita::EntryRow::new();
-    proxy.set_title(t("Custom HTTP proxy"));
-    proxy.set_text(network.custom_proxy.as_deref().unwrap_or(""));
-    proxy.set_show_apply_button(true);
-    proxy.set_tooltip_text(Some(t("Save the custom HTTP proxy")));
-    let trust = libadwaita::SwitchRow::builder()
-        .title(t("Allow invalid or self-signed certificates"))
-        .subtitle(t(
-            "This weakens connection security. Enable only for a server you trust.",
-        ))
-        .active(network.trust_invalid_certificates)
         .build();
 
     let impact = libadwaita::SwitchRow::builder()
@@ -720,71 +679,20 @@ fn build_network_page(
 
     {
         let store = store.clone();
-        let proxy_guard = proxy.clone();
-        let trust_guard = trust.clone();
-        let impact_guard = impact.clone();
-        let ssids_guard = ssids.clone();
-        proxy.connect_apply(move |_| {
-            save_network(
-                &store,
-                &proxy_guard,
-                &trust_guard,
-                &impact_guard,
-                &ssids_guard,
-            );
-        });
-    }
-    {
-        let store = store.clone();
-        let proxy_guard = proxy.clone();
-        let trust_guard = trust.clone();
-        let impact_guard = impact.clone();
-        let ssids_guard = ssids.clone();
-        trust.connect_active_notify(move |_| {
-            save_network(
-                &store,
-                &proxy_guard,
-                &trust_guard,
-                &impact_guard,
-                &ssids_guard,
-            );
-        });
-    }
-    {
-        let store = store.clone();
-        let proxy_guard = proxy.clone();
-        let trust_guard = trust.clone();
         let impact_guard = impact.clone();
         let ssids_guard = ssids.clone();
         impact.connect_active_notify(move |_| {
-            save_network(
-                &store,
-                &proxy_guard,
-                &trust_guard,
-                &impact_guard,
-                &ssids_guard,
-            );
+            save_network(&store, &impact_guard, &ssids_guard);
         });
     }
     {
         let store = store.clone();
-        let proxy_guard = proxy.clone();
-        let trust_guard = trust.clone();
         let impact_guard = impact.clone();
         let ssids_guard = ssids.clone();
         ssids.connect_apply(move |_| {
-            save_network(
-                &store,
-                &proxy_guard,
-                &trust_guard,
-                &impact_guard,
-                &ssids_guard,
-            );
+            save_network(&store, &impact_guard, &ssids_guard);
         });
     }
-
-    proxy_group.add(&proxy);
-    page.add(&proxy_group);
 
     let wifi = libadwaita::PreferencesGroup::builder()
         .title(t("Wi-Fi"))
@@ -798,11 +706,6 @@ fn build_network_page(
     transfers.add(&impact);
     page.add(&transfers);
 
-    let tls = libadwaita::PreferencesGroup::builder()
-        .title(t("TLS"))
-        .build();
-    tls.add(&trust);
-    page.add(&tls);
     page
 }
 
@@ -811,11 +714,8 @@ fn build_network_page(
 #[allow(clippy::too_many_arguments)]
 fn build_advanced_page(
     store: &ConfigStore,
-    account_id: &str,
-    account: &AccountConfig,
     logging: &LoggingConfig,
     callbacks: &SettingsCallbacks,
-    host: &SettingsHost,
 ) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("Advanced"))
@@ -886,30 +786,95 @@ fn build_advanced_page(
             .subtitle("nextsync-YYYY-MM-DD.log")
             .build(),
     );
+    page.add(&logging_group);
 
-    // Detailed output sits in the Logging group but persists through the
-    // account sync settings (the store field is `account.sync.detailed_output`).
+    page.add(&size_confirmation_group(store));
+
+    // Configuration backup (issue #47): export/import the whole settings
+    // file. Keyring secrets are never part of it.
+    let backup_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Backup"))
+        .description(t(
+            "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty.",
+        ))
+        .build();
+    let export_row = libadwaita::ActionRow::builder()
+        .title(t("Export configuration…"))
+        .subtitle(t(
+            "Save every account, folder and preference to a JSON file",
+        ))
+        .activatable(true)
+        .build();
+    let import_row = libadwaita::ActionRow::builder()
+        .title(t("Import configuration…"))
+        .subtitle(t("Replace the current configuration from a backup file"))
+        .activatable(true)
+        .build();
+    for (row, icon) in [
+        (&export_row, "document-save-symbolic"),
+        (&import_row, "document-open-symbolic"),
+    ] {
+        let glyph = gtk4::Image::builder()
+            .icon_name(icon)
+            .pixel_size(16)
+            .build();
+        row.add_prefix(&glyph);
+        let next = gtk4::Image::builder()
+            .icon_name("go-next-symbolic")
+            .pixel_size(16)
+            .build();
+        row.add_suffix(&next);
+    }
+    {
+        let store = store.clone();
+        export_row.connect_activated(move |_| export_configuration(&store));
+    }
+    {
+        let store = store.clone();
+        let callbacks = callbacks.clone();
+        import_row.connect_activated(move |_| import_configuration(&store, &callbacks));
+    }
+    backup_group.add(&export_row);
+    backup_group.add(&import_row);
+    page.add(&backup_group);
+
+    page
+}
+
+/// Detailed-output switch row (account-owned, issue #56): reused by the
+/// account settings panel.
+pub(crate) fn detailed_output_row(
+    store: &ConfigStore,
+    account_id: &str,
+    callbacks: &SettingsCallbacks,
+    account: &AccountConfig,
+) -> libadwaita::SwitchRow {
     let detailed = libadwaita::SwitchRow::builder()
         .title(t("Detailed synchronization output"))
         .active(account.sync.detailed_output)
         .build();
-    logging_group.add(&detailed);
-    {
-        let store = store.clone();
-        let account_id = account_id.to_string();
-        let callbacks = callbacks.clone();
-        let detailed_guard = detailed.clone();
-        detailed.connect_active_notify(move |_| {
-            if let Err(error) = persist_account(&store, &account_id, |account| {
-                account.sync.detailed_output = detailed_guard.is_active();
-            }) {
-                eprintln!("Settings: could not save detailed output: {error}");
-            }
-            invoke(&callbacks.on_reconfigure);
-        });
-    }
-    page.add(&logging_group);
-    // Deletion guard (account-owned).
+    let store = store.clone();
+    let account_id = account_id.to_string();
+    let callbacks = callbacks.clone();
+    let detailed_guard = detailed.clone();
+    detailed.connect_active_notify(move |_| {
+        if let Err(error) = persist_account(&store, &account_id, |account| {
+            account.sync.detailed_output = detailed_guard.is_active();
+        }) {
+            eprintln!("Settings: could not save detailed output: {error}");
+        }
+        invoke(&callbacks.on_reconfigure);
+    });
+    detailed
+}
+
+/// Deletion-guard group (account-owned, issue #56): reused by the account
+/// settings panel.
+pub(crate) fn deletion_guard_group(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+) -> libadwaita::PreferencesGroup {
     let guard = libadwaita::PreferencesGroup::builder()
         .title(t("Deletion Guard"))
         .description(
@@ -988,60 +953,18 @@ fn build_advanced_page(
     guard.add(&guard_enabled);
     guard.add(&guard_count);
     guard.add(&guard_percent);
-    page.add(&guard);
+    guard
+}
 
-    // Configuration backup (issue #47): export/import the whole settings
-    // file. Keyring secrets are never part of it.
-    let backup_group = libadwaita::PreferencesGroup::builder()
-        .title(t("Backup"))
-        .description(t(
-            "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty.",
-        ))
-        .build();
-    let export_row = libadwaita::ActionRow::builder()
-        .title(t("Export configuration…"))
-        .subtitle(t(
-            "Save every account, folder and preference to a JSON file",
-        ))
-        .activatable(true)
-        .build();
-    let import_row = libadwaita::ActionRow::builder()
-        .title(t("Import configuration…"))
-        .subtitle(t("Replace the current configuration from a backup file"))
-        .activatable(true)
-        .build();
-    for (row, icon) in [
-        (&export_row, "document-save-symbolic"),
-        (&import_row, "document-open-symbolic"),
-    ] {
-        let glyph = gtk4::Image::builder()
-            .icon_name(icon)
-            .pixel_size(16)
-            .build();
-        row.add_prefix(&glyph);
-        let next = gtk4::Image::builder()
-            .icon_name("go-next-symbolic")
-            .pixel_size(16)
-            .build();
-        row.add_suffix(&next);
-    }
-    {
-        let store = store.clone();
-        export_row.connect_activated(move |_| export_configuration(&store));
-    }
-    {
-        let store = store.clone();
-        let callbacks = callbacks.clone();
-        import_row.connect_activated(move |_| import_configuration(&store, &callbacks));
-    }
-    backup_group.add(&export_row);
-    backup_group.add(&import_row);
-    page.add(&backup_group);
-
-    // Diagnostics removed by user decision (issue #18): the log files under
-    // $XDG_STATE_HOME carry the same information.
-
-    // Authentication: re-enter credentials without removing the account.
+/// Authentication and account-removal groups (issue #56): reused by the
+/// account settings panel.
+pub(crate) fn account_action_groups(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+    host: &SettingsHost,
+) -> Vec<libadwaita::PreferencesGroup> {
     let auth_group = libadwaita::PreferencesGroup::builder()
         .title(t("Authentication"))
         .description(t(
@@ -1077,9 +1000,7 @@ fn build_advanced_page(
         );
     });
     auth_group.add(&sign_in_again);
-    page.add(&auth_group);
 
-    // Account removal (typed confirmation).
     let account_group = libadwaita::PreferencesGroup::builder()
         .title(t("Account"))
         .description(
@@ -1100,9 +1021,8 @@ fn build_advanced_page(
         present_remove_account(&login_name, &host, &callbacks);
     });
     account_group.add(&remove);
-    page.add(&account_group);
 
-    page
+    vec![auth_group, account_group]
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,6 +1056,37 @@ fn invoke(callback: &Option<SettingsCallback>) {
     if let Some(callback) = callback {
         callback();
     }
+}
+
+/// Persist an account's proxy + TLS-trust overrides and refresh the runtime
+/// network config (issue #56). Shared by the account settings panel.
+pub(crate) fn save_account_network(
+    store: &ConfigStore,
+    account_id: &str,
+    proxy: &libadwaita::EntryRow,
+    trust: &libadwaita::SwitchRow,
+    callbacks: &SettingsCallbacks,
+) {
+    let value = proxy.text().trim().to_string();
+    if !value.is_empty() && !valid_proxy_url(&value) {
+        proxy.set_title(t("Invalid HTTP proxy URL"));
+        proxy.add_css_class("error");
+        return;
+    }
+    if let Err(error) = persist_account(store, account_id, |account| {
+        account.custom_proxy = if value.is_empty() {
+            None
+        } else {
+            Some(value.clone())
+        };
+        account.trust_invalid_certificates = trust.is_active();
+    }) {
+        eprintln!("Settings: could not save the account connection settings: {error}");
+        return;
+    }
+    proxy.set_title(t("Custom HTTP proxy"));
+    proxy.remove_css_class("error");
+    invoke(&callbacks.on_reconfigure);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1257,27 +1208,9 @@ fn save_delete_guard(
     }
 }
 
-fn save_network(
-    store: &ConfigStore,
-    proxy: &libadwaita::EntryRow,
-    trust: &libadwaita::SwitchRow,
-    impact: &libadwaita::SwitchRow,
-    ssids: &libadwaita::EntryRow,
-) {
-    let value = proxy.text().trim().to_string();
-    if !value.is_empty() && !valid_proxy_url(&value) {
-        proxy.set_title(t("Invalid HTTP proxy URL"));
-        proxy.add_css_class("error");
-        return;
-    }
+fn save_network(store: &ConfigStore, impact: &libadwaita::SwitchRow, ssids: &libadwaita::EntryRow) {
     let ssid_value = ssids.text().trim().to_string();
     if let Err(error) = persist_config(store, |config| {
-        config.network.custom_proxy = if value.is_empty() {
-            None
-        } else {
-            Some(value.clone())
-        };
-        config.network.trust_invalid_certificates = trust.is_active();
         config.network.reduce_transfer_impact = impact.is_active();
         config.network.allowed_ssids = if ssid_value.is_empty() {
             None
@@ -1286,10 +1219,7 @@ fn save_network(
         };
     }) {
         eprintln!("Settings: could not save network settings: {error}");
-        return;
     }
-    proxy.set_title(t("Custom HTTP proxy"));
-    proxy.remove_css_class("error");
 }
 
 // ---------------------------------------------------------------------------
@@ -2578,30 +2508,18 @@ mod tests {
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
-            let account_id = store.add_account(&account).unwrap();
+            let _account_id = store.add_account(&account).unwrap();
             let host = test_host();
-            let view = SettingsView::new(
-                store.clone(),
-                account.clone(),
-                account_id.clone(),
-                SettingsCallbacks::default(),
-                &host,
-            );
-            assert_eq!(view.page_names().len(), 4);
+            let view = SettingsView::new(store.clone(), SettingsCallbacks::default(), &host);
+            assert_eq!(view.page_names().len(), 3);
             assert!(view
                 .page_names()
                 .iter()
                 .any(|name| name == crate::ui::settings::page::ADVANCED));
 
             set_locale(Locale::Spanish);
-            let view = SettingsView::new(
-                store,
-                account,
-                account_id,
-                SettingsCallbacks::default(),
-                &host,
-            );
-            assert_eq!(view.page_names().len(), 4);
+            let view = SettingsView::new(store, SettingsCallbacks::default(), &host);
+            assert_eq!(view.page_names().len(), 3);
             reset_locale();
         });
     }
@@ -2622,25 +2540,11 @@ mod tests {
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
-            let account_id = store.add_account(&account).unwrap();
-            let view = SettingsView::new(
-                store,
-                account,
-                account_id,
-                SettingsCallbacks::default(),
-                &test_host(),
-            );
+            let _account_id = store.add_account(&account).unwrap();
+            let view = SettingsView::new(store, SettingsCallbacks::default(), &test_host());
 
             let names: Vec<&str> = view.page_names().iter().map(String::as_str).collect();
-            assert_eq!(
-                names,
-                [
-                    page::GENERAL,
-                    page::SYNCHRONIZATION,
-                    page::NETWORK,
-                    page::ADVANCED
-                ]
-            );
+            assert_eq!(names, [page::GENERAL, page::NETWORK, page::ADVANCED]);
             for name in view.page_names() {
                 assert!(
                     view.stack.child_by_name(name).is_some(),
@@ -2664,10 +2568,10 @@ mod tests {
                 view.stack.visible_child_name().as_deref(),
                 Some(page::ADVANCED)
             );
-            view.show_page(page::SYNCHRONIZATION);
+            view.show_page(page::NETWORK);
             assert_eq!(
                 view.stack.visible_child_name().as_deref(),
-                Some(page::SYNCHRONIZATION)
+                Some(page::NETWORK)
             );
             reset_locale();
         });

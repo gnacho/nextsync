@@ -456,6 +456,8 @@ mod tests {
             sync: Default::default(),
             delete_guard: Default::default(),
             runtime: Default::default(),
+            custom_proxy: None,
+            trust_invalid_certificates: false,
         }
     }
 

@@ -677,6 +677,11 @@ impl AccountRuntime {
         }
     }
 
+    /// Replace the network config used by future engine runs (issue #56).
+    pub fn set_network(&mut self, network: NetworkConfig) {
+        self.network = network;
+    }
+
     /// Start runtimes for every configured folder and wire the system watchers
     /// (network/power/suspend) and the notify_push client.
     /// Apply the global environment gates (metered networks, Wi-Fi allowlist,
@@ -884,8 +889,29 @@ pub struct AccountManager {
     sync_permit: SyncPermit,
     /// Global `general.pause_on_battery` preference, applied to new runtimes.
     pause_on_battery: bool,
+    /// Global network snapshot; each runtime receives the effective network
+    /// config (account overrides merged on top, issue #56).
+    network: NetworkConfig,
     /// Builds the production watchers; tests swap in fakes.
     watcher_factory: WatcherFactory,
+}
+
+/// The network config an account's engine runs with: the account's proxy and
+/// trust overrides on top of the global preferences (issue #56). A proxy set
+/// on the account replaces the global one; trust is enabled when either side
+/// asks for it.
+pub fn effective_network(account: &AccountConfig, global: &NetworkConfig) -> NetworkConfig {
+    NetworkConfig {
+        custom_proxy: account
+            .custom_proxy
+            .clone()
+            .filter(|proxy| !proxy.trim().is_empty())
+            .or_else(|| global.custom_proxy.clone()),
+        trust_invalid_certificates: account.trust_invalid_certificates
+            || global.trust_invalid_certificates,
+        reduce_transfer_impact: global.reduce_transfer_impact,
+        allowed_ssids: global.allowed_ssids.clone(),
+    }
 }
 
 impl AccountManager {
@@ -898,6 +924,7 @@ impl AccountManager {
             source,
             sync_permit: SyncPermit::try_new(1).expect("permit max 1"),
             pause_on_battery: false,
+            network: NetworkConfig::default(),
             watcher_factory: default_watcher_factory(),
         }
     }
@@ -911,6 +938,7 @@ impl AccountManager {
     /// the progress forwarders.
     pub fn start(&mut self, config: &Config) {
         self.pause_on_battery = config.general.pause_on_battery;
+        self.network = config.network.clone();
         for account in config.accounts.clone() {
             self.ensure_runtime(account);
         }
@@ -995,9 +1023,10 @@ impl AccountManager {
         if self.runtimes.contains_key(&account.id) {
             return;
         }
+        let network = effective_network(&account, &self.network);
         let mut runtime = AccountRuntime::new(
             account,
-            NetworkConfig::default(),
+            network,
             self.source.clone(),
             Some(self.sync_permit.clone()),
             self.pause_on_battery,
@@ -1011,6 +1040,20 @@ impl AccountManager {
         let account_id = runtime.account_id().to_string();
         self.aggregate_sources.insert(account_id, sources);
         self.runtimes.insert(runtime.account.id.clone(), runtime);
+    }
+
+    /// Refresh the effective network config of every runtime after the
+    /// global or per-account network settings changed (issue #56). Applies
+    /// to engine runs started after the call.
+    pub fn refresh_network(&mut self, config: &Config) {
+        self.network = config.network.clone();
+        let accounts: Vec<AccountConfig> = config.accounts.clone();
+        for (account_id, runtime) in self.runtimes.iter_mut() {
+            let Some(account) = accounts.iter().find(|account| &account.id == account_id) else {
+                continue;
+            };
+            runtime.set_network(effective_network(account, &self.network));
+        }
     }
 
     /// Stop every account runtime.
