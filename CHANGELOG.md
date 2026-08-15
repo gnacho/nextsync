@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.54.0] - 2026-08-15
+
+### Cambiado
+- **Subtítulo genérico**: la app soporta OpenCloud y Nextcloud, así que la ventana ya no menciona solo Nextcloud; ahora dice "Sincronización de archivos para GNOME".
+
 ## [0.52.0] - 2026-08-15
 
 Correcciones del panel de ajustes y de la carpeta remota OpenCloud.
