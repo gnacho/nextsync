@@ -125,8 +125,10 @@ impl SyncResult {
 pub type RemoteEnsurer =
     Arc<dyn Fn(&AccountConfig, &FolderConfig, &str) -> Result<(), ApiError> + Send + Sync>;
 
-/// Production [`RemoteEnsurer`]: MKCOL the folder's remote path (Nextcloud
-/// accounts only; OpenCloud spaces are managed by `opencloudcmd` itself).
+/// Production [`RemoteEnsurer`]: MKCOL the folder's remote path before the
+/// engine runs. Nextcloud creates it under the per-user files tree; OpenCloud
+/// under the folder's space (issue #55; both verified against real
+/// deployments). Root targets (empty remote path) stay a no-op.
 #[derive(Default)]
 pub struct ProductionRemoteEnsurer;
 
@@ -137,17 +139,33 @@ impl ProductionRemoteEnsurer {
         folder: &FolderConfig,
         password: &str,
     ) -> Result<(), ApiError> {
-        if account.provider != Provider::Nextcloud
-            || folder.remote_path.trim_matches('/').is_empty()
-        {
+        let remote = folder.remote_path.trim_matches('/');
+        if remote.is_empty() {
             return Ok(());
         }
-        NextcloudApi::new().ensure_remote_folder(
-            &account.server_url,
-            &account.login_name,
-            password,
-            &folder.remote_path,
-        )
+        match account.provider {
+            Provider::Nextcloud => NextcloudApi::new().ensure_remote_folder(
+                &account.server_url,
+                &account.login_name,
+                password,
+                &folder.remote_path,
+            ),
+            Provider::OpenCloud => {
+                let Some(space_id) = folder.space_id.as_deref().map(str::trim) else {
+                    return Ok(());
+                };
+                if space_id.is_empty() {
+                    return Ok(());
+                }
+                NextcloudApi::new().ensure_opencloud_folder(
+                    &account.server_url,
+                    &account.login_name,
+                    password,
+                    space_id,
+                    &folder.remote_path,
+                )
+            }
+        }
     }
 }
 
@@ -825,15 +843,20 @@ mod tests {
     }
 
     #[test]
-    fn production_ensurer_skips_opencloud_and_account_root() {
-        let mut opencloud = account();
-        opencloud.provider = Provider::OpenCloud;
-        // Neither case touches the network: both return Ok without an HTTP
-        // stack (a live request would fail with a transport error instead).
-        assert!(ProductionRemoteEnsurer::run(&opencloud, &folder(), "pw").is_ok());
+    fn production_ensurer_skips_root_and_spaceless_targets() {
+        // Root-of-account (Nextcloud) and root-of-space (OpenCloud) targets
+        // are no-ops: neither touches the network.
         let mut root_folder = folder();
         root_folder.remote_path = String::new();
         assert!(ProductionRemoteEnsurer::run(&account(), &root_folder, "pw").is_ok());
+        let mut opencloud = account();
+        opencloud.provider = Provider::OpenCloud;
+        assert!(ProductionRemoteEnsurer::run(&opencloud, &root_folder, "pw").is_ok());
+        // An OpenCloud folder without a space id cannot be ensured either.
+        let mut spaceless = folder();
+        spaceless.remote_path = "/cloud".to_string();
+        spaceless.space_id = None;
+        assert!(ProductionRemoteEnsurer::run(&opencloud, &spaceless, "pw").is_ok());
     }
 
     #[test]
@@ -844,6 +867,21 @@ mod tests {
         remote.remote_path = "/docs".to_string();
         assert!(matches!(
             ProductionRemoteEnsurer::run(&account(), &remote, "pw"),
+            Err(ApiError::Transport)
+        ));
+    }
+
+    #[test]
+    fn production_ensurer_hits_a_real_server_for_opencloud_subpaths() {
+        // Same proof for the OpenCloud branch: a non-empty remote path with
+        // a space id must reach the network (Transport here).
+        let mut opencloud = account();
+        opencloud.provider = Provider::OpenCloud;
+        let mut remote = folder();
+        remote.remote_path = "/cloud".to_string();
+        remote.space_id = Some("7d443b01$9bc084a7".to_string());
+        assert!(matches!(
+            ProductionRemoteEnsurer::run(&opencloud, &remote, "pw"),
             Err(ApiError::Transport)
         ));
     }
