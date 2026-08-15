@@ -2,6 +2,15 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.58.0] - 2026-08-15
+
+### Corregido
+- **"Sincronizado" ya no miente (#59)**: una carpeta que nunca ha completado una sincronización mostraba "Sincronizado" al quedarse inactiva. Ahora hay un estado "Aún no se ha sincronizado" (con su propia luz y etiqueta de bandeja) que es el estado inicial y el que se muestra hasta que una sincronización real tenga éxito; un fallo ya no vuelve a "Sincronizado".
+
+### Cambiado
+- **Tarjeta de cuenta simplificada**: la cabecera de la ventana principal muestra "Conectado" y el espacio usado, sin repetir usuario@servidor (eso vive en la barra lateral y en los ajustes de la cuenta).
+- **Dominios sin esquema**: la barra lateral muestra el host del servidor sin `https://`.
+
 ## [0.56.0] - 2026-08-15
 
 ### Cambiado
