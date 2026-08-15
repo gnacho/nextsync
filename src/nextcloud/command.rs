@@ -70,6 +70,29 @@ impl CommandSpec {
         command.envs(self.environment.iter().cloned());
         command
     }
+
+    /// Materialize this spec with reduced IO/CPU priority when the tools
+    /// exist on `$PATH` (issue #39). Returns the plain command otherwise.
+    ///
+    /// `nextcloudcmd` has no bandwidth flag; lowering the process priority
+    /// is the closest portable lever (idle IO class + low CPU niceness).
+    pub fn to_command_low_impact(&self) -> std::process::Command {
+        let ionice = find_binary("ionice");
+        let nice = find_binary("nice");
+        match (ionice, nice) {
+            (Some(ionice), Some(nice)) => {
+                let mut command = std::process::Command::new(&ionice);
+                command.arg("-c").arg("3");
+                command.arg(&nice);
+                command.arg("-n").arg("10");
+                command.arg(&self.argv[0]);
+                command.args(&self.argv[1..]);
+                command.envs(self.environment.iter().cloned());
+                command
+            }
+            _ => self.to_command(),
+        }
+    }
 }
 
 /// Locate an executable on `$PATH` (mirror of `shutil.which`).
@@ -311,6 +334,8 @@ mod tests {
         let network = NetworkConfig {
             custom_proxy: Some("http://proxy:8080".to_string()),
             trust_invalid_certificates: true,
+            reduce_transfer_impact: false,
+            allowed_ssids: None,
         };
         let spec = build_command(
             &account,
@@ -483,5 +508,31 @@ mod tests {
             .map(|arg| arg.to_str().expect("argv is utf-8"))
             .collect();
         assert_eq!(args, vec!["--trust"]);
+    }
+
+    #[test]
+    fn low_impact_wraps_with_ionice_and_nice_when_available() {
+        let spec = CommandSpec {
+            argv: vec!["/bin/syncengine".to_string(), "--flag".to_string()],
+            environment: vec![("NC_PASSWORD".to_string(), "secret".to_string())],
+        };
+        let command = spec.to_command_low_impact();
+        let program = command.get_program().to_string_lossy().to_string();
+        // Either the wrapper chain (ionice found) or the plain argv fallback:
+        // both must preserve the original argv and environment.
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        if program.ends_with("ionice") {
+            assert!(args.windows(2).any(|pair| pair == ["-c", "3"]));
+            assert!(args.iter().any(|arg| arg.ends_with("nice")));
+            assert!(args.windows(2).any(|pair| pair == ["-n", "10"]));
+            assert!(args.iter().any(|arg| arg == "/bin/syncengine"));
+            assert!(args.iter().any(|arg| arg == "--flag"));
+        } else {
+            assert_eq!(program, "/bin/syncengine");
+            assert_eq!(args, vec!["--flag".to_string()]);
+        }
     }
 }

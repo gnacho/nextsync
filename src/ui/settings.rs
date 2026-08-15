@@ -227,17 +227,48 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         .active(general.show_server_notifications)
         .build();
 
+    let quiet = libadwaita::SwitchRow::builder()
+        .title(t("Quiet hours"))
+        .subtitle(t(
+            "Suspend automatic synchronization inside a daily time window",
+        ))
+        .active(general.quiet_hours.is_some())
+        .build();
+    let quiet_start = libadwaita::EntryRow::new();
+    quiet_start.set_title(t("Starts at"));
+    quiet_start.set_text(
+        general
+            .quiet_hours
+            .as_ref()
+            .map_or("", |pair| pair.0.as_str()),
+    );
+    quiet_start.set_input_purpose(gtk4::InputPurpose::Alpha);
+    let quiet_end = libadwaita::EntryRow::new();
+    quiet_end.set_title(t("Ends at"));
+    quiet_end.set_text(
+        general
+            .quiet_hours
+            .as_ref()
+            .map_or("", |pair| pair.1.as_str()),
+    );
+
     {
         let store = store.clone();
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
         let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
         autostart.connect_active_notify(move |_| {
             save_general(
                 &store,
                 &autostart_guard,
                 &notifications_guard,
                 &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
             );
         });
     }
@@ -246,12 +277,18 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
         let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
         notifications.connect_active_notify(move |_| {
             save_general(
                 &store,
                 &autostart_guard,
                 &notifications_guard,
                 &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
             );
         });
     }
@@ -260,12 +297,81 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
         let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
         server_notifications.connect_active_notify(move |_| {
             save_general(
                 &store,
                 &autostart_guard,
                 &notifications_guard,
                 &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
+        let save = move || {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
+            );
+        };
+        quiet.connect_active_notify(move |_| {
+            save();
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
+        quiet_start.connect_apply(move |_| {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
+        quiet_end.connect_apply(move |_| {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
             );
         });
     }
@@ -279,6 +385,16 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
     notifications_group.add(&notifications);
     notifications_group.add(&server_notifications);
     page.add(&notifications_group);
+
+    quiet_start.set_show_apply_button(true);
+    quiet_end.set_show_apply_button(true);
+    let quiet_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Quiet Hours"))
+        .build();
+    quiet_group.add(&quiet);
+    quiet_group.add(&quiet_start);
+    quiet_group.add(&quiet_end);
+    page.add(&quiet_group);
 
     page
 }
@@ -575,25 +691,101 @@ fn build_network_page(
         .active(network.trust_invalid_certificates)
         .build();
 
+    let impact = libadwaita::SwitchRow::builder()
+        .title(t("Reduce transfer impact"))
+        .subtitle(t(
+            "Runs the sync engine with idle IO priority and low CPU priority so transfers do not saturate the machine. It is a priority hint, not a speed limit.",
+        ))
+        .active(network.reduce_transfer_impact)
+        .build();
+
+    let ssids = libadwaita::EntryRow::new();
+    ssids.set_title(t("Only sync on these Wi-Fi networks"));
+    ssids.set_text(network.allowed_ssids.as_deref().unwrap_or(""));
+    ssids.set_show_apply_button(true);
+    ssids.set_tooltip_text(Some(t(
+        "Comma-separated network names. Leave empty to sync on any network.",
+    )));
+
     {
         let store = store.clone();
         let proxy_guard = proxy.clone();
         let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
         proxy.connect_apply(move |_| {
-            save_network(&store, &proxy_guard, &trust_guard);
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
         });
     }
     {
         let store = store.clone();
         let proxy_guard = proxy.clone();
         let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
         trust.connect_active_notify(move |_| {
-            save_network(&store, &proxy_guard, &trust_guard);
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let proxy_guard = proxy.clone();
+        let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
+        impact.connect_active_notify(move |_| {
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let proxy_guard = proxy.clone();
+        let trust_guard = trust.clone();
+        let impact_guard = impact.clone();
+        let ssids_guard = ssids.clone();
+        ssids.connect_apply(move |_| {
+            save_network(
+                &store,
+                &proxy_guard,
+                &trust_guard,
+                &impact_guard,
+                &ssids_guard,
+            );
         });
     }
 
     proxy_group.add(&proxy);
     page.add(&proxy_group);
+
+    let wifi = libadwaita::PreferencesGroup::builder()
+        .title(t("Wi-Fi"))
+        .build();
+    wifi.add(&ssids);
+    page.add(&wifi);
+
+    let transfers = libadwaita::PreferencesGroup::builder()
+        .title(t("Transfers"))
+        .build();
+    transfers.add(&impact);
+    page.add(&transfers);
 
     let tls = libadwaita::PreferencesGroup::builder()
         .title(t("TLS"))
@@ -787,6 +979,54 @@ fn build_advanced_page(
     guard.add(&guard_percent);
     page.add(&guard);
 
+    // Configuration backup (issue #47): export/import the whole settings
+    // file. Keyring secrets are never part of it.
+    let backup_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Backup"))
+        .description(t(
+            "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty.",
+        ))
+        .build();
+    let export_row = libadwaita::ActionRow::builder()
+        .title(t("Export configuration…"))
+        .subtitle(t(
+            "Save every account, folder and preference to a JSON file",
+        ))
+        .activatable(true)
+        .build();
+    let import_row = libadwaita::ActionRow::builder()
+        .title(t("Import configuration…"))
+        .subtitle(t("Replace the current configuration from a backup file"))
+        .activatable(true)
+        .build();
+    for (row, icon) in [
+        (&export_row, "document-save-symbolic"),
+        (&import_row, "document-open-symbolic"),
+    ] {
+        let glyph = gtk4::Image::builder()
+            .icon_name(icon)
+            .pixel_size(16)
+            .build();
+        row.add_prefix(&glyph);
+        let next = gtk4::Image::builder()
+            .icon_name("go-next-symbolic")
+            .pixel_size(16)
+            .build();
+        row.add_suffix(&next);
+    }
+    {
+        let store = store.clone();
+        export_row.connect_activated(move |_| export_configuration(&store));
+    }
+    {
+        let store = store.clone();
+        let callbacks = callbacks.clone();
+        import_row.connect_activated(move |_| import_configuration(&store, &callbacks));
+    }
+    backup_group.add(&export_row);
+    backup_group.add(&import_row);
+    page.add(&backup_group);
+
     // Diagnostics removed by user decision (issue #18): the log files under
     // $XDG_STATE_HOME carry the same information.
 
@@ -887,18 +1127,44 @@ fn invoke(callback: &Option<SettingsCallback>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_general(
     store: &ConfigStore,
     autostart: &libadwaita::SwitchRow,
     notifications: &libadwaita::SwitchRow,
     server_notifications: &libadwaita::SwitchRow,
+    quiet: &libadwaita::SwitchRow,
+    quiet_start: &libadwaita::EntryRow,
+    quiet_end: &libadwaita::EntryRow,
 ) {
+    let hours = if quiet.is_active() {
+        let start = quiet_start.text().trim().to_string();
+        let end = quiet_end.text().trim().to_string();
+        if crate::storage::config::valid_hhmm_public(&start)
+            && crate::storage::config::valid_hhmm_public(&end)
+        {
+            Some((start, end))
+        } else {
+            quiet_start.add_css_class("error");
+            quiet_end.add_css_class("error");
+            None
+        }
+    } else {
+        None
+    };
+    let hours_valid = quiet.is_active() == hours.is_some() || !quiet.is_active();
     if let Err(error) = persist_config(store, |config| {
         config.general.autostart = autostart.is_active();
         config.general.show_notifications = notifications.is_active();
         config.general.show_server_notifications = server_notifications.is_active();
+        config.general.quiet_hours = hours.clone();
     }) {
         eprintln!("Settings: could not save general settings: {error}");
+        return;
+    }
+    if hours_valid || !quiet.is_active() {
+        quiet_start.remove_css_class("error");
+        quiet_end.remove_css_class("error");
     }
     // Reflect the startup preference in the desktop session immediately
     // (atomic desktop-entry write under ~/.config/autostart).
@@ -980,13 +1246,20 @@ fn save_delete_guard(
     }
 }
 
-fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libadwaita::SwitchRow) {
+fn save_network(
+    store: &ConfigStore,
+    proxy: &libadwaita::EntryRow,
+    trust: &libadwaita::SwitchRow,
+    impact: &libadwaita::SwitchRow,
+    ssids: &libadwaita::EntryRow,
+) {
     let value = proxy.text().trim().to_string();
     if !value.is_empty() && !valid_proxy_url(&value) {
         proxy.set_title(t("Invalid HTTP proxy URL"));
         proxy.add_css_class("error");
         return;
     }
+    let ssid_value = ssids.text().trim().to_string();
     if let Err(error) = persist_config(store, |config| {
         config.network.custom_proxy = if value.is_empty() {
             None
@@ -994,6 +1267,12 @@ fn save_network(store: &ConfigStore, proxy: &libadwaita::EntryRow, trust: &libad
             Some(value.clone())
         };
         config.network.trust_invalid_certificates = trust.is_active();
+        config.network.reduce_transfer_impact = impact.is_active();
+        config.network.allowed_ssids = if ssid_value.is_empty() {
+            None
+        } else {
+            Some(ssid_value.clone())
+        };
     }) {
         eprintln!("Settings: could not save network settings: {error}");
         return;
@@ -2014,6 +2293,76 @@ fn connect_integration_switch(
             )));
         }
     });
+}
+
+/// Export the full configuration to a user-chosen JSON file (issue #47).
+fn export_configuration(store: &ConfigStore) {
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title(t("Export configuration"));
+    dialog.set_initial_name(Some("nextsync-config.json"));
+    let config = match store.load() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Settings: export could not read the configuration: {error}");
+            return;
+        }
+    };
+    dialog.save(
+        None::<&gtk4::Window>,
+        None::<&gio::Cancellable>,
+        move |result| {
+            let Ok(file) = result else {
+                // A dismissed dialog is a plain cancel, not a failure.
+                return;
+            };
+            let body = match serde_json::to_string_pretty(&config) {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("Settings: export serialization failed: {error}");
+                    return;
+                }
+            };
+            if let Err(error) = std::fs::write(file.path().unwrap_or_default(), body) {
+                eprintln!("Settings: export write failed: {error}");
+            }
+        },
+    );
+}
+
+/// Import a configuration backup, validating it through the same loader
+/// before replacing the current settings atomically (issue #47).
+fn import_configuration(store: &ConfigStore, callbacks: &SettingsCallbacks) {
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title(t("Import configuration"));
+    let store = store.clone();
+    let callbacks = callbacks.clone();
+    dialog.open(
+        None::<&gtk4::Window>,
+        None::<&gio::Cancellable>,
+        move |result| {
+            let Ok(file) = result else {
+                return;
+            };
+            let path = file.path().unwrap_or_default();
+            let imported = std::fs::read_to_string(&path).ok().and_then(|body| {
+                serde_json::from_str::<crate::storage::config::Config>(&body).ok()
+            });
+            match imported {
+                Some(config) => {
+                    // `save` performs the same schema validation and
+                    // atomic replace as every other write.
+                    if let Err(error) = store.save(&config) {
+                        eprintln!("Settings: import save failed: {error}");
+                        return;
+                    }
+                    invoke(&callbacks.on_reconfigure);
+                }
+                None => {
+                    eprintln!("Settings: import file is not a valid NextSync configuration");
+                }
+            }
+        },
+    );
 }
 
 #[cfg(test)]

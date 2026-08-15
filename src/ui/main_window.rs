@@ -651,6 +651,12 @@ pub struct MainWindow {
     /// Quit item is the only way to fully exit (issue #34). The launcher sets
     /// it once the tray is up; without a tray the close keeps quitting.
     tray_active: Rc<Cell<bool>>,
+    /// Whether every account is paused (pause/resume all, issue #42).
+    all_paused: Cell<bool>,
+    /// Header button toggling every account's pause state (issue #42).
+    pause_all_button: Option<gtk4::Button>,
+    /// Fired when the global pause state changes (issue #42).
+    on_pause_all_changed: Option<Rc<dyn Fn(bool)>>,
     _subscription: Option<crate::state::Subscription>,
     // Kept alive while the window exists.
     _sidebar_page: libadwaita::NavigationPage,
@@ -753,6 +759,23 @@ impl MainWindow {
             action
         });
         hamburger.insert_action_group("app", Some(&actions));
+        // Pause/resume every account at once (issue #42), left of the
+        // hamburger.
+        let pause_all_button = gtk4::Button::builder()
+            .icon_name("media-playback-pause-symbolic")
+            .tooltip_text(t("Pause Everything"))
+            .css_classes(["flat"])
+            .build();
+        {
+            let weak = self_weak.clone();
+            pause_all_button.connect_clicked(move |_button| {
+                if let Some(main) = weak.upgrade() {
+                    let next = !main.borrow().all_accounts_paused();
+                    main.borrow_mut().set_all_accounts_paused(next);
+                }
+            });
+        }
+        header.pack_end(&pause_all_button);
         header.pack_end(&hamburger);
 
         toolbar.add_top_bar(&header);
@@ -871,6 +894,9 @@ impl MainWindow {
             add_account_handler,
             self_weak,
             tray_active,
+            all_paused: Cell::new(false),
+            pause_all_button: Some(pause_all_button.clone()),
+            on_pause_all_changed: None,
             _subscription: None,
             _sidebar_page: sidebar_page,
             _content_page: content_page,
@@ -900,6 +926,44 @@ impl MainWindow {
     /// window keeps quitting the application (issue #34).
     pub fn set_tray_active(&self, active: bool) {
         self.tray_active.set(active);
+    }
+
+    /// Pause or resume every account at once (issue #42). Iterates the
+    /// account runtimes toggling each folder runtime's pause flag, then
+    /// refreshes the header button state.
+    pub fn set_all_accounts_paused(&mut self, paused: bool) {
+        for runtime in self.account_manager.runtimes().values() {
+            for folder in runtime.folders().values() {
+                folder.set_paused(paused);
+            }
+        }
+        self.all_paused.set(paused);
+        if let Some(button) = &self.pause_all_button {
+            button.set_icon_name(if paused {
+                "media-playback-start-symbolic"
+            } else {
+                "media-playback-pause-symbolic"
+            });
+            button.set_tooltip_text(Some(if paused {
+                t("Resume Everything")
+            } else {
+                t("Pause Everything")
+            }));
+        }
+        if let Some(on_change) = &self.on_pause_all_changed {
+            on_change(paused);
+        }
+    }
+
+    /// Install the callback fired whenever the global pause state changes
+    /// (the launcher refreshes the tray label here, issue #42).
+    pub fn install_pause_all_handler(&mut self, callback: Rc<dyn Fn(bool)>) {
+        self.on_pause_all_changed = Some(callback);
+    }
+
+    /// Whether every account is currently paused (issue #42).
+    pub fn all_accounts_paused(&self) -> bool {
+        self.all_paused.get()
     }
 
     /// Wire the Settings header button to open this window's Preferences.
@@ -1184,6 +1248,10 @@ impl MainWindow {
         for account in self.config.accounts.clone() {
             self.account_manager.sync_folders(&account);
         }
+        // Environment gates (metered networks, Wi-Fi allowlist, quiet hours)
+        // may have changed in Settings; push the fresh values to the
+        // schedulers.
+        self.account_manager.apply_environment(&self.config);
         self.refresh_sidebar();
         let account_id = self.active_account_id.clone();
         self.present_account(account_id.as_deref());

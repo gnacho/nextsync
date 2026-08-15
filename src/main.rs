@@ -186,6 +186,18 @@ fn main() {
             main_window
                 .borrow_mut()
                 .install_add_account_handler(Rc::downgrade(&main_window));
+            // Keep the tray label in sync with the global pause state
+            // (issue #42).
+            {
+                let tray_slot = tray_slot.clone();
+                main_window
+                    .borrow_mut()
+                    .install_pause_all_handler(Rc::new(move |paused| {
+                        if let Some(tray) = tray_slot.borrow_mut().as_mut() {
+                            tray.update_all_paused(paused);
+                        }
+                    }));
+            }
             *window_slot.borrow_mut() = Some(main_window.clone());
 
             // Register the tray (best effort; the app works without one).
@@ -214,6 +226,22 @@ fn main() {
                         }
                     }
                 })),
+                pause_all: Rc::new({
+                    let weak = weak.clone();
+                    move |paused| {
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow_mut().set_all_accounts_paused(paused);
+                        }
+                    }
+                }),
+                all_paused: Rc::new({
+                    let weak = weak.clone();
+                    move || {
+                        weak.upgrade()
+                            .map(|main| main.borrow().all_accounts_paused())
+                            .unwrap_or(false)
+                    }
+                }),
                 quit: Rc::new({
                     let app = app.clone();
                     move || app.quit()

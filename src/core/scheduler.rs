@@ -114,12 +114,26 @@ struct SchedulerInner {
     keyring_locked: bool,
     delete_alert: Option<DeleteAlert>,
     delete_bypass_once: bool,
+<<<<<<< HEAD
     /// Canonical local root this scheduler reconciles (issue #35): drives
     /// the overlap-aware permit acquisition and the external-engine scan.
     local_root: Option<std::path::PathBuf>,
     /// Where to scan for external engine processes; `None` means the real
     /// `/proc` (injectable for tests).
     proc_scan_root: Option<std::path::PathBuf>,
+=======
+    /// Skip syncs while the connection is metered (issue #40).
+    skip_metered: bool,
+    /// Whether the current connection is metered (issue #40).
+    metered: bool,
+    /// Wi-Fi SSIDs syncs are restricted to; empty means any (issue #41).
+    allowed_ssids: Vec<String>,
+    /// Active Wi-Fi SSID, when known (issue #41).
+    active_ssid: Option<String>,
+    /// Quiet-hours window in local time; blocks new runs inside it
+    /// (issue #45).
+    quiet_hours: Option<(String, String)>,
+>>>>>>> feat/39-47-control
 }
 
 impl Scheduler {
@@ -158,8 +172,16 @@ impl Scheduler {
             keyring_locked: false,
             delete_alert: None,
             delete_bypass_once: false,
+<<<<<<< HEAD
             local_root: None,
             proc_scan_root: None,
+=======
+            skip_metered: true,
+            metered: false,
+            allowed_ssids: Vec::new(),
+            active_ssid: None,
+            quiet_hours: None,
+>>>>>>> feat/39-47-control
         };
         let inner = Rc::new(RefCell::new(inner));
         {
@@ -198,6 +220,35 @@ impl Scheduler {
     /// Report network availability.
     pub fn set_online(&self, online: bool) {
         self.inner.borrow_mut().set_online(online);
+    }
+
+    /// Report whether the current connection is metered (issue #40). A
+    /// metered connection blocks non-manual runs while
+    /// [`Scheduler::set_skip_metered`] is enabled.
+    pub fn set_metered(&self, metered: bool) {
+        self.inner.borrow_mut().set_metered(metered);
+    }
+
+    /// Enable or disable skipping syncs on metered networks (issue #40).
+    pub fn set_skip_metered(&self, skip: bool) {
+        self.inner.borrow_mut().skip_metered = skip;
+    }
+
+    /// Configure the Wi-Fi SSIDs syncs are restricted to; an empty list
+    /// means any network (issue #41).
+    pub fn set_allowed_ssids(&self, ssids: Vec<String>) {
+        self.inner.borrow_mut().allowed_ssids = ssids;
+    }
+
+    /// Report the active Wi-Fi SSID, if known (issue #41).
+    pub fn set_active_ssid(&self, ssid: Option<String>) {
+        self.inner.borrow_mut().active_ssid = ssid;
+    }
+
+    /// Configure the quiet-hours window (`"HH:MM"` start and end, local
+    /// time); `None` disables it (issue #45).
+    pub fn set_quiet_hours(&self, hours: Option<(String, String)>) {
+        self.inner.borrow_mut().quiet_hours = hours;
     }
 
     /// Block the scheduler with a deletion-guard alert.
@@ -362,6 +413,11 @@ impl SchedulerInner {
                 .set(AppState::KeyringLocked, t("Password keyring is locked"));
             return;
         }
+        if let Some((_reason, message)) = self.environment_gate(trigger == Trigger::Manual) {
+            self.queue.add(trigger);
+            self.state.set(AppState::Offline, message);
+            return;
+        }
         self.queue.add(trigger);
         if self.keyring_locked && trigger == Trigger::Manual {
             self.start();
@@ -406,6 +462,12 @@ impl SchedulerInner {
             return;
         }
         let reasons = self.queue.take();
+        if let Some((_reason, message)) = self.environment_gate(reasons.contains(&Trigger::Manual))
+        {
+            self.queue.extend(reasons.iter().copied());
+            self.state.set(AppState::Offline, message);
+            return;
+        }
         if self.paused() && !reasons.contains(&Trigger::Manual) {
             self.local_dirty = true;
             return;
@@ -641,6 +703,55 @@ impl SchedulerInner {
         }
     }
 
+    fn set_metered(&mut self, metered: bool) {
+        let was = self.metered;
+        self.metered = metered;
+        if was && !metered && self.online {
+            // Leaving a metered network re-enables queued work.
+            if !self.queue.is_empty() || !self.manual_only() {
+                self.request(Trigger::NetworkRestored);
+            } else {
+                self.set_idle_state();
+            }
+        }
+    }
+
+    /// Combined gate for metered connections, Wi-Fi restrictions and quiet
+    /// hours (issues #40, #41, #45). Returns the paused-state message when
+    /// the run must not start, mirroring the offline gate.
+    fn environment_gate(&self, manual: bool) -> Option<(&'static str, String)> {
+        if manual {
+            return None;
+        }
+        if self.metered && self.skip_metered {
+            return Some((
+                "metered",
+                t("Waiting for an unmetered network connection").to_owned(),
+            ));
+        }
+        if !self.allowed_ssids.is_empty() {
+            let allowed = self
+                .active_ssid
+                .as_ref()
+                .map(|ssid| self.allowed_ssids.iter().any(|entry| entry == ssid))
+                .unwrap_or(false);
+            if !allowed {
+                return Some(("ssid", t("Waiting for an allowed Wi-Fi network").to_owned()));
+            }
+        }
+        if let Some((start, end)) = &self.quiet_hours {
+            if let Some(now) = local_hhmm() {
+                if time_in_window(&now, start, end) {
+                    return Some((
+                        "quiet",
+                        t("Quiet hours: synchronization is suspended").to_owned(),
+                    ));
+                }
+            }
+        }
+        None
+    }
+
     fn set_online(&mut self, online: bool) {
         let was_online = self.online;
         self.online = online;
@@ -809,6 +920,45 @@ impl From<&SyncConfig> for TriggerSettings {
             remote_interval_enabled: sync.remote_interval_enabled,
             remote_interval_minutes: sync.remote_interval_minutes,
         }
+    }
+}
+
+/// Current local time formatted as `HH:MM`, or `None` outside the
+/// representable range.
+fn local_hhmm() -> Option<String> {
+    let now = glib::DateTime::now_local().ok()?;
+    Some(format!("{:02}:{:02}", now.hour(), now.minute()))
+}
+
+/// Whether `now` (`HH:MM`) falls inside the `[start, end)` window, which may
+/// cross midnight (`22:00` to `06:30`). Inclusive start, exclusive end.
+fn time_in_window(now: &str, start: &str, end: &str) -> bool {
+    let Some(now) = parse_hhmm(now) else {
+        return false;
+    };
+    let Some(start) = parse_hhmm(start) else {
+        return false;
+    };
+    let Some(end) = parse_hhmm(end) else {
+        return false;
+    };
+    if start <= end {
+        now >= start && now < end
+    } else {
+        // Window crossing midnight: [22:00, 24:00) or [00:00, 06:30).
+        now >= start || now < end
+    }
+}
+
+/// `"HH:MM"` to minutes since midnight.
+fn parse_hhmm(value: &str) -> Option<u32> {
+    let (hours, minutes) = value.trim().split_once(':')?;
+    let hours: u32 = hours.parse().ok()?;
+    let minutes: u32 = minutes.parse().ok()?;
+    if hours < 24 && minutes < 60 {
+        Some(hours * 60 + minutes)
+    } else {
+        None
     }
 }
 
@@ -1460,5 +1610,84 @@ mod tests {
             scheduler.state().snapshot().message,
             "Waiting for local changes to settle"
         );
+    }
+
+    // ---- environment gates (#40, #41, #45) ---------------------------------
+
+    #[test]
+    fn metered_connection_blocks_automatic_but_not_manual_runs() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.set_metered(true);
+        scheduler.request(Trigger::LocalInterval);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+        assert_eq!(
+            scheduler.state().snapshot().message,
+            "Waiting for an unmetered network connection"
+        );
+        assert_eq!(runner.0.borrow().start_calls, 0);
+        // Manual runs ignore the gate.
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    #[test]
+    fn leaving_a_metered_network_requeues_blocked_work() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.set_metered(true);
+        scheduler.request(Trigger::RemotePush);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+        assert_eq!(scheduler.queue_len(), 1);
+        scheduler.set_metered(false);
+        assert_eq!(scheduler.queue_len(), 2);
+        assert!(source.borrow().pending() >= 1);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    #[test]
+    fn ssid_allowlist_blocks_unknown_networks() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.set_allowed_ssids(vec!["HomeNet".to_owned()]);
+        scheduler.set_active_ssid(Some("CoffeeShop".to_owned()));
+        scheduler.request(Trigger::RemotePush);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+        assert_eq!(
+            scheduler.state().snapshot().message,
+            "Waiting for an allowed Wi-Fi network"
+        );
+        // Joining an allowed network unblocks it.
+        scheduler.set_active_ssid(Some("HomeNet".to_owned()));
+        scheduler.request(Trigger::NetworkRestored);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    #[test]
+    fn quiet_hours_block_automatic_runs() {
+        let (scheduler, _source, runner) = make_scheduler(None);
+        scheduler.set_quiet_hours(Some(("00:00".to_owned(), "23:59".to_owned())));
+        scheduler.request(Trigger::RemotePush);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+        assert_eq!(
+            scheduler.state().snapshot().message,
+            "Quiet hours: synchronization is suspended"
+        );
+        assert_eq!(runner.0.borrow().start_calls, 0);
+    }
+
+    #[test]
+    fn time_in_window_handles_simple_and_overnight_ranges() {
+        assert!(time_in_window("10:00", "08:00", "18:00"));
+        assert!(!time_in_window("19:00", "08:00", "18:00"));
+        // Overnight window crossing midnight.
+        assert!(time_in_window("23:30", "22:00", "06:30"));
+        assert!(time_in_window("02:00", "22:00", "06:30"));
+        assert!(!time_in_window("12:00", "22:00", "06:30"));
+        // Degenerate values never match.
+        assert!(!time_in_window("12:00", "bad", "06:30"));
     }
 }

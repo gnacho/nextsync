@@ -23,11 +23,50 @@ pub trait NetworkProbe {
     /// Whether the network is currently available.
     fn is_available(&self) -> bool;
 
+    /// Whether the current connection is metered (cellular or a metered
+    /// Wi-Fi). Unknown states report `false`.
+    fn is_metered(&self) -> bool;
+
+    /// Name of the Wi-Fi network currently connected, when known.
+    fn wifi_ssid(&self) -> Option<String>;
+
     /// Subscribe to availability changes. Returns a token for [`Self::unsubscribe`].
     fn subscribe(&self, callback: Rc<dyn Fn(bool)>) -> u64;
 
     /// Stop a subscription started with [`Self::subscribe`].
     fn unsubscribe(&self, id: u64);
+}
+
+/// Parse `nmcli -t -f IN-USE,SSID dev wifi` output into the active SSID.
+/// Lines look like `yes:HomeNet` / `no:Other`; only the `yes` row matters.
+pub fn parse_active_ssid(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (used, ssid) = line.split_once(':')?;
+        if used.trim() == "yes" && !ssid.trim().is_empty() {
+            Some(ssid.trim().to_owned())
+        } else {
+            None
+        }
+    })
+}
+
+/// Parse `nmcli -t -f GENERAL.METERED dev status` output into whether any
+/// device reports a metered connection. Each line is `device:metered` in
+/// the common case, but tolerate extra fields (`device:state:metered`).
+pub fn parse_metered(output: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.split(':').any(|field| field.trim() == "yes"))
+}
+
+/// Parse the raw `network.allowed_ssids` config value (comma separated).
+/// Empty entries are dropped; comparison elsewhere is exact.
+pub fn parse_allowed_ssids(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// [`NetworkProbe`] over the GLib `NetworkMonitor` singleton (the same signal
@@ -54,6 +93,24 @@ impl NetworkProbe for GioNetworkProbe {
             .as_ref()
             .map(|monitor| monitor.is_network_available())
             .unwrap_or(true)
+    }
+
+    fn is_metered(&self) -> bool {
+        self.monitor
+            .as_ref()
+            .map(|monitor| monitor.is_network_metered())
+            .unwrap_or(false)
+    }
+
+    fn wifi_ssid(&self) -> Option<String> {
+        // GLib exposes availability and metering but not the network name;
+        // NetworkManager is the source of truth on Linux desktops.
+        let output = std::process::Command::new("nmcli")
+            .args(["-t", "-f", "IN-USE,SSID", "dev", "wifi"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+        parse_active_ssid(&text)
     }
 
     fn subscribe(&self, callback: Rc<dyn Fn(bool)>) -> u64 {
@@ -188,6 +245,14 @@ mod tests {
             self.0.borrow().available
         }
 
+        fn is_metered(&self) -> bool {
+            false
+        }
+
+        fn wifi_ssid(&self) -> Option<String> {
+            None
+        }
+
         fn subscribe(&self, callback: Rc<dyn Fn(bool)>) -> u64 {
             let mut inner = self.0.borrow_mut();
             inner.callback = Some(callback);
@@ -269,5 +334,34 @@ mod tests {
         probe.0.borrow_mut().available = false;
         let watcher = NetworkWatcher::new(Box::new(probe));
         assert!(!watcher.is_online());
+    }
+
+    #[test]
+    fn parse_active_ssid_finds_the_in_use_row() {
+        assert_eq!(
+            parse_active_ssid("no:CoffeeShop\nyes:HomeNet\nno:Other"),
+            Some("HomeNet".to_owned())
+        );
+        assert_eq!(parse_active_ssid("no:CoffeeShop\nno:Other"), None);
+        assert_eq!(parse_active_ssid("yes:"), None);
+        assert_eq!(parse_active_ssid(""), None);
+    }
+
+    #[test]
+    fn parse_metered_only_triggers_on_yes() {
+        assert!(parse_metered("wlan0:connected:yes\neth0:connected:no"));
+        assert!(!parse_metered("wlan0:connected:no"));
+        assert!(!parse_metered("wlan0:connected:unknown"));
+        assert!(!parse_metered(""));
+    }
+
+    #[test]
+    fn parse_allowed_ssids_drops_empty_entries() {
+        assert_eq!(
+            parse_allowed_ssids(" Home , Work ,, Gym "),
+            vec!["Home".to_owned(), "Work".to_owned(), "Gym".to_owned()]
+        );
+        assert!(parse_allowed_ssids("").is_empty());
+        assert!(parse_allowed_ssids(" , ").is_empty());
     }
 }

@@ -2233,7 +2233,6 @@ msgstr "No se pudo mover la carpeta a la papelera."
 msgid "{size} local"
 msgstr "{size} en local"
 
-
 #: src/core/scheduler.rs
 msgid "Another synchronization engine ({name}) is already running on this folder. Close it and try again."
 msgstr "Otro motor de sincronización ({name}) ya está funcionando en esta carpeta. Ciérralo e inténtalo de nuevo."
@@ -2345,4 +2344,100 @@ msgstr "Cambios locales desde la última sincronización, comparando el árbol l
 #: src/ui/pending_changes.rs
 msgid "This folder has no synchronization journal yet, so every local file counts as new. Remote changes are not included."
 msgstr "Esta carpeta aún no tiene registro de sincronización, así que cada archivo local cuenta como nuevo. Los cambios remotos no se incluyen."
+
+#: src/ui/settings.rs
+msgid "Reduce transfer impact"
+msgstr "Reducir el impacto de las transferencias"
+
+#: src/ui/settings.rs
+msgid "Runs the sync engine with idle IO priority and low CPU priority so transfers do not saturate the machine. It is a priority hint, not a speed limit."
+msgstr "Ejecuta el motor de sincronización con prioridad de E/S inactiva y baja prioridad de CPU para que las transferencias no saturën la máquina. Es una indicación de prioridad, no un límite de velocidad."
+
+#: src/ui/settings.rs
+msgid "Only sync on these Wi-Fi networks"
+msgstr "Sincronizar solo en estas redes Wi-Fi"
+
+#: src/ui/settings.rs
+msgid "Comma-separated network names. Leave empty to sync on any network."
+msgstr "Nombres de red separados por comas. Déjalo vacío para sincronizar en cualquier red."
+
+#: src/ui/settings.rs
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+#: src/ui/settings.rs
+msgid "Transfers"
+msgstr "Transferencias"
+
+#: src/core/scheduler.rs
+msgid "Waiting for an unmetered network connection"
+msgstr "Esperando una conexión de red sin límite de datos"
+
+#: src/core/scheduler.rs
+msgid "Waiting for an allowed Wi-Fi network"
+msgstr "Esperando una red Wi-Fi permitida"
+
+#: src/core/scheduler.rs
+msgid "Quiet hours: synchronization is suspended"
+msgstr "Horario de silencio: la sincronización está suspendida"
+
+#: src/ui/settings.rs
+msgid "Quiet hours"
+msgstr "Horario de silencio"
+
+#: src/ui/settings.rs
+msgid "Suspend automatic synchronization inside a daily time window"
+msgstr "Suspende la sincronización automática dentro de una franja horaria diaria"
+
+#: src/ui/settings.rs
+msgid "Starts at"
+msgstr "Empieza a las"
+
+#: src/ui/settings.rs
+msgid "Ends at"
+msgstr "Termina a las"
+
+#: src/ui/settings.rs
+msgid "Quiet Hours"
+msgstr "Horario de silencio"
+
+#: src/ui/tray.rs
+msgid "Pause Everything"
+msgstr "Pausar todo"
+
+#: src/ui/tray.rs
+msgid "Resume Everything"
+msgstr "Reanudar todo"
+
+#: src/ui/settings.rs
+msgid "Backup"
+msgstr "Copia de seguridad"
+
+#: src/ui/settings.rs
+msgid "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty."
+msgstr "Las contraseñas guardadas en el llavero no se incluyen; las cuentas solo pedirán iniciar sesión de nuevo si el llavero está vacío."
+
+#: src/ui/settings.rs
+msgid "Export configuration…"
+msgstr "Exportar configuración…"
+
+#: src/ui/settings.rs
+msgid "Save every account, folder and preference to a JSON file"
+msgstr "Guarda todas las cuentas, carpetas y preferencias en un fichero JSON"
+
+#: src/ui/settings.rs
+msgid "Import configuration…"
+msgstr "Importar configuración…"
+
+#: src/ui/settings.rs
+msgid "Replace the current configuration from a backup file"
+msgstr "Sustituye la configuración actual por la de un fichero de copia"
+
+#: src/ui/settings.rs
+msgid "Export configuration"
+msgstr "Exportar configuración"
+
+#: src/ui/settings.rs
+msgid "Import configuration"
+msgstr "Importar configuración"
 

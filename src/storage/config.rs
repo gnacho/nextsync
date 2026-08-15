@@ -228,11 +228,51 @@ pub struct GeneralConfig {
     /// `0` disables the check.
     #[serde(default = "default_size_confirm_threshold_mb")]
     pub size_confirm_threshold_mb: i64,
+    /// Quiet-hours window (`"HH:MM"` start and end, local time) during which
+    /// automatic synchronization is suspended (issue #45).
+    #[serde(default)]
+    pub quiet_hours: Option<(String, String)>,
 }
 
 /// Default color scheme (follow the desktop).
 fn default_color_scheme() -> String {
     "system".to_string()
+}
+
+/// Parse the `quiet_hours` pair from its serialized `[start, end]` form,
+/// keeping `None` for anything malformed or empty (issue #45).
+fn parse_quiet_hours(obj: &Map<String, Value>) -> Option<(String, String)> {
+    let pair = obj.get("quiet_hours")?.as_array()?;
+    if pair.len() != 2 {
+        return None;
+    }
+    let start = pair.first()?.as_str()?.trim().to_owned();
+    let end = pair.get(1)?.as_str()?.trim().to_owned();
+    if valid_hhmm(&start) && valid_hhmm(&end) {
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
+/// `"HH:MM"` with 00-23 hours and 00-59 minutes.
+pub fn valid_hhmm(value: &str) -> bool {
+    match value.split_once(':') {
+        Some((hours, minutes)) => {
+            hours.len() == 2
+                && minutes.len() == 2
+                && hours.bytes().all(|b| b.is_ascii_digit())
+                && minutes.bytes().all(|b| b.is_ascii_digit())
+                && hours < "24"
+                && minutes < "60"
+        }
+        None => false,
+    }
+}
+
+/// Settings-facing alias of [`valid_hhmm`].
+pub fn valid_hhmm_public(value: &str) -> bool {
+    valid_hhmm(value)
 }
 
 /// Default for `show_notifications` (on).
@@ -274,6 +314,7 @@ impl Default for GeneralConfig {
             show_notifications: yes(),
             show_server_notifications: false,
             size_confirm_threshold_mb: default_size_confirm_threshold_mb(),
+            quiet_hours: None,
         }
     }
 }
@@ -301,6 +342,15 @@ impl Default for LoggingConfig {
 pub struct NetworkConfig {
     pub custom_proxy: Option<String>,
     pub trust_invalid_certificates: bool,
+    /// Whether sync processes run with reduced IO/CPU priority
+    /// (`ionice -c 3` + `nice -n 10`) so transfers do not saturate the
+    /// machine (issue #39). It is a priority hint, not a bandwidth cap.
+    #[serde(default)]
+    pub reduce_transfer_impact: bool,
+    /// Wi-Fi SSIDs synchronization is restricted to (comma separated).
+    /// Empty or `None` means any network (issue #41).
+    #[serde(default)]
+    pub allowed_ssids: Option<String>,
 }
 
 /// Normalize a Nextcloud server URL: scheme lowered, no embedded credentials,
@@ -1063,6 +1113,7 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
             0,
             1_000_000,
         ),
+        quiet_hours: parse_quiet_hours(obj),
     }
 }
 
@@ -1104,6 +1155,11 @@ fn validate_network(raw: Option<&Value>) -> Result<NetworkConfig, ConfigError> {
     Ok(NetworkConfig {
         custom_proxy,
         trust_invalid_certificates: get_bool(obj, "trust_invalid_certificates", false),
+        reduce_transfer_impact: get_bool(obj, "reduce_transfer_impact", false),
+        allowed_ssids: match obj.get("allowed_ssids") {
+            Some(Value::String(text)) if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        },
     })
 }
 
