@@ -661,6 +661,8 @@ pub struct MainWindow {
     _content_page: libadwaita::NavigationPage,
     // Kept alive for contract tests (the widget tree also owns a reference).
     _hamburger: gtk4::MenuButton,
+    // Kept alive for contract tests (issue #54 visibility assertions).
+    _back_button: gtk4::Button,
 }
 
 impl MainWindow {
@@ -706,6 +708,9 @@ impl MainWindow {
                 main.borrow_mut().show_sync_view();
             }
         });
+        // Hidden while the sync view is already in front (issue #54); the
+        // binding is completed once the root stack exists below.
+        let back_button_for_binding = back_button.clone();
         header.pack_start(&back_button);
 
         let hamburger = gtk4::MenuButton::builder()
@@ -804,6 +809,17 @@ impl MainWindow {
             .build();
         root_stack.add_named(&split, Some("sync"));
         root_stack.set_visible_child_name("sync");
+        // The back arrow only makes sense over the settings view (issue #54).
+        {
+            let button = back_button_for_binding.clone();
+            root_stack.connect_visible_child_notify(move |stack| {
+                let in_settings = stack
+                    .visible_child_name()
+                    .is_some_and(|name| name == "settings");
+                button.set_visible(in_settings);
+            });
+            back_button_for_binding.set_visible(false);
+        }
 
         toolbar.set_content(Some(&root_stack));
         window.set_content(Some(&toolbar));
@@ -862,6 +878,7 @@ impl MainWindow {
             _sidebar_page: sidebar_page,
             _content_page: content_page,
             _hamburger: hamburger.clone(),
+            _back_button: back_button.clone(),
         };
         // Install the Settings handler: opening Settings needs the whole
         // window, so it is wired once the shared cell exists.
@@ -2101,10 +2118,9 @@ mod tests {
                 window.root_stack.visible_child_name().as_deref(),
                 Some("sync")
             );
-            assert_eq!(
-                window._hamburger.icon_name().as_deref(),
-                Some("open-menu-symbolic")
-            );
+            // The back arrow is hidden while the sync view is in front
+            // (issue #54). `visible()` reads the flag, not the mapped state.
+            assert!(!window._back_button.property::<bool>("visible"));
 
             // Preferences slides the in-app settings view in; the stack then
             // holds exactly the 'sync' and 'settings' pages.
@@ -2115,6 +2131,7 @@ mod tests {
                 window.root_stack.visible_child_name().as_deref(),
                 Some("settings")
             );
+            assert!(window._back_button.property::<bool>("visible"));
 
             // Synchronization slides back without dropping the view.
             window.show_sync_view();
