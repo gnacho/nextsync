@@ -221,15 +221,11 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         .title(t("Show desktop notifications"))
         .active(general.show_notifications)
         .build();
-    notifications.set_tooltip_text(Some(t("Authentication and synchronization failures")));
 
     let server_notifications = libadwaita::SwitchRow::builder()
         .title(t("Show server notifications"))
         .active(general.show_server_notifications)
         .build();
-    server_notifications.set_tooltip_text(Some(t(
-        "New shares, comments and mentions from your account",
-    )));
 
     let quiet = libadwaita::SwitchRow::builder()
         .title(t("Quiet hours"))
@@ -435,7 +431,6 @@ pub(crate) fn sync_option_groups(
         .title(t("Monitor filesystem changes"))
         .active(sync.local_inotify_enabled)
         .build();
-    inotify.set_tooltip_text(Some(t("Synchronizes shortly after a local file changes.")));
     let local_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a local interval"))
         .active(sync.local_interval_enabled)
@@ -459,14 +454,10 @@ pub(crate) fn sync_option_groups(
         .title(t("Use server push notifications"))
         .active(sync.remote_push_enabled)
         .build();
-    push.set_tooltip_text(Some(t(
-        "Near-real-time detection when notify_push is supported.",
-    )));
     let remote_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a remote interval"))
         .active(sync.remote_interval_enabled)
         .build();
-    remote_timer.set_tooltip_text(Some(t("Recommended because push delivery is best effort.")));
     let remote_minutes = spin_row(
         t("Remote interval (minutes)"),
         1.0,
@@ -486,9 +477,6 @@ pub(crate) fn sync_option_groups(
         .title(t("Exclude disposable files"))
         .active(sync.exclude_patterns_enabled)
         .build();
-    exclusions_enabled.set_tooltip_text(Some(t(
-        "Hidden files remain synchronized unless a rule matches.",
-    )));
     excluded.add(&exclusions_enabled);
     let edit_row = libadwaita::ActionRow::builder()
         .title(t("File patterns"))
@@ -815,9 +803,6 @@ fn build_advanced_page(
     // file. Keyring secrets are never part of it.
     let backup_group = libadwaita::PreferencesGroup::builder()
         .title(t("Backup"))
-        .description(t(
-            "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty.",
-        ))
         .build();
     let export_row = libadwaita::ActionRow::builder()
         .title(t("Export configuration…"))
@@ -898,9 +883,6 @@ pub(crate) fn deletion_guard_group(
 ) -> libadwaita::PreferencesGroup {
     let guard = libadwaita::PreferencesGroup::builder()
         .title(t("Deletion Guard"))
-        .description(
-            t("Blocks synchronization before nextcloudcmd starts when too many previously synchronized local files disappear."),
-        )
         .build();
     let guard_enabled = libadwaita::SwitchRow::builder()
         .title(t("Protect against mass local deletion"))
@@ -988,9 +970,6 @@ pub(crate) fn account_action_groups(
 ) -> Vec<libadwaita::PreferencesGroup> {
     let auth_group = libadwaita::PreferencesGroup::builder()
         .title(t("Authentication"))
-        .description(t(
-            "Use Sign in again when the stored credentials are missing or rejected.",
-        ))
         .build();
     let sign_in_again = libadwaita::ActionRow::builder()
         .title(t("Sign in again"))
@@ -1023,9 +1002,6 @@ pub(crate) fn account_action_groups(
 
     let account_group = libadwaita::PreferencesGroup::builder()
         .title(t("Account"))
-        .description(
-            t("Removing the account only removes the connection; your local folders and files are never touched."),
-        )
         .build();
     let remove = libadwaita::ActionRow::builder()
         .title(t("Remove account"))
