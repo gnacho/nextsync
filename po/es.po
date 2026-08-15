@@ -2278,3 +2278,35 @@ msgstr "Pausar todo"
 #: src/ui/tray.rs
 msgid "Resume Everything"
 msgstr "Reanudar todo"
+
+#: src/ui/settings.rs
+msgid "Backup"
+msgstr "Copia de seguridad"
+
+#: src/ui/settings.rs
+msgid "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty."
+msgstr "Las contraseñas guardadas en el llavero no se incluyen; las cuentas solo pedirán iniciar sesión de nuevo si el llavero está vacío."
+
+#: src/ui/settings.rs
+msgid "Export configuration…"
+msgstr "Exportar configuración…"
+
+#: src/ui/settings.rs
+msgid "Save every account, folder and preference to a JSON file"
+msgstr "Guarda todas las cuentas, carpetas y preferencias en un fichero JSON"
+
+#: src/ui/settings.rs
+msgid "Import configuration…"
+msgstr "Importar configuración…"
+
+#: src/ui/settings.rs
+msgid "Replace the current configuration from a backup file"
+msgstr "Sustituye la configuración actual por la de un fichero de copia"
+
+#: src/ui/settings.rs
+msgid "Export configuration"
+msgstr "Exportar configuración"
+
+#: src/ui/settings.rs
+msgid "Import configuration"
+msgstr "Importar configuración"

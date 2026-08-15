@@ -942,6 +942,54 @@ fn build_advanced_page(
     guard.add(&guard_percent);
     page.add(&guard);
 
+    // Configuration backup (issue #47): export/import the whole settings
+    // file. Keyring secrets are never part of it.
+    let backup_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Backup"))
+        .description(t(
+            "Passwords stored in the keyring are not included; accounts will ask to sign in again only if the keyring is empty.",
+        ))
+        .build();
+    let export_row = libadwaita::ActionRow::builder()
+        .title(t("Export configuration…"))
+        .subtitle(t(
+            "Save every account, folder and preference to a JSON file",
+        ))
+        .activatable(true)
+        .build();
+    let import_row = libadwaita::ActionRow::builder()
+        .title(t("Import configuration…"))
+        .subtitle(t("Replace the current configuration from a backup file"))
+        .activatable(true)
+        .build();
+    for (row, icon) in [
+        (&export_row, "document-save-symbolic"),
+        (&import_row, "document-open-symbolic"),
+    ] {
+        let glyph = gtk4::Image::builder()
+            .icon_name(icon)
+            .pixel_size(16)
+            .build();
+        row.add_prefix(&glyph);
+        let next = gtk4::Image::builder()
+            .icon_name("go-next-symbolic")
+            .pixel_size(16)
+            .build();
+        row.add_suffix(&next);
+    }
+    {
+        let store = store.clone();
+        export_row.connect_activated(move |_| export_configuration(&store));
+    }
+    {
+        let store = store.clone();
+        let callbacks = callbacks.clone();
+        import_row.connect_activated(move |_| import_configuration(&store, &callbacks));
+    }
+    backup_group.add(&export_row);
+    backup_group.add(&import_row);
+    page.add(&backup_group);
+
     // Diagnostics removed by user decision (issue #18): the log files under
     // $XDG_STATE_HOME carry the same information.
 
@@ -2053,6 +2101,76 @@ fn connect_integration_switch(
             )));
         }
     });
+}
+
+/// Export the full configuration to a user-chosen JSON file (issue #47).
+fn export_configuration(store: &ConfigStore) {
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title(t("Export configuration"));
+    dialog.set_initial_name(Some("nextsync-config.json"));
+    let config = match store.load() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Settings: export could not read the configuration: {error}");
+            return;
+        }
+    };
+    dialog.save(
+        None::<&gtk4::Window>,
+        None::<&gio::Cancellable>,
+        move |result| {
+            let Ok(file) = result else {
+                // A dismissed dialog is a plain cancel, not a failure.
+                return;
+            };
+            let body = match serde_json::to_string_pretty(&config) {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("Settings: export serialization failed: {error}");
+                    return;
+                }
+            };
+            if let Err(error) = std::fs::write(file.path().unwrap_or_default(), body) {
+                eprintln!("Settings: export write failed: {error}");
+            }
+        },
+    );
+}
+
+/// Import a configuration backup, validating it through the same loader
+/// before replacing the current settings atomically (issue #47).
+fn import_configuration(store: &ConfigStore, callbacks: &SettingsCallbacks) {
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title(t("Import configuration"));
+    let store = store.clone();
+    let callbacks = callbacks.clone();
+    dialog.open(
+        None::<&gtk4::Window>,
+        None::<&gio::Cancellable>,
+        move |result| {
+            let Ok(file) = result else {
+                return;
+            };
+            let path = file.path().unwrap_or_default();
+            let imported = std::fs::read_to_string(&path).ok().and_then(|body| {
+                serde_json::from_str::<crate::storage::config::Config>(&body).ok()
+            });
+            match imported {
+                Some(config) => {
+                    // `save` performs the same schema validation and
+                    // atomic replace as every other write.
+                    if let Err(error) = store.save(&config) {
+                        eprintln!("Settings: import save failed: {error}");
+                        return;
+                    }
+                    invoke(&callbacks.on_reconfigure);
+                }
+                None => {
+                    eprintln!("Settings: import file is not a valid NextSync configuration");
+                }
+            }
+        },
+    );
 }
 
 #[cfg(test)]
