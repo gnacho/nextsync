@@ -1,12 +1,13 @@
 //! Credential storage in the Secret Service.
 //!
-//! Per-account passwords are stored in the default collection of the desktop
-//! Secret Service (`org.freedesktop.secrets`) keyed by `account_id`, so they
-//! survive a reinstall. Accounts created by the Python `nextsync` app stored
-//! their secret with `{server, username}` attributes instead; those entries
-//! are picked up through [`CredentialsStore::get_for_account`] and adopted
-//! (re-stored under `account_id`, leaving the legacy item untouched for the
-//! Python app).
+//! Per-account passwords are stored in the `login` collection (the one the
+//! desktop session unlocks at sign-in, issue #58) falling back to the
+//! default collection, keyed by `account_id`, so they survive a reinstall.
+//! Accounts created by the Python `nextsync` app stored their secret with
+//! `{server, username}` attributes instead; those entries are picked up
+//! through [`CredentialsStore::get_for_account`] and adopted (re-stored
+//! under `account_id`, leaving the legacy item untouched for the Python
+//! app).
 //!
 //! Uses `secret_service::blocking` (feature `rt-tokio-crypto-rust`, DH
 //! encrypted session). Blocking calls must not run on the async UI loop.
@@ -29,15 +30,29 @@ const ATTR_USERNAME: &str = "username";
 /// Secret content type used for stored passwords.
 const CONTENT_TYPE: &str = "text/plain";
 
-/// Stores and retrieves account passwords in the default Secret Service
-/// collection.
+/// Prefer the `login` collection (unlocked automatically by the desktop
+/// session) and fall back to the default collection (issue #58).
+///
+/// The default collection is not always the login keyring: on GNOME it can
+/// point at a separate, password-less keyring that never gets unlocked, in
+/// which case every write fails with a locked error.
+fn collection<'a>(
+    service: &'a SecretService<'_>,
+) -> Result<secret_service::blocking::Collection<'a>, CredentialError> {
+    service
+        .get_collection_by_alias("login")
+        .or_else(|_| service.get_default_collection())
+}
+
+/// Stores and retrieves account passwords in the Secret Service collection
+/// the desktop session unlocks (`login`, falling back to default).
 pub struct CredentialsStore;
 
 impl CredentialsStore {
     /// Save (or replace) the password for an account.
     pub fn set(account_id: &str, password: &str) -> Result<(), CredentialError> {
         let service = SecretService::connect(EncryptionType::Dh)?;
-        let collection = service.get_default_collection()?;
+        let collection = collection(&service)?;
         collection.create_item(
             &format!("nextsync-{account_id}"),
             HashMap::from([(ATTR_ACCOUNT_ID, account_id)]),
@@ -96,10 +111,9 @@ impl CredentialsStore {
     pub fn delete(account_id: &str) -> Result<(), CredentialError> {
         let service = SecretService::connect(EncryptionType::Dh)?;
         let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
+        // Only the unlocked items are reachable; items in a locked collection
+        // (the legacy default keyring) cannot be removed without unlocking.
         for item in result.unlocked {
-            item.delete()?;
-        }
-        for item in result.locked {
             item.delete()?;
         }
         Ok(())
@@ -189,7 +203,7 @@ mod tests {
 
         let _ = CredentialsStore::delete(TEST_ACCOUNT);
         let service = SecretService::connect(EncryptionType::Dh).expect("connect");
-        let collection = service.get_default_collection().expect("collection");
+        let collection = collection(&service).expect("collection");
         collection
             .create_item(
                 "NextSync — legacy test entry",
