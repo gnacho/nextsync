@@ -10,8 +10,7 @@ use libadwaita::prelude::*;
 
 use crate::storage::config::{AccountConfig, ConfigStore};
 use crate::ui::settings::{
-    account_action_groups, deletion_guard_group, detailed_output_row, save_account_network,
-    sync_option_groups, SettingsCallbacks, SettingsHost,
+    account_action_groups, save_account_network, SettingsCallbacks, SettingsHost,
 };
 use crate::util::i18n::t;
 
@@ -87,19 +86,9 @@ pub fn build_account_settings_panel(
     connection.add(&trust);
     page.add(&connection);
 
-    // Synchronization options (account-owned).
-    for group in sync_option_groups(store, account_id, account, callbacks, host) {
-        page.add(&group);
-    }
-
-    // Detailed output (account-owned).
-    let detailed_group = libadwaita::PreferencesGroup::new();
-    detailed_group.add(&detailed_output_row(store, account_id, callbacks, account));
-    page.add(&detailed_group);
-
-    // Deletion guard (account-owned).
-    page.add(&deletion_guard_group(store, account_id, account));
-
+    // The synchronization options live in Preferences (Synchronization
+    // page); this panel keeps only the account identity and connection
+    // (issue #63: the dropdown was too long).
     // Authentication + account removal (account-owned).
     for group in account_action_groups(store, account_id, account, callbacks, host) {
         page.add(&group);

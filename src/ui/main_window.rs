@@ -1152,18 +1152,25 @@ impl MainWindow {
         let Some(account_id) = self.active_account_id.clone() else {
             return;
         };
-        if !self
+        let Some(account) = self
             .config
             .accounts
             .iter()
-            .any(|account| account.id == account_id)
-        {
+            .find(|account| account.id == account_id)
+            .cloned()
+        else {
             return;
-        }
+        };
         if self.settings_view.is_none() {
             let host = SettingsHost::new(&self.window, &self.toast_overlay);
             let callbacks = self.build_settings_callbacks();
-            let view = SettingsView::new(self.config_store.clone(), callbacks, &host);
+            let view = SettingsView::new(
+                self.config_store.clone(),
+                account,
+                account_id.clone(),
+                callbacks,
+                &host,
+            );
             self.root_stack.add_named(view.widget(), Some("settings"));
             self.settings_view = Some(view);
         }
@@ -1639,14 +1646,25 @@ impl MainWindow {
                 &host,
             );
             let toggle = gtk4::Button::builder()
-                .label(t("Account settings"))
                 .tooltip_text(t(
                     "Server, proxy and synchronization options for this account",
                 ))
                 .css_classes(["flat"])
                 .halign(gtk4::Align::Fill)
                 .build();
-            toggle.set_icon_name("preferences-system-symbolic");
+            // Icon AND label together: a plain label-or-icon button shows
+            // only one of them.
+            let toggle_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            let gear = gtk4::Image::builder()
+                .icon_name("preferences-system-symbolic")
+                .pixel_size(16)
+                .build();
+            toggle_content.append(&gear);
+            let toggle_label = gtk4::Label::new(Some(t("Account settings")));
+            toggle_label.set_xalign(0.0);
+            toggle_label.set_hexpand(true);
+            toggle_content.append(&toggle_label);
+            toggle.set_child(Some(&toggle_content));
             {
                 let panel = panel.clone();
                 toggle.connect_clicked(move |_| {

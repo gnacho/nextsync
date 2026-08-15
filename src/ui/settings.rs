@@ -118,8 +118,10 @@ impl SettingsView {
     /// `account_id` is the key every write operation uses against the store.
     pub fn new(
         config_store: ConfigStore,
+        account: AccountConfig,
+        account_id: String,
         callbacks: SettingsCallbacks,
-        _host: &SettingsHost,
+        host: &SettingsHost,
     ) -> Self {
         // Top-level sections (general/logging/network) come from the current
         // configuration; account-owned settings come from the snapshot.
@@ -129,6 +131,8 @@ impl SettingsView {
         // removed from Settings by user decision (issue #18): the sync view
         // owns it, so the settings pages never duplicate it.
         let general = build_general_page(&config_store, &config.general);
+        let synchronization =
+            build_sync_page(&config_store, &account_id, &account, &callbacks, host);
         let network = build_network_page(&config_store, &config.network);
         let advanced = build_advanced_page(&config_store, &config.logging, &callbacks);
 
@@ -149,6 +153,7 @@ impl SettingsView {
             page_names,
         };
         view.add_page("general", general);
+        view.add_page("synchronization", synchronization);
         view.add_page("network", network);
         view.add_page("advanced", advanced);
         stack.set_visible_child_name("general");
@@ -190,6 +195,7 @@ impl SettingsView {
 /// Stable identifiers for the settings pages.
 pub mod page {
     pub const GENERAL: &str = "general";
+    pub const SYNCHRONIZATION: &str = "synchronization";
     pub const NETWORK: &str = "network";
     pub const ADVANCED: &str = "advanced";
 }
@@ -616,6 +622,30 @@ pub(crate) fn sync_option_groups(
 
     let _ = widgets;
     groups
+}
+
+/// Synchronization page: the per-account trigger options, exclusions,
+/// reliability, deletion guard and detailed output (issue #63 moves them
+/// here from the account panel).
+fn build_sync_page(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+    host: &SettingsHost,
+) -> libadwaita::PreferencesPage {
+    let page = libadwaita::PreferencesPage::builder()
+        .title(t("Synchronization"))
+        .icon_name("emblem-synchronizing-symbolic")
+        .build();
+    for group in sync_option_groups(store, account_id, account, callbacks, host) {
+        page.add(&group);
+    }
+    let detailed_group = libadwaita::PreferencesGroup::new();
+    detailed_group.add(&detailed_output_row(store, account_id, callbacks, account));
+    page.add(&detailed_group);
+    page.add(&deletion_guard_group(store, account_id, account));
+    page
 }
 
 /// Global folder-size confirmation threshold (issue #36 / #56): `0` disables.
@@ -2510,18 +2540,30 @@ mod tests {
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
-            let _account_id = store.add_account(&account).unwrap();
+            let account_id = store.add_account(&account).unwrap();
             let host = test_host();
-            let view = SettingsView::new(store.clone(), SettingsCallbacks::default(), &host);
-            assert_eq!(view.page_names().len(), 3);
+            let view = SettingsView::new(
+                store.clone(),
+                account.clone(),
+                account_id.clone(),
+                SettingsCallbacks::default(),
+                &host,
+            );
+            assert_eq!(view.page_names().len(), 4);
             assert!(view
                 .page_names()
                 .iter()
                 .any(|name| name == crate::ui::settings::page::ADVANCED));
 
             set_locale(Locale::Spanish);
-            let view = SettingsView::new(store, SettingsCallbacks::default(), &host);
-            assert_eq!(view.page_names().len(), 3);
+            let view = SettingsView::new(
+                store,
+                account.clone(),
+                account_id.clone(),
+                SettingsCallbacks::default(),
+                &host,
+            );
+            assert_eq!(view.page_names().len(), 4);
             reset_locale();
         });
     }
@@ -2542,11 +2584,25 @@ mod tests {
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
-            let _account_id = store.add_account(&account).unwrap();
-            let view = SettingsView::new(store, SettingsCallbacks::default(), &test_host());
+            let account_id = store.add_account(&account).unwrap();
+            let view = SettingsView::new(
+                store,
+                account,
+                account_id,
+                SettingsCallbacks::default(),
+                &test_host(),
+            );
 
             let names: Vec<&str> = view.page_names().iter().map(String::as_str).collect();
-            assert_eq!(names, [page::GENERAL, page::NETWORK, page::ADVANCED]);
+            assert_eq!(
+                names,
+                [
+                    page::GENERAL,
+                    page::SYNCHRONIZATION,
+                    page::NETWORK,
+                    page::ADVANCED
+                ]
+            );
             for name in view.page_names() {
                 assert!(
                     view.stack.child_by_name(name).is_some(),

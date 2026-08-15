@@ -733,6 +733,18 @@ impl AccountRuntime {
         } = (self.watcher_factory)();
         let push = self.default_push();
         self.mount(network, power, suspend, push);
+        // Synchronize every folder once at startup (production only; tests
+        // drive their own triggers). Without this the app sits idle until an
+        // event or interval fires, so a fresh install never compares the
+        // trees and the not-yet-synchronized state sticks until a manual run.
+        let schedulers: Vec<_> = self
+            .folders
+            .values()
+            .map(|folder| folder.scheduler())
+            .collect();
+        for scheduler in schedulers {
+            scheduler.request(Trigger::Startup);
+        }
     }
 
     /// Wire the GLib main-loop consumers for every folder runtime: the local
@@ -848,6 +860,11 @@ impl AccountRuntime {
         );
         let state = runtime.state();
         self.aggregate.add(state);
+        // A folder added while the app runs starts synchronizing right away
+        // (in production; tests mount their own watchers and triggers).
+        if self.network_watcher.is_some() {
+            runtime.scheduler().request(Trigger::Startup);
+        }
         self.folders.insert(runtime.folder.id.clone(), runtime);
     }
 
