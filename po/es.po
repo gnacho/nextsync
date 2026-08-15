@@ -2250,3 +2250,23 @@ msgstr "Esperando una red Wi-Fi permitida"
 #: src/core/scheduler.rs
 msgid "Quiet hours: synchronization is suspended"
 msgstr "Horario de silencio: la sincronización está suspendida"
+
+#: src/ui/settings.rs
+msgid "Quiet hours"
+msgstr "Horario de silencio"
+
+#: src/ui/settings.rs
+msgid "Suspend automatic synchronization inside a daily time window"
+msgstr "Suspende la sincronización automática dentro de una franja horaria diaria"
+
+#: src/ui/settings.rs
+msgid "Starts at"
+msgstr "Empieza a las"
+
+#: src/ui/settings.rs
+msgid "Ends at"
+msgstr "Termina a las"
+
+#: src/ui/settings.rs
+msgid "Quiet Hours"
+msgstr "Horario de silencio"

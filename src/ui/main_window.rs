@@ -951,6 +951,10 @@ impl MainWindow {
         for account in self.config.accounts.clone() {
             self.account_manager.sync_folders(&account);
         }
+        // Environment gates (metered networks, Wi-Fi allowlist, quiet hours)
+        // may have changed in Settings; push the fresh values to the
+        // schedulers.
+        self.account_manager.apply_environment(&self.config);
         self.refresh_sidebar();
         let account_id = self.active_account_id.clone();
         self.present_account(account_id.as_deref());

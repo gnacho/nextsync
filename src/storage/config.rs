@@ -219,11 +219,51 @@ pub struct GeneralConfig {
     /// mentions) are raised as desktop notifications (issue #31).
     #[serde(default)]
     pub show_server_notifications: bool,
+    /// Quiet-hours window (`"HH:MM"` start and end, local time) during which
+    /// automatic synchronization is suspended (issue #45).
+    #[serde(default)]
+    pub quiet_hours: Option<(String, String)>,
 }
 
 /// Default color scheme (follow the desktop).
 fn default_color_scheme() -> String {
     "system".to_string()
+}
+
+/// Parse the `quiet_hours` pair from its serialized `[start, end]` form,
+/// keeping `None` for anything malformed or empty (issue #45).
+fn parse_quiet_hours(obj: &Map<String, Value>) -> Option<(String, String)> {
+    let pair = obj.get("quiet_hours")?.as_array()?;
+    if pair.len() != 2 {
+        return None;
+    }
+    let start = pair.first()?.as_str()?.trim().to_owned();
+    let end = pair.get(1)?.as_str()?.trim().to_owned();
+    if valid_hhmm(&start) && valid_hhmm(&end) {
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
+/// `"HH:MM"` with 00-23 hours and 00-59 minutes.
+pub fn valid_hhmm(value: &str) -> bool {
+    match value.split_once(':') {
+        Some((hours, minutes)) => {
+            hours.len() == 2
+                && minutes.len() == 2
+                && hours.bytes().all(|b| b.is_ascii_digit())
+                && minutes.bytes().all(|b| b.is_ascii_digit())
+                && hours < "24"
+                && minutes < "60"
+        }
+        None => false,
+    }
+}
+
+/// Settings-facing alias of [`valid_hhmm`].
+pub fn valid_hhmm_public(value: &str) -> bool {
+    valid_hhmm(value)
 }
 
 /// Default for `show_notifications` (on).
@@ -239,6 +279,7 @@ impl Default for GeneralConfig {
             color_scheme: default_color_scheme(),
             show_notifications: yes(),
             show_server_notifications: false,
+            quiet_hours: None,
         }
     }
 }
@@ -1027,6 +1068,7 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
         color_scheme: get_string(obj, "color_scheme", &default_color_scheme()),
         show_notifications: get_bool(obj, "show_notifications", true),
         show_server_notifications: get_bool(obj, "show_server_notifications", false),
+        quiet_hours: parse_quiet_hours(obj),
     }
 }
 

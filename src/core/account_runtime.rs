@@ -81,6 +81,14 @@ struct WatcherTargets {
     /// App-layer hook for the push `notify_notification` hint (issue #31): set
     /// by the launcher to poke the server-notifications poller.
     on_server_notification: Option<Rc<dyn Fn()>>,
+    /// Environment gates shared by every scheduler (issues #40, #41, #45).
+    skip_metered: bool,
+    allowed_ssids: Vec<String>,
+    quiet_hours: Option<(String, String)>,
+    /// Shared probe reference to re-read metering/SSID on network changes
+    /// (issue #40/#41). The default Gio probe reads NetworkManager on
+    /// demand; tests leave it unset.
+    network_probe: Option<Rc<dyn crate::core::network::NetworkProbe>>,
 }
 
 impl WatcherTargets {
@@ -99,6 +107,33 @@ impl WatcherTargets {
         }
         if let Some(push) = &push {
             push.set_online(online);
+        }
+        // Network changes also re-evaluate metering and the active SSID.
+        WatcherTargets::apply_environment(targets);
+    }
+
+    /// Re-read metering/Wi-Fi from the network probe and push the
+    /// environment gates (metered, SSID allowlist, quiet hours) to every
+    /// scheduler (issues #40, #41, #45).
+    fn apply_environment(targets: &Rc<RefCell<WatcherTargets>>) {
+        let (skip_metered, allowed_ssids, quiet_hours, probe) = {
+            let current = targets.borrow();
+            (
+                current.skip_metered,
+                current.allowed_ssids.clone(),
+                current.quiet_hours.clone(),
+                current.network_probe.clone(),
+            )
+        };
+        let schedulers = targets.borrow().schedulers.clone();
+        for scheduler in &schedulers {
+            scheduler.set_skip_metered(skip_metered);
+            scheduler.set_allowed_ssids(allowed_ssids.clone());
+            scheduler.set_quiet_hours(quiet_hours.clone());
+            if let Some(probe) = &probe {
+                scheduler.set_metered(probe.is_metered());
+                scheduler.set_active_ssid(probe.wifi_ssid());
+            }
         }
     }
 
@@ -640,6 +675,28 @@ impl AccountRuntime {
 
     /// Start runtimes for every configured folder and wire the system watchers
     /// (network/power/suspend) and the notify_push client.
+    /// Apply the global environment gates (metered networks, Wi-Fi allowlist,
+    /// quiet hours) to this account's schedulers (issues #40, #41, #45).
+    /// The network probe re-reads metering/SSID immediately; later network
+    /// changes re-apply the same values through the watcher callback.
+    pub fn set_environment(
+        &self,
+        skip_metered: bool,
+        allowed_ssids: Vec<String>,
+        quiet_hours: Option<(String, String)>,
+    ) {
+        {
+            let mut targets = self.targets.borrow_mut();
+            targets.skip_metered = skip_metered;
+            targets.allowed_ssids = allowed_ssids;
+            targets.quiet_hours = quiet_hours;
+            if targets.network_probe.is_none() {
+                targets.network_probe = Some(Rc::new(crate::core::network::GioNetworkProbe::new()));
+            }
+        }
+        WatcherTargets::apply_environment(&self.targets);
+    }
+
     pub fn start(&mut self) {
         self.prime();
         self.mount_watchers();
@@ -852,6 +909,24 @@ impl AccountManager {
         self.pause_on_battery = config.general.pause_on_battery;
         for account in config.accounts.clone() {
             self.ensure_runtime(account);
+        }
+        self.apply_environment(config);
+    }
+
+    /// Push the global environment gates (metered networks, Wi-Fi allowlist,
+    /// quiet hours) to every runtime (issues #40, #41, #45). Called on start
+    /// and whenever the settings change.
+    pub fn apply_environment(&mut self, config: &Config) {
+        let skip_metered = true;
+        let allowed_ssids = config
+            .network
+            .allowed_ssids
+            .as_deref()
+            .map(crate::core::network::parse_allowed_ssids)
+            .unwrap_or_default();
+        let quiet_hours = config.general.quiet_hours.clone();
+        for runtime in self.runtimes.values() {
+            runtime.set_environment(skip_metered, allowed_ssids.clone(), quiet_hours.clone());
         }
     }
 

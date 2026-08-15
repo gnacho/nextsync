@@ -223,17 +223,48 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         .active(general.show_server_notifications)
         .build();
 
+    let quiet = libadwaita::SwitchRow::builder()
+        .title(t("Quiet hours"))
+        .subtitle(t(
+            "Suspend automatic synchronization inside a daily time window",
+        ))
+        .active(general.quiet_hours.is_some())
+        .build();
+    let quiet_start = libadwaita::EntryRow::new();
+    quiet_start.set_title(t("Starts at"));
+    quiet_start.set_text(
+        general
+            .quiet_hours
+            .as_ref()
+            .map_or("", |pair| pair.0.as_str()),
+    );
+    quiet_start.set_input_purpose(gtk4::InputPurpose::Alpha);
+    let quiet_end = libadwaita::EntryRow::new();
+    quiet_end.set_title(t("Ends at"));
+    quiet_end.set_text(
+        general
+            .quiet_hours
+            .as_ref()
+            .map_or("", |pair| pair.1.as_str()),
+    );
+
     {
         let store = store.clone();
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
         let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
         autostart.connect_active_notify(move |_| {
             save_general(
                 &store,
                 &autostart_guard,
                 &notifications_guard,
                 &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
             );
         });
     }
@@ -242,12 +273,18 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
         let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
         notifications.connect_active_notify(move |_| {
             save_general(
                 &store,
                 &autostart_guard,
                 &notifications_guard,
                 &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
             );
         });
     }
@@ -256,12 +293,81 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
         let autostart_guard = autostart.clone();
         let notifications_guard = notifications.clone();
         let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
         server_notifications.connect_active_notify(move |_| {
             save_general(
                 &store,
                 &autostart_guard,
                 &notifications_guard,
                 &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
+        let save = move || {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
+            );
+        };
+        quiet.connect_active_notify(move |_| {
+            save();
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
+        quiet_start.connect_apply(move |_| {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
+            );
+        });
+    }
+    {
+        let store = store.clone();
+        let autostart_guard = autostart.clone();
+        let notifications_guard = notifications.clone();
+        let server_guard = server_notifications.clone();
+        let quiet_guard = quiet.clone();
+        let quiet_start_guard = quiet_start.clone();
+        let quiet_end_guard = quiet_end.clone();
+        quiet_end.connect_apply(move |_| {
+            save_general(
+                &store,
+                &autostart_guard,
+                &notifications_guard,
+                &server_guard,
+                &quiet_guard,
+                &quiet_start_guard,
+                &quiet_end_guard,
             );
         });
     }
@@ -275,6 +381,16 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
     notifications_group.add(&notifications);
     notifications_group.add(&server_notifications);
     page.add(&notifications_group);
+
+    quiet_start.set_show_apply_button(true);
+    quiet_end.set_show_apply_button(true);
+    let quiet_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Quiet Hours"))
+        .build();
+    quiet_group.add(&quiet);
+    quiet_group.add(&quiet_start);
+    quiet_group.add(&quiet_end);
+    page.add(&quiet_group);
 
     page
 }
@@ -926,18 +1042,44 @@ fn invoke(callback: &Option<SettingsCallback>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_general(
     store: &ConfigStore,
     autostart: &libadwaita::SwitchRow,
     notifications: &libadwaita::SwitchRow,
     server_notifications: &libadwaita::SwitchRow,
+    quiet: &libadwaita::SwitchRow,
+    quiet_start: &libadwaita::EntryRow,
+    quiet_end: &libadwaita::EntryRow,
 ) {
+    let hours = if quiet.is_active() {
+        let start = quiet_start.text().trim().to_string();
+        let end = quiet_end.text().trim().to_string();
+        if crate::storage::config::valid_hhmm_public(&start)
+            && crate::storage::config::valid_hhmm_public(&end)
+        {
+            Some((start, end))
+        } else {
+            quiet_start.add_css_class("error");
+            quiet_end.add_css_class("error");
+            None
+        }
+    } else {
+        None
+    };
+    let hours_valid = quiet.is_active() == hours.is_some() || !quiet.is_active();
     if let Err(error) = persist_config(store, |config| {
         config.general.autostart = autostart.is_active();
         config.general.show_notifications = notifications.is_active();
         config.general.show_server_notifications = server_notifications.is_active();
+        config.general.quiet_hours = hours.clone();
     }) {
         eprintln!("Settings: could not save general settings: {error}");
+        return;
+    }
+    if hours_valid || !quiet.is_active() {
+        quiet_start.remove_css_class("error");
+        quiet_end.remove_css_class("error");
     }
     // Reflect the startup preference in the desktop session immediately
     // (atomic desktop-entry write under ~/.config/autostart).
