@@ -33,7 +33,7 @@ pub fn window_title() -> &'static str {
 
 /// Translated window subtitle.
 pub fn window_subtitle() -> &'static str {
-    t("Nextcloud file synchronization")
+    t("File synchronization for GNOME")
 }
 
 /// What a main-window close-request should do.
@@ -200,6 +200,7 @@ impl AccountView {
             .margin_bottom(16)
             .margin_start(18)
             .margin_end(18)
+            .vexpand(true)
             .build();
 
         let account_list = gtk4::ListBox::builder()
@@ -1772,7 +1773,7 @@ mod tests {
     fn window_constants_are_stable() {
         set_locale(Locale::English);
         assert_eq!(window_title(), "NextSync");
-        assert_eq!(window_subtitle(), "Nextcloud file synchronization");
+        assert_eq!(window_subtitle(), "File synchronization for GNOME");
         reset_locale();
     }
 
@@ -2047,7 +2048,7 @@ mod tests {
     fn window_subtitle_translates_to_spanish() {
         set_locale(Locale::Spanish);
         assert_eq!(window_title(), "NextSync");
-        assert_eq!(window_subtitle(), "Sincronización de archivos de Nextcloud");
+        assert_eq!(window_subtitle(), "Sincronización de archivos para GNOME");
         reset_locale();
     }
 

@@ -1069,8 +1069,8 @@ msgid "Run one synchronization without changing the power preference?"
 msgstr "¿Ejecutar una sincronización sin cambiar la preferencia de energía?"
 
 #: src/nextsync/ui/main_window.py:310
-msgid "Nextcloud file synchronization"
-msgstr "Sincronización de archivos de Nextcloud"
+msgid "File synchronization for GNOME"
+msgstr "Sincronización de archivos para GNOME"
 
 #: src/nextsync/ui/main_window.py:312 src/nextsync/ui/settings.py:123
 #: src/nextsync/ui/tray.py:346
