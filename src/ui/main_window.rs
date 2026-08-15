@@ -17,7 +17,7 @@ use libadwaita::prelude::*;
 
 use crate::core::account_runtime::{AccountManager, AccountRuntime, SchedulerFacade};
 use crate::state::{AppState, StateSnapshot};
-use crate::storage::config::{Config, ConfigStore};
+use crate::storage::config::{AccountConfig, Config, ConfigStore};
 use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{
@@ -64,7 +64,15 @@ pub fn close_action(tray_active: bool) -> CloseAction {
 /// clears the alert and re-downloads the folder; Approve These Deletions Once
 /// lets the run proceed for a single synchronization (the guard re-blocks if
 /// the same mass deletion is still present afterwards).
-fn present_delete_review(scheduler: &SchedulerFacade, parent: &gtk4::Widget) {
+///
+/// Issue #38: Nextcloud accounts additionally get a server trash browser
+/// that lists what the server kept and can restore everything (OpenCloud
+/// has no documented trashbin, so the entry point stays hidden there).
+fn present_delete_review(
+    scheduler: &SchedulerFacade,
+    account: &AccountConfig,
+    parent: &gtk4::Widget,
+) {
     let Some(alert) = scheduler.delete_alert() else {
         return;
     };
@@ -76,6 +84,9 @@ fn present_delete_review(scheduler: &SchedulerFacade, parent: &gtk4::Widget) {
     };
     let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&detail));
     dialog.add_response("keep_paused", t("Keep Paused"));
+    if crate::ui::server_trash::trash_supported(account) {
+        dialog.add_response("trash", t("Restore from server trash…"));
+    }
     dialog.add_response("restore", t("Restore from Nextcloud"));
     dialog.add_response("approve", t("Approve These Deletions Once"));
     dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Suggested);
@@ -83,9 +94,15 @@ fn present_delete_review(scheduler: &SchedulerFacade, parent: &gtk4::Widget) {
     dialog.set_default_response(Some("keep_paused"));
 
     let scheduler_for_response = scheduler.clone();
+    let account_for_trash = account.clone();
+    let parent_for_trash = parent.clone();
     dialog.connect_response(None, move |_dialog, response| match response {
         "restore" => scheduler_for_response.restore_from_server(),
         "approve" => scheduler_for_response.approve_delete_once(),
+        "trash" => crate::ui::server_trash::present_server_trash(
+            &account_for_trash,
+            parent_for_trash.upcast_ref::<gtk4::Widget>(),
+        ),
         _ => {}
     });
     dialog.present(Some(parent));
@@ -331,10 +348,15 @@ impl AccountView {
             .css_classes(["suggested-action", "pill"])
             .build();
         let runtime_for_sync = runtime.clone();
+        let account_for_review = account.clone();
         sync_button.connect_clicked(move |button| {
             let scheduler = runtime_for_sync.scheduler();
             if scheduler.delete_alert().is_some() {
-                present_delete_review(&scheduler, button.upcast_ref::<gtk4::Widget>());
+                present_delete_review(
+                    &scheduler,
+                    &account_for_review,
+                    button.upcast_ref::<gtk4::Widget>(),
+                );
                 return;
             }
             scheduler.sync_now();

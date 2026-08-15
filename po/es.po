@@ -2254,3 +2254,43 @@ msgstr "Preguntar antes de sincronizar carpetas mayores de"
 #: src/ui/settings.rs
 msgid "MB"
 msgstr "MB"
+
+#: src/ui/server_trash.rs
+msgid "No saved credentials"
+msgstr "No hay credenciales guardadas"
+
+#: src/ui/server_trash.rs
+msgid "Folder"
+msgstr "Carpeta"
+
+#: src/ui/server_trash.rs
+msgid "File"
+msgstr "Archivo"
+
+#: src/ui/server_trash.rs
+msgid "and {count} more…"
+msgstr "y {count} más…"
+
+#: src/ui/server_trash.rs
+msgid "No restorable files were found in the server trash."
+msgstr "No se encontraron archivos recuperables en la papelera del servidor."
+
+#: src/ui/server_trash.rs
+msgid "Deleted files can be restored to their original location. The retention window depends on the server settings."
+msgstr "Los archivos eliminados se pueden restaurar a su ubicación original. La ventana de conservación depende de la configuración del servidor."
+
+#: src/ui/server_trash.rs
+msgid "Restore All"
+msgstr "Restaurar todo"
+
+#: src/ui/server_trash.rs
+msgid "{count} of {total} items were restored from the server trash."
+msgstr "Se restauraron {count} de {total} elementos de la papelera del servidor."
+
+#: src/ui/server_trash.rs
+msgid "Items that could not be restored stay in the server trash."
+msgstr "Los elementos que no se pudieron restaurar permanecen en la papelera del servidor."
+
+#: src/ui/main_window.rs
+msgid "Restore from server trash…"
+msgstr "Restaurar de la papelera del servidor…"
