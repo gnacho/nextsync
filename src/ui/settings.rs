@@ -107,6 +107,7 @@ impl SettingsHost {
 pub struct SettingsView {
     root: libadwaita::ToolbarView,
     stack: libadwaita::ViewStack,
+    switcher: libadwaita::ViewSwitcherBar,
     page_names: Vec<String>,
 }
 
@@ -146,12 +147,16 @@ impl SettingsView {
         let toolbar = libadwaita::ToolbarView::new();
         let switcher = libadwaita::ViewSwitcherBar::new();
         switcher.set_stack(Some(&stack));
+        // The bar defaults to hidden (reveal = false); without this the four
+        // pages are unreachable (issue #51).
+        switcher.set_reveal(true);
         toolbar.add_bottom_bar(&switcher);
         toolbar.set_content(Some(&stack));
         let page_names = Vec::new();
         let mut view = Self {
             root: toolbar,
             stack: stack.clone(),
+            switcher: switcher.clone(),
             page_names,
         };
         view.add_page("general", general);
@@ -175,6 +180,12 @@ impl SettingsView {
     /// The root widget to embed in the main window.
     pub fn widget(&self) -> &libadwaita::ToolbarView {
         &self.root
+    }
+
+    /// Whether the bottom page switcher is revealed (issue #51: it must
+    /// always be, or the non-visible pages are unreachable).
+    pub fn switcher_revealed(&self) -> bool {
+        self.switcher.property::<bool>("reveal")
     }
 
     /// Show the page identified by `name` (see [`SettingsPage`] constants).
@@ -2641,6 +2652,12 @@ mod tests {
             assert_eq!(
                 view.stack.visible_child_name().as_deref(),
                 Some(page::GENERAL)
+            );
+            // The page switcher must be revealed or only General is ever
+            // reachable (issue #51).
+            assert!(
+                view.switcher_revealed(),
+                "the ViewSwitcherBar must be revealed"
             );
             view.show_page(page::ADVANCED);
             assert_eq!(

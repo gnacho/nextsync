@@ -64,10 +64,6 @@ fn main() {
                 }
             };
 
-            // Apply the persisted color scheme before any window is shown.
-            libadwaita::StyleManager::default()
-                .set_color_scheme(nextsync::ui::color_scheme_for(&config.general.color_scheme));
-
             let source: Rc<RefCell<dyn nextsync::core::debounce::TimeoutSource>> =
                 Rc::new(RefCell::new(GlibTimeoutSource::new()));
             let logger = nextsync::core::log::LogBuffer::new();
