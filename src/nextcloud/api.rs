@@ -342,11 +342,52 @@ impl NextcloudApi {
         password: &str,
         remote_path: &str,
     ) -> Result<(), ApiError> {
+        let base = dav_base(server, username);
+        self.mkcol_segments(&base, username, password, remote_path)
+    }
+
+    /// Create the remote folder inside an OpenCloud space over WebDAV MKCOL
+    /// (issue #55).
+    ///
+    /// OpenCloud folders map a whole space; a non-empty `remote_path` is the
+    /// optional `--remote-folder` subpath. `MKCOL
+    /// /remote.php/dav/spaces/<id>/<path>/` answers 201 on a real deployment
+    /// (verified), so the same segment-by-segment creation the Nextcloud
+    /// path uses applies. The space root itself (empty `remote_path`) is
+    /// managed by the server and stays a no-op.
+    pub fn ensure_opencloud_folder(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+        space_id: &str,
+        remote_path: &str,
+    ) -> Result<(), ApiError> {
+        let space = space_id.trim_matches('/');
+        if space.is_empty() || remote_path.trim_matches('/').is_empty() {
+            return Ok(());
+        }
+        let base = format!(
+            "{}/remote.php/dav/spaces/{space}",
+            server.trim_end_matches('/')
+        );
+        self.mkcol_segments(&base, username, token, remote_path)
+    }
+
+    /// Shared MKCOL walk: create each missing path segment under `base`.
+    /// Idempotent per segment (201 created and 405 exists both succeed);
+    /// 401/403 map to [`ApiError::AuthRejected`].
+    fn mkcol_segments(
+        &self,
+        base: &str,
+        username: &str,
+        password: &str,
+        remote_path: &str,
+    ) -> Result<(), ApiError> {
         let path = remote_path.trim_matches('/');
         if path.is_empty() {
             return Ok(());
         }
-        let base = dav_base(server, username);
         let authorization = basic_authorization(username, password);
         let mut accumulated = String::new();
         for segment in path.split('/') {
@@ -1371,6 +1412,66 @@ mod tests {
         api.ensure_remote_folder("https://cloud.example.com", "alice", "pw", "")
             .unwrap();
         assert!(requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn ensure_opencloud_folder_creates_segments_under_the_space() {
+        let http = ScriptedHttp::new(&[201, 201]);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.ensure_opencloud_folder(
+            "https://cloud.example.com",
+            "alice",
+            "token",
+            "7d443b01$9bc084a7",
+            "/cloud/sub",
+        )
+        .unwrap();
+        let urls: Vec<String> = requests
+            .borrow()
+            .iter()
+            .map(|request| request.url.clone())
+            .collect();
+        let base = "https://cloud.example.com/remote.php/dav/spaces/7d443b01$9bc084a7";
+        assert_eq!(
+            urls,
+            vec![format!("{base}/cloud"), format!("{base}/cloud/sub")]
+        );
+        assert!(requests.borrow().iter().all(|r| r.method == "MKCOL"));
+    }
+
+    #[test]
+    fn ensure_opencloud_folder_noops_on_space_root_or_missing_space() {
+        let http = ScriptedHttp::new(&[]);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        api.ensure_opencloud_folder(
+            "https://cloud.example.com",
+            "alice",
+            "token",
+            "7d443b01$9bc084a7",
+            "/",
+        )
+        .unwrap();
+        api.ensure_opencloud_folder("https://cloud.example.com", "alice", "token", "", "/cloud")
+            .unwrap();
+        assert!(requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn ensure_opencloud_folder_maps_401_to_auth_rejected() {
+        let http = ScriptedHttp::new(&[401]);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(matches!(
+            api.ensure_opencloud_folder(
+                "https://cloud.example.com",
+                "alice",
+                "token",
+                "7d443b01$9bc084a7",
+                "/cloud"
+            ),
+            Err(ApiError::AuthRejected)
+        ));
     }
 
     #[test]
