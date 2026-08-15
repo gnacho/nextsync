@@ -2214,3 +2214,115 @@ msgstr "Estilo oscuro"
 #: src/ui/settings.rs
 msgid "Desktop Integration"
 msgstr "Integración con el escritorio"
+
+#: src/core/scheduler.rs
+msgid "Another synchronization engine ({name}) is already running on this folder. Close it and try again."
+msgstr "Otro motor de sincronización ({name}) ya está funcionando en esta carpeta. Ciérralo e inténtalo de nuevo."
+
+#: src/core/sync_safety.rs
+msgid "Both the local folder and the remote folder contain files. Confirm that you want to merge their contents."
+msgstr "Tanto la carpeta local como la remota contienen archivos. Confirma que quieres fusionar su contenido."
+
+#: src/core/sync_safety.rs
+msgid "This folder was synchronized before. Hidden sync journal files were found: {names}. They record what the engine already transferred. Starting fresh moves them to the trash and re-downloads from the server; keeping them resumes the previous sync history."
+msgstr "Esta carpeta se sincronizó anteriormente. Se encontraron archivos ocultos de registro de sincronización: {names}. Registran lo que el motor ya transfirió. Empezar de cero los mueve a la papelera y vuelve a descargar todo del servidor; mantenerlos reanuda el historial de sincronización anterior."
+
+#: src/ui/safety_review.rs
+msgid "Keep Synchronization History"
+msgstr "Mantener el historial de sincronización"
+
+#: src/ui/safety_review.rs
+msgid "Start Fresh"
+msgstr "Empezar de cero"
+
+#: src/ui/settings.rs
+msgid "Start synchronizing this folder now?"
+msgstr "¿Empezar a sincronizar esta carpeta ahora?"
+
+#: src/ui/safety_review.rs
+msgid "The remote folder holds about {size}. Its files will be downloaded into {target}."
+msgstr "La carpeta remota ocupa unos {size}. Sus archivos se descargarán en {target}."
+
+#: src/ui/settings.rs
+msgid "Folder Size Confirmation"
+msgstr "Confirmación de tamaño de carpeta"
+
+#: src/ui/settings.rs
+msgid "Ask before syncing folders larger than"
+msgstr "Preguntar antes de sincronizar carpetas mayores de"
+
+#: src/ui/settings.rs
+msgid "MB"
+msgstr "MB"
+
+#: src/ui/server_trash.rs
+msgid "No saved credentials"
+msgstr "No hay credenciales guardadas"
+
+#: src/ui/server_trash.rs
+msgid "Folder"
+msgstr "Carpeta"
+
+#: src/ui/server_trash.rs
+msgid "File"
+msgstr "Archivo"
+
+#: src/ui/server_trash.rs
+msgid "and {count} more…"
+msgstr "y {count} más…"
+
+#: src/ui/server_trash.rs
+msgid "No restorable files were found in the server trash."
+msgstr "No se encontraron archivos recuperables en la papelera del servidor."
+
+#: src/ui/server_trash.rs
+msgid "Deleted files can be restored to their original location. The retention window depends on the server settings."
+msgstr "Los archivos eliminados se pueden restaurar a su ubicación original. La ventana de conservación depende de la configuración del servidor."
+
+#: src/ui/server_trash.rs
+msgid "Restore All"
+msgstr "Restaurar todo"
+
+#: src/ui/server_trash.rs
+msgid "{count} of {total} items were restored from the server trash."
+msgstr "Se restauraron {count} de {total} elementos de la papelera del servidor."
+
+#: src/ui/server_trash.rs
+msgid "Items that could not be restored stay in the server trash."
+msgstr "Los elementos que no se pudieron restaurar permanecen en la papelera del servidor."
+
+#: src/ui/main_window.rs
+msgid "Restore from server trash…"
+msgstr "Restaurar de la papelera del servidor…"
+
+#: src/ui/folder_status.rs
+msgid "Pending changes…"
+msgstr "Cambios pendientes…"
+
+#: src/ui/pending_changes.rs
+msgid "Pending Changes"
+msgstr "Cambios pendientes"
+
+#: src/ui/pending_changes.rs
+msgid "New"
+msgstr "Nuevo"
+
+#: src/ui/pending_changes.rs
+msgid "Changed"
+msgstr "Modificado"
+
+#: src/ui/pending_changes.rs
+msgid "Deleted"
+msgstr "Eliminado"
+
+#: src/ui/pending_changes.rs
+msgid "No pending local changes since the last synchronization."
+msgstr "No hay cambios locales pendientes desde la última sincronización."
+
+#: src/ui/pending_changes.rs
+msgid "Local changes since the last synchronization, compared against the local tree and the synchronization journal. Remote changes are not included."
+msgstr "Cambios locales desde la última sincronización, comparando el árbol local con el registro de sincronización. Los cambios remotos no se incluyen."
+
+#: src/ui/pending_changes.rs
+msgid "This folder has no synchronization journal yet, so every local file counts as new. Remote changes are not included."
+msgstr "Esta carpeta aún no tiene registro de sincronización, así que cada archivo local cuenta como nuevo. Los cambios remotos no se incluyen."

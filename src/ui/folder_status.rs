@@ -92,6 +92,7 @@ pub struct FolderRowCallbacks {
     pub on_force_sync: Option<Rc<dyn Fn()>>,
     pub on_toggle_pause: Option<Rc<dyn Fn()>>,
     pub on_remove: Option<Rc<dyn Fn()>>,
+    pub on_pending_changes: Option<Rc<dyn Fn()>>,
 }
 
 /// A GTK action row rendering one synchronized folder with live status.
@@ -157,6 +158,7 @@ impl FolderStatusRow {
             ("force-sync", callbacks.on_force_sync.clone()),
             ("toggle-pause", callbacks.on_toggle_pause.clone()),
             ("remove", callbacks.on_remove.clone()),
+            ("pending-changes", callbacks.on_pending_changes.clone()),
         ] {
             let Some(callback) = callback else { continue };
             let action = gio::SimpleAction::new(name, None);
@@ -202,6 +204,12 @@ impl FolderStatusRow {
         if actions.contains_key("remove") {
             let item = gio::MenuItem::new(Some(t("Remove synchronization")), Some("folder.remove"));
             item.set_icon(&gio::ThemedIcon::new("user-trash-symbolic"));
+            menu.append_item(&item);
+        }
+        if actions.contains_key("pending-changes") {
+            let item =
+                gio::MenuItem::new(Some(t("Pending changes…")), Some("folder.pending-changes"));
+            item.set_icon(&gio::ThemedIcon::new("nextsync-list-checks-symbolic"));
             menu.append_item(&item);
         }
         let popover = gtk4::PopoverMenu::from_model(Some(&menu));
@@ -383,12 +391,14 @@ mod tests {
                 local_root: "/tmp/a".to_string(),
                 remote_path: "/docs".to_string(),
                 space_id: None,
+                size_confirmed: false,
             },
             FolderConfig {
                 id: "f2".to_string(),
                 local_root: "/tmp/b".to_string(),
                 remote_path: "/photos".to_string(),
                 space_id: None,
+                size_confirmed: false,
             },
         ];
         let runtimes = std::collections::HashMap::new();
@@ -408,6 +418,7 @@ mod tests {
                 local_root: "/tmp/a".to_string(),
                 remote_path: "/docs".to_string(),
                 space_id: None,
+                size_confirmed: false,
             };
             let state = StateController::new(AppState::IdleOk);
             let row = FolderStatusRow::new(
