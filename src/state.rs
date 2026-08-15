@@ -28,6 +28,8 @@ pub enum AppState {
     IdleOk,
     /// Idle, but only manual synchronizations are allowed.
     IdleManualOnly,
+    /// Idle without ever having completed a successful synchronization.
+    IdleNotSynced,
     /// A synchronization is queued and will start shortly.
     SyncQueued,
     /// A synchronization is running.
@@ -55,6 +57,7 @@ impl AppState {
             Self::Unconfigured => "unconfigured",
             Self::IdleOk => "idle_ok",
             Self::IdleManualOnly => "idle_manual_only",
+            Self::IdleNotSynced => "idle_not_synced",
             Self::SyncQueued => "sync_queued",
             Self::Syncing => "syncing",
             Self::PausedUser => "paused_user",
@@ -129,6 +132,7 @@ pub fn severity(state: AppState) -> i32 {
         AppState::PausedBattery => 30,
         AppState::PausedUser => 20,
         AppState::IdleManualOnly => 10,
+        AppState::IdleNotSynced => 5,
         AppState::IdleOk => 0,
         AppState::Unconfigured => -10,
     }

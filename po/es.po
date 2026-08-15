@@ -2453,3 +2453,15 @@ msgstr "Crea un Token de aplicación en la web del servidor (ajustes de la cuent
 #: src/ui/setup.rs
 msgid "Create an App Token in the server web UI (account settings, App Tokens, + New) and paste it here. Your account password does not work for OpenCloud."
 msgstr "Crea un Token de aplicación en la web del servidor (ajustes de la cuenta, App Tokens, + Nuevo) y pégalo aquí. Tu contraseña de cuenta no sirve para OpenCloud."
+
+#: src/core/scheduler.rs
+msgid "Not synchronized yet"
+msgstr "Aún no se ha sincronizado"
+
+#: src/ui/tray_state.rs
+msgid "Not Synchronized Yet"
+msgstr "Aún no sincronizado"
+
+#: src/ui/main_window.rs
+msgid "Connected"
+msgstr "Conectado"

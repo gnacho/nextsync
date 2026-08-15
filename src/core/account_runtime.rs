@@ -238,7 +238,7 @@ impl FolderRuntime {
         sync_permit: Option<SyncPermit>,
         progress_rx: Option<async_channel::Receiver<SyncProgress>>,
     ) -> Self {
-        let state = StateController::new(AppState::IdleOk);
+        let state = StateController::new(AppState::IdleNotSynced);
         let settings = crate::core::triggers::TriggerSettings::from(&account.sync);
         let scheduler = Scheduler::new(
             state.clone(),
@@ -1294,7 +1294,8 @@ mod tests {
         assert_eq!(runtime.folders().len(), 1);
         let folder = runtime.folders().values().next().unwrap().clone();
         assert_eq!(folder.folder.id, "folder-1");
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        // A fresh folder has never synchronized (issue #59).
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
 
         folder.sync_now();
         // A queued manual sync schedules an idle source on the shared backend.
@@ -1392,7 +1393,10 @@ mod tests {
         let _sub = runtime.state().subscribe(collect);
         let folder = runtime.folders().values().next().unwrap().clone();
         folder.set_paused(true);
-        assert_eq!(*seen.borrow(), vec![AppState::IdleOk, AppState::PausedUser]);
+        assert_eq!(
+            *seen.borrow(),
+            vec![AppState::IdleNotSynced, AppState::PausedUser]
+        );
     }
 
     #[test]
@@ -1448,7 +1452,7 @@ mod tests {
             None,
         );
         // mount reports the initial online state, so the folder stays IdleOk.
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
 
         net.set(false);
         assert_eq!(runtime.state().snapshot().state, AppState::Offline);
@@ -1477,7 +1481,7 @@ mod tests {
             SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
             None,
         );
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
 
         net.set(false);
         assert_eq!(runtime.state().snapshot().state, AppState::Offline);
@@ -1508,10 +1512,11 @@ mod tests {
             SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
             None,
         );
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
         net.set(true);
-        // Still online: no transition, no Offline state.
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        // Still online: no transition, no Offline state; a folder that has
+        // never synchronized stays not-synced (issue #59).
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
     }
 
     // ---- power watcher wiring ---------------------------------------------
@@ -1539,7 +1544,7 @@ mod tests {
         assert_eq!(runtime.state().snapshot().state, AppState::PausedBattery);
 
         power.set(false);
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
     }
 
     #[test]
@@ -1562,7 +1567,7 @@ mod tests {
         );
 
         power.set(true);
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
     }
 
     #[test]
@@ -1586,7 +1591,7 @@ mod tests {
 
         // On battery, but preference off: not paused.
         power.set(true);
-        assert_eq!(runtime.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(runtime.state().snapshot().state, AppState::IdleNotSynced);
 
         // Flip the preference while still on battery: now paused.
         runtime.set_pause_on_battery(true);

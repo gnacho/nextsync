@@ -208,16 +208,12 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary card: avatar, login@server, storage used and an
-        // all-ok light driven by the aggregate state. The quota and avatar
-        // fetches run off the UI thread; on any failure the card simply
-        // shows no usage line.
+        // Account summary card: the account avatar, a "connected" state and
+        // the storage used; the login@host details live in the sidebar and
+        // the account settings panel. The quota and avatar fetches run off
+        // the UI thread; on any failure the card simply shows no usage line.
         let summary_row = libadwaita::ActionRow::builder()
-            .title(format!(
-                "{}@{}",
-                account.login_name,
-                server_host(&account.server_url)
-            ))
+            .title(t("Connected"))
             .build();
         // Issue #50: the account avatar leads the card; the initials
         // fallback covers accounts without one.
@@ -1374,7 +1370,7 @@ impl MainWindow {
                 .ellipsize(gtk4::pango::EllipsizeMode::End)
                 .build();
             let server = gtk4::Label::builder()
-                .label(&account.server_url)
+                .label(server_host(&account.server_url))
                 .xalign(0.0)
                 .ellipsize(gtk4::pango::EllipsizeMode::End)
                 .css_classes(["dim-label"])
@@ -1697,9 +1693,10 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
         AppState::IdleOk | AppState::IdleManualOnly | AppState::SyncQueued | AppState::Syncing => {
             "nextsync-status-ok-symbolic"
         }
-        AppState::PausedUser | AppState::PausedBattery | AppState::Offline => {
-            "nextsync-status-paused-symbolic"
-        }
+        AppState::PausedUser
+        | AppState::PausedBattery
+        | AppState::Offline
+        | AppState::IdleNotSynced => "nextsync-status-paused-symbolic",
         AppState::Error
         | AppState::AuthRequired
         | AppState::KeyringLocked

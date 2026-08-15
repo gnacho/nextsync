@@ -28,6 +28,7 @@ pub fn folder_emblem_for(state: AppState) -> Option<&'static str> {
         AppState::IdleOk => Some("emblem-default"),
         AppState::SyncQueued | AppState::Syncing => Some("emblem-synchronizing"),
         AppState::IdleManualOnly
+        | AppState::IdleNotSynced
         | AppState::PausedUser
         | AppState::PausedBattery
         | AppState::Offline => Some("emblem-paused"),

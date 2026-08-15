@@ -114,6 +114,10 @@ struct SchedulerInner {
     keyring_locked: bool,
     delete_alert: Option<DeleteAlert>,
     delete_bypass_once: bool,
+    /// Whether a synchronization has ever completed successfully. Drives the
+    /// not-yet-synchronized idle state (issue #59): "Synchronized" is only
+    /// truthful after a real successful run.
+    ever_synced: bool,
     /// Canonical local root this scheduler reconciles (issue #35): drives
     /// the overlap-aware permit acquisition and the external-engine scan.
     local_root: Option<std::path::PathBuf>,
@@ -169,6 +173,7 @@ impl Scheduler {
             keyring_locked: false,
             delete_alert: None,
             delete_bypass_once: false,
+            ever_synced: false,
             local_root: None,
             proc_scan_root: None,
             skip_metered: true,
@@ -567,11 +572,13 @@ impl SchedulerInner {
         let ran = match outcome {
             SyncOutcome::Success => {
                 self.keyring_locked = false;
+                self.ever_synced = true;
                 self.set_idle_state();
                 true
             }
             SyncOutcome::Conflict => {
                 self.keyring_locked = false;
+                self.ever_synced = true;
                 self.state.set(
                     AppState::IdleOk,
                     t("Synchronized with conflicts — review the log"),
@@ -779,6 +786,9 @@ impl SchedulerInner {
                 AppState::IdleManualOnly,
                 t("Automatic synchronization is off"),
             );
+        } else if !self.ever_synced {
+            self.state
+                .set(AppState::IdleNotSynced, t("Not synchronized yet"));
         } else {
             self.state.set(AppState::IdleOk, t("Synchronized"));
         }

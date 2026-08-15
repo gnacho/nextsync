@@ -33,7 +33,7 @@ pub struct TrayPresentation {
 /// Kept as the single source of truth so both `presentation_for` and the tests
 /// cannot drift apart. The `label` fields are English msgids; they are
 /// translated at read time in [`presentation_for`].
-const STATE_PRESENTATIONS: [(AppState, TrayPresentation); 12] = [
+const STATE_PRESENTATIONS: [(AppState, TrayPresentation); 13] = [
     (
         AppState::Unconfigured,
         TrayPresentation {
@@ -58,6 +58,15 @@ const STATE_PRESENTATIONS: [(AppState, TrayPresentation); 12] = [
             icon_key: "paused",
             status: "Active",
             label: "Automatic Sync Is Off",
+            user_paused: false,
+        },
+    ),
+    (
+        AppState::IdleNotSynced,
+        TrayPresentation {
+            icon_key: "paused",
+            status: "Active",
+            label: "Not Synchronized Yet",
             user_paused: false,
         },
     ),
@@ -292,8 +301,8 @@ mod tests {
     }
 
     #[test]
-    fn the_table_defines_twelve_presentations() {
-        assert_eq!(STATE_PRESENTATIONS.len(), 12);
+    fn the_table_defines_thirteen_presentations() {
+        assert_eq!(STATE_PRESENTATIONS.len(), 13);
     }
 
     #[test]

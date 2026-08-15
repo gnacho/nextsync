@@ -28,6 +28,7 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
         AppState::Unconfigured => ("dialog-question-symbolic", t("Not Configured")),
         AppState::IdleOk => ("emblem-ok-symbolic", t("Synchronized")),
         AppState::IdleManualOnly => ("media-playback-pause-symbolic", t("Automatic Sync Is Off")),
+        AppState::IdleNotSynced => ("appointment-soon-symbolic", t("Not Synchronized Yet")),
         AppState::SyncQueued => ("appointment-soon-symbolic", t("Synchronization Scheduled")),
         AppState::Syncing => ("emblem-synchronizing-symbolic", t("Synchronizing…")),
         AppState::PausedUser => ("media-playback-pause-symbolic", t("Paused")),
