@@ -2,6 +2,32 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.60.0] - 2026-08-15
+
+La release grande: quince issues en tres frentes (seguridad de datos, red y control, interfaz), resueltos en paralelo.
+
+### Seguridad de datos
+- **Avisos bloqueantes antes de la primera sincronización (#35)**: cuando la carpeta local y la remota tienen datos a la vez, un diálogo bloqueante explica la fusión y los conflictos potenciales antes de arrancar. Las carpetas que ya estuvieron sincronizadas (detectadas por sus ficheros journal `.sync*`/`.db`) piden confirmación siempre, y los artefactos ocultos viejos se mandan a la papelera en vez de acumularse ("Start Fresh" frente a "Keep Synchronization History").
+- **Nunca dos syncs solapadas (#35)**: el permiso de sincronización rechaza carreras sobre la misma carpeta o padre/hijo (rutas canónicas) y un escaneo de `/proc` detecta un motor externo (nextcloudcmd/opencloudcmd) corriendo sobre la misma carpeta antes de arrancar.
+- **Confirmación por tamaño (#36)**: ajuste nuevo (Synchronization) con umbral en MiB (500 por defecto, 0 lo desactiva); la primera sincronización estima el tamaño remoto (PROPFIND con getcontentlength; OpenCloud por quota del space) y pide confirmación por encima del umbral, recordándolo por carpeta.
+- **Restaurar desde la papelera del servidor (#38)**: el diálogo de revisión de borrados gana "Restore from server trash", que lista la papelera WebDAV de Nextcloud (nombre, ubicación original, fecha) y restaura con MOVE al endpoint restore (oculto en OpenCloud, sin papelera documentada).
+- **Cambios pendientes antes de sincronizar (#46)**: nueva entrada por carpeta que muestra el diff local contra el journal (nuevos/modificados/borrados, acotado a 50 con contador), calculado fuera del hilo de UI.
+
+### Red y control
+- **Menor impacto de transferencia (#39)**: ajuste nuevo que lanza el motor con `ionice -c 3` + `nice -n 10` cuando existen en el sistema; documentado como prioridad, no límite de velocidad.
+- **Redes con límite de datos (#40)**: el planificador bloquea las carreras automáticas en conexiones medidas (NetworkMonitor de GLib); las manuales pasan siempre, y al salir de la red medida el trabajo pendiente se relanza.
+- **Solo en redes Wi-Fi elegidas (#41)**: lista de SSIDs permitidos (coma separada); una red fuera de la lista pausa la sincronización como si estuviera offline, y se reevalúa en cada cambio de red.
+- **Horario de silencio (#45)**: ventana diaria HH:MM (soporta cruce de medianoche) durante la cual no arrancan carreras nuevas; las en curso terminan.
+- **Pausar todo (#42)**: botón en la cabecera y entrada "Pausar todo"/"Reanudar todo" en el menú del tray que conmutan la pausa de todas las cuentas a la vez, con icono y etiqueta siguiendo el estado.
+- **Copia de seguridad de la configuración (#47)**: exportar (cuentas, carpetas, preferencias a JSON) e importar con validación por el mismo loader y reemplazo atómico, en la página Avanzado; los secretos del llavero nunca viajan en el fichero.
+
+### Interfaz
+- **Cambiar de cuenta cambia la vista (#49)**: la lista lateral ahora responde a la selección (antes la vista solo se presentaba al arranque) y mantiene el resaltado de la cuenta activa al refrescar.
+- **Al quitar carpeta, a la papelera (#37)**: diálogo con "Move Folder to Trash" (papelera del sistema vía GIO) o "Keep Folder" para solo desconfigurar.
+- **Tamaño local por carpeta (#43)**: cada fila muestra su tamaño en disco ("12.4 GiB local"), medido fuera del hilo de UI y refrescado al terminar cada sincronización.
+- **Emblema de estado en el gestor de ficheros (#44)**: las carpetas sincronizadas llevan emblema según su estado (sincronizando, error, pausada, correcto) vía metadatos gvfs; verificado contra el daemon real (nota: dos de los emblemas no existen aún en Adwaita, documentado).
+- **Avatar de la cuenta (#50)**: la tarjeta de cuenta y la barra lateral muestran la foto del usuario (Nextcloud `/avatar`, OpenCloud Graph), con caché en disco y placeholder de iniciales.
+
 ## [0.50.0] - 2026-08-15
 
 OpenCloud verificado contra un servidor real: LibreGraph sustituye al raíz WebDAV.
