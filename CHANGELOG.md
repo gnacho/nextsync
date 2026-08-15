@@ -2,6 +2,18 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.70.0] - 2026-08-15
+
+Ronda de limpieza de interfaz tras el uso real de la v0.60.0.
+
+### Corregido
+- **Las pestañas de Preferencias ya se ven (#51)**: la barra inferior de páginas (General / Sincronización / Red / Avanzado) nunca se mostraba porque el ViewSwitcherBar quedaba sin `reveal`; General era la única página alcanzable. Ahora siempre está visible.
+- **La flecha "volver" solo tiene sentido en Preferencias (#54)**: desaparece de la cabecera cuando la vista de sincronización está en primer plano y reaparece sobre los ajustes.
+
+### Cambiado
+- **Menos botones en la cabecera (#52)**: fuera el botón de pausa global añadido con la v0.60.0; pausar/reanudar todo queda en el menú de la bandeja, donde se pidió.
+- **La app sigue siempre el tema del sistema (#53)**: eliminado el selector claro/oscuro/sistema del menú (círculos CSS) y el override de arranque; el esquema guardado en configuración queda inerte por compatibilidad.
+
 ## [0.60.0] - 2026-08-15
 
 La release grande: quince issues en tres frentes (seguridad de datos, red y control, interfaz), resueltos en paralelo.
