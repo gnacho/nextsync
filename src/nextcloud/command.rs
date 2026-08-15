@@ -274,6 +274,7 @@ mod tests {
             local_root: "/tmp/NextCloud".to_string(),
             remote_path: String::new(),
             space_id: None,
+            size_confirmed: false,
         }
     }
 

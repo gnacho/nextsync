@@ -402,6 +402,39 @@ fn build_sync_page(
     reliability.add(&retries);
     page.add(&reliability);
 
+    // Folder-size confirmation (issue #36): its own group so it never
+    // collides with the per-account trigger settings above. The threshold
+    // is a general setting; `0` disables the check.
+    let size_group = libadwaita::PreferencesGroup::builder()
+        .title(t("Folder Size Confirmation"))
+        .build();
+    let threshold_mb = store
+        .load()
+        .map(|config| config.general.size_confirm_threshold_mb)
+        .unwrap_or(500);
+    let size_row = spin_row(
+        t("Ask before syncing folders larger than"),
+        0.0,
+        1_000_000.0,
+        threshold_mb as f64,
+    );
+    let unit = gtk4::Label::new(Some(t("MB")));
+    unit.set_valign(gtk4::Align::Center);
+    size_row.add_suffix(&unit);
+    size_group.add(&size_row);
+    page.add(&size_group);
+    {
+        let store = store.clone();
+        size_row.connect_value_notify(move |row| {
+            let megabytes = row.value() as i64;
+            if let Err(error) = persist_config(&store, |config| {
+                config.general.size_confirm_threshold_mb = megabytes;
+            }) {
+                eprintln!("Settings: could not save the size threshold: {error}");
+            }
+        });
+    }
+
     // Desktop integration (restored by user decision, issue #25): targets
     // the account's first folder, like the Python's `_build_desktop_integrations`.
     let integration_rows = desktop_integration_rows(account, host);
@@ -1164,7 +1197,8 @@ fn review_then_add_folder(
     };
     let remote_for_probe = remote_path.clone();
     let account_id_for_probe = account_id.clone();
-    let probe = gio::spawn_blocking(move || -> Option<bool> {
+    // Issue #36: the probe also estimates the remote size.
+    let probe = gio::spawn_blocking(move || -> Option<(bool, Option<u64>)> {
         let password = CredentialsStore::get_for_account(&account_id_for_probe, &server, &login)
             .ok()
             .flatten()?;
@@ -1172,30 +1206,48 @@ fn review_then_add_folder(
         match provider {
             Provider::OpenCloud => {
                 let space = space_id?;
+                let size = api
+                    .opencloud_space_size(&server, &login, &password, &space)
+                    .ok()
+                    .flatten();
                 api.probe_opencloud_space(&server, &login, &password, &space)
                     .ok()
+                    .map(|has_children| (has_children, size))
             }
-            Provider::Nextcloud => api
-                .probe_remote(&server, &login, &password, &remote_for_probe)
-                .ok(),
+            Provider::Nextcloud => {
+                let size = api
+                    .remote_size(&server, &login, &password, &remote_for_probe)
+                    .ok()
+                    .flatten();
+                api.probe_remote(&server, &login, &password, &remote_for_probe)
+                    .ok()
+                    .map(|has_children| (has_children, size))
+            }
         }
     });
 
+    // Issue #36: the confirmation threshold lives in the general settings.
+    let threshold_bytes = size_threshold_bytes(&store);
     let local_root_for_facts = local_root.clone();
     let parent = parent.clone();
     let store_for_commit = store.clone();
     let account_id_for_commit = account_id.clone();
     let on_folder_added_for_commit = on_folder_added.clone();
     glib::spawn_future_local(async move {
-        let remote_empty: Option<bool> = match probe.await {
-            Ok(has_children) => has_children.map(|children| !children),
-            Err(_) => None,
+        let (remote_empty, remote_size): (Option<bool>, Option<u64>) = match probe.await {
+            Ok(Some((has_children, size))) => (Some(!has_children), size),
+            Ok(None) | Err(_) => (None, None),
         };
         let facts = FirstSyncFacts {
             local_empty: local_folder_is_empty(&local_root_for_facts),
             remote_empty,
+            remote_size,
             journal_names: stale_artifact_names(&expanduser(&local_root_for_facts)),
         };
+        // Issue #36: remember that this folder's size was explicitly
+        // accepted so the prompt is not repeated for it.
+        let oversized = crate::core::sync_safety::first_sync_warnings(&facts, threshold_bytes)
+            .contains(&crate::core::sync_safety::FirstSyncWarning::Oversized);
         let commit = {
             let store = store_for_commit.clone();
             let account_id = account_id_for_commit.clone();
@@ -1213,6 +1265,7 @@ fn review_then_add_folder(
                         local_root: local_root.clone(),
                         remote_path: remote_path.clone(),
                         space_id: None,
+                        size_confirmed: oversized,
                     },
                 ) {
                     Ok(_) => on_folder_added(),
@@ -1232,13 +1285,17 @@ fn review_then_add_folder(
                 }
             })
         };
-        if review_required(&facts) {
+        if review_required(&facts, threshold_bytes) {
             crate::ui::safety_review::present_first_sync_review(
                 &parent,
-                t("Add Folder"),
-                t("Start synchronizing this folder now?"),
-                &facts,
-                t("Cancel"),
+                crate::ui::safety_review::FirstSyncReview {
+                    title: t("Add Folder"),
+                    base_body: t("Start synchronizing this folder now?"),
+                    facts: &facts,
+                    threshold_bytes,
+                    size_target: &local_root_for_facts,
+                    cancel_label: t("Cancel"),
+                },
                 commit,
                 Rc::new(|| {}),
             );
@@ -1246,6 +1303,19 @@ fn review_then_add_folder(
             commit(crate::ui::safety_review::FreshStart::No);
         }
     });
+}
+
+/// The folder-size confirmation threshold in bytes; `0` (disabled) and a
+/// missing configuration map to `None` (issue #36).
+fn size_threshold_bytes(store: &ConfigStore) -> Option<u64> {
+    let megabytes = store
+        .load()
+        .map(|config| config.general.size_confirm_threshold_mb)
+        .unwrap_or(500);
+    if megabytes <= 0 {
+        return None;
+    }
+    Some(megabytes as u64 * 1024 * 1024)
 }
 
 /// Present a folder chooser and write the selection into the entry row.
@@ -1962,6 +2032,7 @@ mod tests {
                 local_root: "/tmp/nsync-sample".to_string(),
                 remote_path: "/docs".to_string(),
                 space_id: None,
+                size_confirmed: false,
             }],
             ..AccountConfig::default()
         }
@@ -2084,6 +2155,7 @@ mod tests {
             local_root: "/tmp/nsync-settings-a".to_string(),
             remote_path: "/A".to_string(),
             space_id: None,
+            size_confirmed: false,
         };
         let folder_id = store.add_folder(&account_id, &folder).unwrap();
         assert!(!folder_id.is_empty());
@@ -2110,6 +2182,7 @@ mod tests {
             local_root: "/tmp/nsync-settings-b".to_string(),
             remote_path: "/B".to_string(),
             space_id: None,
+            size_confirmed: false,
         };
         store.add_folder(&account_id, &folder).unwrap();
         let error = store.add_folder(&account_id, &folder).unwrap_err();

@@ -1807,6 +1807,7 @@ mod tests {
                         local_root: dir.path().join("one").to_string_lossy().into_owned(),
                         remote_path: "/one".to_string(),
                         space_id: None,
+                        size_confirmed: false,
                     },
                 )
                 .unwrap();

@@ -2238,3 +2238,19 @@ msgstr "Empezar de cero"
 #: src/ui/settings.rs
 msgid "Start synchronizing this folder now?"
 msgstr "¿Empezar a sincronizar esta carpeta ahora?"
+
+#: src/ui/safety_review.rs
+msgid "The remote folder holds about {size}. Its files will be downloaded into {target}."
+msgstr "La carpeta remota ocupa unos {size}. Sus archivos se descargarán en {target}."
+
+#: src/ui/settings.rs
+msgid "Folder Size Confirmation"
+msgstr "Confirmación de tamaño de carpeta"
+
+#: src/ui/settings.rs
+msgid "Ask before syncing folders larger than"
+msgstr "Preguntar antes de sincronizar carpetas mayores de"
+
+#: src/ui/settings.rs
+msgid "MB"
+msgstr "MB"

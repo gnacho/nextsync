@@ -115,6 +115,9 @@ struct WizardState {
     folders: Vec<WizardFolder>,
     /// Discovered OpenCloud space id (assigned to every folder).
     space_id: Option<String>,
+    /// Whether the user accepted a download over the size threshold
+    /// (issue #36); recorded on the persisted folders.
+    size_confirmed: bool,
 }
 
 /// What the polling timer should do at a given tick.
@@ -1250,7 +1253,9 @@ fn start_syncing(ctx: &SetupContext) {
     let space_id = ctx.state.borrow().folders[0].space_id.clone();
     let server_for_probe = server.clone();
     let username_for_probe = username.clone();
-    let probe = gio::spawn_blocking(move || -> Result<Option<bool>, ApiError> {
+    // Issue #36: the same probe estimates the remote size (unknown sizes
+    // degrade to `None`, exactly like an unavailable probe).
+    let probe = gio::spawn_blocking(move || -> Result<Option<(bool, Option<u64>)>, ApiError> {
         let password = match CredentialsStore::get_for_account(
             &account_id,
             &server_for_probe,
@@ -1269,18 +1274,45 @@ fn start_syncing(ctx: &SetupContext) {
             else {
                 return Ok(None);
             };
-            return NextcloudApi::new()
+            let api = NextcloudApi::new();
+            let has_children = api
                 .probe_opencloud_space(&server_for_probe, &username_for_probe, &password, space_id)
-                .map(Some);
+                .map(|has_children| {
+                    (
+                        has_children,
+                        api.opencloud_space_size(
+                            &server_for_probe,
+                            &username_for_probe,
+                            &password,
+                            space_id,
+                        )
+                        .ok()
+                        .flatten(),
+                    )
+                });
+            return has_children.map(Some);
         }
-        NextcloudApi::new()
-            .probe_remote(
-                &server_for_probe,
-                &username_for_probe,
-                &password,
-                &remote_path,
+        let api = NextcloudApi::new();
+        api.probe_remote(
+            &server_for_probe,
+            &username_for_probe,
+            &password,
+            &remote_path,
+        )
+        .map(|has_children| {
+            (
+                has_children,
+                api.remote_size(
+                    &server_for_probe,
+                    &username_for_probe,
+                    &password,
+                    &remote_path,
+                )
+                .ok()
+                .flatten(),
             )
-            .map(Some)
+        })
+        .map(Some)
     });
     let ctx = ctx.clone();
     glib::spawn_future_local(async move {
@@ -1289,7 +1321,7 @@ fn start_syncing(ctx: &SetupContext) {
             Err(_) => Err(ApiError::Transport),
         };
         match probe_result {
-            Ok(Some(has_children)) => {
+            Ok(Some((has_children, remote_size))) => {
                 let remote_empty = !has_children;
                 let local_empty = ctx
                     .state
@@ -1297,7 +1329,14 @@ fn start_syncing(ctx: &SetupContext) {
                     .folders
                     .iter()
                     .all(|folder| local_folder_is_empty(&folder.local_root));
-                present_first_sync_dialog(&ctx, &server, &username, local_empty, remote_empty);
+                present_first_sync_dialog(
+                    &ctx,
+                    &server,
+                    &username,
+                    local_empty,
+                    remote_empty,
+                    remote_size,
+                );
             }
             Ok(None) | Err(_) => finish_setup(&ctx),
         }
@@ -1310,6 +1349,7 @@ fn present_first_sync_dialog(
     username: &str,
     local_empty: bool,
     remote_empty: bool,
+    remote_size: Option<u64>,
 ) {
     let account = format!("{username}@{server}");
     let (count, folder_label) = {
@@ -1335,8 +1375,20 @@ fn present_first_sync_dialog(
     let facts = crate::core::sync_safety::FirstSyncFacts {
         local_empty,
         remote_empty: Some(remote_empty),
+        remote_size,
         journal_names,
     };
+    // Issue #36: the confirmation threshold lives in the general settings.
+    let threshold_bytes = size_threshold_bytes(&ctx.config_store);
+    let size_target = ctx
+        .state
+        .borrow()
+        .folders
+        .first()
+        .map(|folder| folder.local_root.clone())
+        .unwrap_or_default();
+    let oversized = crate::core::sync_safety::first_sync_warnings(&facts, threshold_bytes)
+        .contains(&crate::core::sync_safety::FirstSyncWarning::Oversized);
     let body = first_sync_body(&account, count, &folder_label, local_empty, remote_empty);
     let local_roots: Vec<String> = ctx
         .state
@@ -1350,24 +1402,45 @@ fn present_first_sync_dialog(
         for root in &local_roots {
             crate::ui::safety_review::apply_fresh_start(root, fresh);
         }
+        // The user explicitly accepted the large download (issue #36).
+        if oversized {
+            ctx_for_decision.state.borrow_mut().size_confirmed = true;
+        }
         finish_setup(&ctx_for_decision);
     });
     let ctx_for_cancel = ctx.clone();
     crate::ui::safety_review::present_first_sync_review(
         ctx.window.upcast_ref::<gtk4::Widget>(),
-        t("Start Synchronizing?"),
-        &body,
-        &facts,
-        t("Back to setup"),
+        crate::ui::safety_review::FirstSyncReview {
+            title: t("Start Synchronizing?"),
+            base_body: &body,
+            facts: &facts,
+            threshold_bytes,
+            size_target: &size_target,
+            cancel_label: t("Back to setup"),
+        },
         on_decision,
         Rc::new(move || ctx_for_cancel.stack.set_visible_child_name("folders")),
     );
 }
 
+/// The folder-size confirmation threshold in bytes; `0` (disabled) and a
+/// missing configuration map to `None` (issue #36).
+fn size_threshold_bytes(store: &ConfigStore) -> Option<u64> {
+    let megabytes = store
+        .load()
+        .map(|config| config.general.size_confirm_threshold_mb)
+        .unwrap_or(500);
+    if megabytes <= 0 {
+        return None;
+    }
+    Some(megabytes as u64 * 1024 * 1024)
+}
+
 /// Create the local roots, persist the account and the TLS trust choice, then
 /// invoke `on_complete` with the validated account and close the wizard.
 fn finish_setup(ctx: &SetupContext) {
-    let (provider, server, username, authentication_type, folders, trust_invalid) = {
+    let (provider, server, username, authentication_type, folders, trust_invalid, size_confirmed) = {
         let state = ctx.state.borrow();
         (
             state.provider,
@@ -1376,13 +1449,20 @@ fn finish_setup(ctx: &SetupContext) {
             state.authentication_type.clone(),
             state.folders.clone(),
             state.trust_invalid,
+            state.size_confirmed,
         )
     };
     for folder in &folders {
         let _ = std::fs::create_dir_all(expanduser(&folder.local_root));
     }
-    let account = match build_account(provider, &server, &username, &authentication_type, &folders)
-    {
+    let account = match build_account(
+        provider,
+        &server,
+        &username,
+        &authentication_type,
+        &folders,
+        size_confirmed,
+    ) {
         Ok(account) => account,
         Err(error) => {
             eprintln!("Setup: could not build the account: {error}");
@@ -1458,6 +1538,7 @@ fn build_account(
     username: &str,
     authentication_type: &str,
     folders: &[WizardFolder],
+    size_confirmed: bool,
 ) -> Result<AccountConfig, ConfigError> {
     let server_url = normalize_server_url(server)?;
     let login_name = username.trim().to_string();
@@ -1486,6 +1567,7 @@ fn build_account(
             local_root,
             remote_path,
             space_id,
+            size_confirmed,
         });
     }
     Ok(AccountConfig {
@@ -1775,6 +1857,7 @@ mod tests {
                 remote_path: "/Docs/".to_string(),
                 space_id: Some("space:should-be-dropped".to_string()),
             }],
+            false,
         )
         .unwrap();
         assert_eq!(account.provider, Provider::Nextcloud);
@@ -1784,6 +1867,7 @@ mod tests {
         assert_eq!(account.folders.len(), 1);
         assert_eq!(account.folders[0].remote_path, "/Docs");
         assert_eq!(account.folders[0].space_id, None);
+        assert!(!account.folders[0].size_confirmed);
         assert_eq!(account.id, account_id("https://cloud.example.com", "alice"));
     }
 
@@ -1799,11 +1883,13 @@ mod tests {
                 remote_path: String::new(),
                 space_id: Some(" space:42 ".to_string()),
             }],
+            true,
         )
         .unwrap();
         assert_eq!(account.provider, Provider::OpenCloud);
         assert_eq!(account.folders[0].space_id.as_deref(), Some("space:42"));
         assert_eq!(account.folders[0].remote_path, "");
+        assert!(account.folders[0].size_confirmed);
     }
 
     #[test]
@@ -1818,6 +1904,7 @@ mod tests {
                 remote_path: "/".to_string(),
                 space_id: Some("   ".to_string()),
             }],
+            false,
         )
         .unwrap();
         assert_eq!(account.folders[0].space_id, None);
@@ -1826,7 +1913,15 @@ mod tests {
 
     #[test]
     fn build_account_rejects_invalid_server_and_relative_local_root() {
-        assert!(build_account(Provider::Nextcloud, "example.com", "alice", "manual", &[]).is_err());
+        assert!(build_account(
+            Provider::Nextcloud,
+            "example.com",
+            "alice",
+            "manual",
+            &[],
+            false
+        )
+        .is_err());
         let relative = build_account(
             Provider::Nextcloud,
             "https://cloud.example.com",
@@ -1837,6 +1932,7 @@ mod tests {
                 remote_path: String::new(),
                 space_id: None,
             }],
+            false,
         );
         assert!(relative.is_err());
     }

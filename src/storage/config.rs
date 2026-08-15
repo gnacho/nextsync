@@ -137,6 +137,10 @@ pub struct FolderConfig {
     /// OpenCloud space id; unused by Nextcloud folders.
     #[serde(default)]
     pub space_id: Option<String>,
+    /// Whether the user already accepted syncing this folder even though
+    /// its remote size exceeded the confirmation threshold (issue #36).
+    #[serde(default)]
+    pub size_confirmed: bool,
 }
 
 /// Per-account sync triggers and exclusions.
@@ -219,6 +223,11 @@ pub struct GeneralConfig {
     /// mentions) are raised as desktop notifications (issue #31).
     #[serde(default)]
     pub show_server_notifications: bool,
+    /// Folder-size confirmation threshold in MiB (issue #36): folders whose
+    /// remote size exceeds it ask before their first synchronization.
+    /// `0` disables the check.
+    #[serde(default = "default_size_confirm_threshold_mb")]
+    pub size_confirm_threshold_mb: i64,
 }
 
 /// Default color scheme (follow the desktop).
@@ -231,6 +240,31 @@ fn yes() -> bool {
     true
 }
 
+/// Default folder-size confirmation threshold: 500 MiB.
+fn default_size_confirm_threshold_mb() -> i64 {
+    500
+}
+
+/// Tolerant integer read for general settings: unparsable or out-of-range
+/// values fall back to `default` instead of failing the whole load.
+fn get_i64_tolerant(
+    obj: &Map<String, Value>,
+    key: &str,
+    default: i64,
+    lower: i64,
+    upper: i64,
+) -> i64 {
+    match obj.get(key) {
+        Some(Value::Number(number)) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|u| i64::try_from(u).ok())),
+        Some(Value::String(text)) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+    .unwrap_or(default)
+    .clamp(lower, upper)
+}
+
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
@@ -239,6 +273,7 @@ impl Default for GeneralConfig {
             color_scheme: default_color_scheme(),
             show_notifications: yes(),
             show_server_notifications: false,
+            size_confirm_threshold_mb: default_size_confirm_threshold_mb(),
         }
     }
 }
@@ -642,6 +677,7 @@ impl ConfigStore {
             local_root,
             remote_path,
             space_id: folder.space_id.clone(),
+            size_confirmed: folder.size_confirmed,
         });
         self.save(&config)?;
         Ok(id)
@@ -891,12 +927,14 @@ fn validate_folder(
         Some(Value::String(value)) if !value.trim().is_empty() => Some(value.trim().to_string()),
         _ => None,
     };
+    let size_confirmed = get_bool(obj, "size_confirmed", false);
     let id = folder_fingerprint(server_url, login_name, &local_root, &remote_path);
     Ok(FolderConfig {
         id,
         local_root,
         remote_path,
         space_id,
+        size_confirmed,
     })
 }
 
@@ -1018,6 +1056,13 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
         color_scheme: get_string(obj, "color_scheme", &default_color_scheme()),
         show_notifications: get_bool(obj, "show_notifications", true),
         show_server_notifications: get_bool(obj, "show_server_notifications", false),
+        size_confirm_threshold_mb: get_i64_tolerant(
+            obj,
+            "size_confirm_threshold_mb",
+            default_size_confirm_threshold_mb(),
+            0,
+            1_000_000,
+        ),
     }
 }
 
@@ -1710,6 +1755,7 @@ mod tests {
                 local_root: "/home/alice/NC".to_string(),
                 remote_path: "/Docs".to_string(),
                 space_id: Some("space:abcd".to_string()),
+                size_confirmed: false,
             }],
             sync: SyncConfig::default(),
             delete_guard: DeleteGuardConfig::default(),
@@ -1761,6 +1807,80 @@ mod tests {
         std::fs::write(&legacy, r#"{"general":{"show_notifications":true}}"#).unwrap();
         let store = ConfigStore::with_path(legacy);
         assert!(!store.load().unwrap().general.show_server_notifications);
+    }
+
+    #[test]
+    fn size_confirm_threshold_roundtrips_with_a_safe_default() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = ConfigStore::with_path(path.clone());
+
+        // Default: 500 MiB.
+        assert_eq!(Config::default().general.size_confirm_threshold_mb, 500);
+
+        let mut config = Config::default();
+        config.general.size_confirm_threshold_mb = 2048;
+        store.save(&config).unwrap();
+        assert_eq!(
+            store.load().unwrap().general.size_confirm_threshold_mb,
+            2048
+        );
+
+        // Older files without the key, unparsable values and out-of-range
+        // values all fall back to the default instead of failing the load.
+        let dir = tempdir().unwrap();
+        let legacy = dir.path().join("settings.json");
+        std::fs::write(
+            &legacy,
+            r#"{"general":{"size_confirm_threshold_mb":"lots"}}"#,
+        )
+        .unwrap();
+        let store = ConfigStore::with_path(legacy);
+        assert_eq!(store.load().unwrap().general.size_confirm_threshold_mb, 500);
+
+        let dir = tempdir().unwrap();
+        let huge = dir.path().join("settings.json");
+        std::fs::write(
+            &huge,
+            r#"{"general":{"size_confirm_threshold_mb":9999999999}}"#,
+        )
+        .unwrap();
+        let store = ConfigStore::with_path(huge);
+        assert_eq!(
+            store.load().unwrap().general.size_confirm_threshold_mb,
+            1_000_000
+        );
+    }
+
+    #[test]
+    fn folder_size_confirmed_roundtrips() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::with_path(dir.path().join("settings.json"));
+        let account_id = store
+            .add_account(&account_fixture("https://cloud.example.com", "alice"))
+            .unwrap();
+
+        let mut folder = folder_fixture("/tmp/nsync-big", "/Big");
+        folder.size_confirmed = true;
+        store.add_folder(&account_id, &folder).unwrap();
+        let loaded = store.load().unwrap();
+        let folders = &loaded
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .unwrap()
+            .folders;
+        assert_eq!(folders.len(), 1);
+        assert!(folders[0].size_confirmed);
+
+        // Legacy folders without the flag load as not confirmed.
+        let raw = r#"{"schema_version":7,"accounts":[{"id":"a","server_url":"https://cloud.example.com","login_name":"alice","authentication_type":"manual","folders":[{"id":"f","local_root":"/tmp/nsync-legacy","remote_path":"/L"}]}]}"#;
+        let dir = tempdir().unwrap();
+        let legacy = dir.path().join("settings.json");
+        std::fs::write(&legacy, raw).unwrap();
+        let store = ConfigStore::with_path(legacy);
+        let legacy_folder = &store.load().unwrap().accounts[0].folders[0];
+        assert!(!legacy_folder.size_confirmed);
     }
 
     #[test]
@@ -1846,6 +1966,7 @@ mod tests {
             local_root: local_root.to_string(),
             remote_path: remote_path.to_string(),
             space_id: None,
+            size_confirmed: false,
         }
     }
 

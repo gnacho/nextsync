@@ -383,12 +383,14 @@ mod tests {
                 local_root: "/tmp/a".to_string(),
                 remote_path: "/docs".to_string(),
                 space_id: None,
+                size_confirmed: false,
             },
             FolderConfig {
                 id: "f2".to_string(),
                 local_root: "/tmp/b".to_string(),
                 remote_path: "/photos".to_string(),
                 space_id: None,
+                size_confirmed: false,
             },
         ];
         let runtimes = std::collections::HashMap::new();
@@ -408,6 +410,7 @@ mod tests {
                 local_root: "/tmp/a".to_string(),
                 remote_path: "/docs".to_string(),
                 space_id: None,
+                size_confirmed: false,
             };
             let state = StateController::new(AppState::IdleOk);
             let row = FolderStatusRow::new(

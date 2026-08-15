@@ -1022,6 +1022,7 @@ mod tests {
                 local_root: "/tmp/nsync-folder-1".to_string(),
                 remote_path: "/docs".to_string(),
                 space_id: None,
+                size_confirmed: false,
             }];
         }
         account
@@ -1214,6 +1215,7 @@ mod tests {
             local_root: "/tmp/nsync-folder-2".to_string(),
             remote_path: "/photos".to_string(),
             space_id: None,
+            size_confirmed: false,
         });
         runtime.account = account;
         runtime.sync_folders();

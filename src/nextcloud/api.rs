@@ -68,8 +68,9 @@ use std::time::Duration;
 use data_encoding::BASE64;
 use roxmltree::{Document, Node};
 
-/// PROPFIND body requesting only `resourcetype` (no file bodies downloaded).
-const PROPFIND_BODY: &[u8] = b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>";
+/// PROPFIND body requesting `resourcetype` and `getcontentlength` (no file
+/// bodies are ever downloaded).
+const PROPFIND_BODY: &[u8] = b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>";
 
 /// Request timeout in seconds, mirroring the Python `HttpClient(timeout=30)`.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -199,6 +200,8 @@ struct PropfindEntry {
     href_path: String,
     /// Whether the resource is a collection (`<d:collection/>`).
     is_collection: bool,
+    /// `<d:getcontentlength>` of a file response, when present.
+    content_length: Option<u64>,
 }
 
 /// Nextcloud HTTP API client (remote folder picker + setup wizard).
@@ -370,6 +373,80 @@ impl NextcloudApi {
             .filter(|entry| entry.href_path != folder_path)
             .count();
         Ok(children > 0)
+    }
+
+    /// Estimate the total size in bytes of a remote folder (issue #36).
+    ///
+    /// A single `PROPFIND` with `Depth: infinity` asks the server to walk
+    /// the whole tree, and every `<d:getcontentlength>` of a file response
+    /// is summed. Servers that refuse infinite depth (a common hardening on
+    /// large instances) answer 400/403/507; that maps to `Ok(None)` — the
+    /// size is simply unknown and the confirmation is skipped. 401 stays
+    /// [`ApiError::AuthRejected`].
+    pub fn remote_size(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+        remote_path: &str,
+    ) -> Result<Option<u64>, ApiError> {
+        let base = dav_base(server, username);
+        let folder = format!("{base}{}/", remote_path.trim_end_matches('/'));
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Depth", "infinity"),
+            ("Content-Type", "application/xml; charset=utf-8"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self
+            .http
+            .request("PROPFIND", &folder, &headers, Some(PROPFIND_BODY))?;
+        match response.status {
+            207 => {}
+            401 => return Err(ApiError::AuthRejected),
+            // The server refuses the full-tree walk: size unknown.
+            400 | 403 | 507 => return Ok(None),
+            status => return Err(ApiError::Http { status }),
+        }
+        let entries = parse_multistatus(&response.body)?;
+        let total: u64 = entries
+            .iter()
+            .filter(|entry| !entry.is_collection)
+            .filter_map(|entry| entry.content_length)
+            .sum();
+        Ok(Some(total))
+    }
+
+    /// Estimate the size in bytes of an OpenCloud space (issue #36).
+    ///
+    /// OpenCloud folders mirror a whole space, so the drive's `quota.used`
+    /// from the LibreGraph API is the closest estimate. Spaces without a
+    /// quota report `Ok(None)`.
+    pub fn opencloud_space_size(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+        space_id: &str,
+    ) -> Result<Option<u64>, ApiError> {
+        let space = space_id.trim().trim_matches('/');
+        if space.is_empty() {
+            return Ok(None);
+        }
+        let url = format!("{}/graph/v1.0/drives/{space}", server.trim_end_matches('/'));
+        let authorization = basic_authorization(username, token);
+        let headers = [("Authorization", authorization.as_str())];
+        let response = self.http.request("GET", &url, &headers, None)?;
+        map_status(response.status)?;
+        let payload: serde_json::Value =
+            serde_json::from_slice(&response.body).map_err(|_| ApiError::InvalidResponse)?;
+        let used = payload
+            .get("quota")
+            .and_then(|quota| quota.get("used"))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|used| *used >= 0.0)
+            .map(|used| used as u64);
+        Ok(used)
     }
 
     /// List the top-level folders that already exist for the account.
@@ -744,23 +821,36 @@ fn parse_multistatus(body: &[u8]) -> Result<Vec<PropfindEntry>, ApiError> {
             .and_then(|node| node.text())
             .unwrap_or("");
         let href_path = href_path_of(href).to_owned();
-        let is_collection = find_resource_type(response)
+        let prop = find_prop(response);
+        let is_collection = prop
+            .and_then(|prop| {
+                prop.descendants()
+                    .find(|node| node.has_tag_name((DAV_NS, "resourcetype")))
+            })
             .map(|resource_type| {
                 resource_type
                     .descendants()
                     .any(|node| node.has_tag_name((DAV_NS, "collection")))
             })
             .unwrap_or(false);
+        let content_length = prop
+            .and_then(|prop| {
+                prop.descendants()
+                    .find(|node| node.has_tag_name((DAV_NS, "getcontentlength")))
+            })
+            .and_then(|node| node.text())
+            .and_then(|text| text.trim().parse::<u64>().ok());
         entries.push(PropfindEntry {
             href_path,
             is_collection,
+            content_length,
         });
     }
     Ok(entries)
 }
 
-/// Find the `<d:propstat>/<d:prop>/<d:resourcetype>` node of a response.
-fn find_resource_type<'a, 'input>(response: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+/// Find the `<d:propstat>/<d:prop>` node of a response.
+fn find_prop<'a, 'input>(response: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
     response
         .descendants()
         .find(|node| node.has_tag_name((DAV_NS, "propstat")))
@@ -768,10 +858,6 @@ fn find_resource_type<'a, 'input>(response: Node<'a, 'input>) -> Option<Node<'a,
             propstat
                 .descendants()
                 .find(|node| node.has_tag_name((DAV_NS, "prop")))
-        })
-        .and_then(|prop| {
-            prop.descendants()
-                .find(|node| node.has_tag_name((DAV_NS, "resourcetype")))
         })
 }
 
@@ -1215,6 +1301,113 @@ mod tests {
             api.probe_remote("https://cloud.example.com", "alice", "secret", ""),
             Err(ApiError::AuthRejected)
         );
+    }
+
+    // ---- remote_size / opencloud_space_size (issue #36) ----------------------
+
+    /// A full-tree multistatus: files carry `getcontentlength`, folders and
+    /// entries without a length are skipped by the sum.
+    const SIZES_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Docs/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Docs/a.bin</d:href>
+    <d:propstat><d:prop><d:resourcetype/><d:getcontentlength>1000</d:getcontentlength></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Docs/sub/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Docs/sub/b.bin</d:href>
+    <d:propstat><d:prop><d:resourcetype/><d:getcontentlength>2000</d:getcontentlength></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Docs/sizeless.bin</d:href>
+    <d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    #[test]
+    fn remote_size_sums_file_lengths_with_depth_infinity() {
+        let http = FakeHttp::new(207, SIZES_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.remote_size("https://cloud.example.com", "alice", "secret", "/Docs")
+                .unwrap(),
+            Some(3000)
+        );
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "PROPFIND");
+        assert_eq!(header_value(request, "Depth"), Some("infinity"));
+        let body = request.body.as_deref().unwrap_or_default();
+        let body = String::from_utf8_lossy(body);
+        assert!(body.contains("getcontentlength"));
+    }
+
+    #[test]
+    fn remote_size_depth_refusal_means_unknown() {
+        for status in [400u16, 403, 507] {
+            let http = FakeHttp::new(status, b"");
+            let api = NextcloudApi::with_http(Box::new(http));
+            assert_eq!(
+                api.remote_size("https://cloud.example.com", "alice", "secret", "/Docs"),
+                Ok(None),
+                "status {status} should mean unknown size"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_size_keeps_auth_rejection() {
+        let http = FakeHttp::new(401, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.remote_size("https://cloud.example.com", "alice", "secret", "/Docs"),
+            Err(ApiError::AuthRejected)
+        );
+    }
+
+    #[test]
+    fn opencloud_space_size_reads_the_drive_quota() {
+        let body = br#"{"id":"space$root","driveType":"personal","quota":{"used":123456789,"total":1000000000}}"#;
+        let http = FakeHttp::new(200, body);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.opencloud_space_size("https://cloud.example.com", "alice", "token", "space$root")
+                .unwrap(),
+            Some(123456789)
+        );
+        assert!(requests.borrow()[0]
+            .url
+            .ends_with("/graph/v1.0/drives/space$root"));
+    }
+
+    #[test]
+    fn opencloud_space_size_without_quota_is_unknown() {
+        let http = FakeHttp::new(200, br#"{"id":"space$root"}"#);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.opencloud_space_size("https://cloud.example.com", "alice", "token", "space$root"),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn opencloud_space_size_without_space_makes_no_request() {
+        let http = FakeHttp::new(200, br#"{}"#);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.opencloud_space_size("https://cloud.example.com", "alice", "token", "  "),
+            Ok(None)
+        );
+        assert!(requests.borrow().is_empty());
     }
 
     #[test]

@@ -27,9 +27,15 @@ pub enum FreshStart {
 ///
 /// The base first-sync wording (conflict copies etc.) comes from the
 /// caller; these paragraphs state the blocking facts of this review.
-pub fn review_sections(facts: &FirstSyncFacts) -> Vec<String> {
+/// `threshold_bytes` is the folder-size confirmation threshold (issue #36)
+/// and `size_target` the local folder the download would land in.
+pub fn review_sections(
+    facts: &FirstSyncFacts,
+    threshold_bytes: Option<u64>,
+    size_target: &str,
+) -> Vec<String> {
     let mut sections = Vec::new();
-    for warning in crate::core::sync_safety::first_sync_warnings(facts) {
+    for warning in crate::core::sync_safety::first_sync_warnings(facts, threshold_bytes) {
         match warning {
             FirstSyncWarning::Merge => sections.push(
                 t("Both the local folder and the remote folder contain files. Confirm that you want to merge their contents.")
@@ -42,32 +48,62 @@ pub fn review_sections(facts: &FirstSyncFacts) -> Vec<String> {
                         .replacen("{names}", &names, 1),
                 );
             }
+            FirstSyncWarning::Oversized => {
+                let Some(size) = facts.remote_size else {
+                    continue;
+                };
+                let size = crate::nextcloud::api::format_bytes(size);
+                sections.push(
+                    t("The remote folder holds about {size}. Its files will be downloaded into {target}.")
+                        .replacen("{size}", &size, 1)
+                        .replacen("{target}", size_target, 1),
+                );
+            }
         }
     }
     sections
 }
 
+/// Presentation parameters of the blocking first-sync review.
+pub struct FirstSyncReview<'a> {
+    /// Dialog title.
+    pub title: &'a str,
+    /// Standard first-sync wording shown before the warning sections.
+    pub base_body: &'a str,
+    /// The collected facts (merge, journals, remote size).
+    pub facts: &'a FirstSyncFacts,
+    /// Folder-size confirmation threshold in bytes (issue #36).
+    pub threshold_bytes: Option<u64>,
+    /// Local folder a confirmed download would land in.
+    pub size_target: &'a str,
+    /// Label of the cancel response ("Back to setup" in the wizard).
+    pub cancel_label: &'a str,
+}
+
 /// Present the blocking review and invoke `on_decision` with the choice.
 ///
-/// `base_body` is the standard first-sync wording; `cancel_label` adapts to
-/// the caller ("Back to setup" in the wizard, "Cancel" elsewhere) and
-/// `on_cancel` runs when that response is picked. The dialog is modal by
-/// nature: nothing happens until a response is chosen.
+/// The dialog is modal by nature: nothing happens until a response is
+/// chosen; `on_cancel` runs when the cancel response is picked.
 pub fn present_first_sync_review(
     parent: &gtk4::Widget,
-    title: &str,
-    base_body: &str,
-    facts: &FirstSyncFacts,
-    cancel_label: &str,
+    review: FirstSyncReview<'_>,
     on_decision: Rc<dyn Fn(FreshStart)>,
     on_cancel: Rc<dyn Fn()>,
 ) {
+    let FirstSyncReview {
+        title,
+        base_body,
+        facts,
+        threshold_bytes,
+        size_target,
+        cancel_label,
+    } = review;
     let mut body = base_body.to_string();
-    for section in review_sections(facts) {
+    for section in review_sections(facts, threshold_bytes, size_target) {
         body.push_str("\n\n");
         body.push_str(&section);
     }
-    let previously_synced = crate::core::sync_safety::first_sync_warnings(facts)
+    let previously_synced = crate::core::sync_safety::first_sync_warnings(facts, threshold_bytes)
         .contains(&FirstSyncWarning::PreviouslySynced);
 
     let dialog = libadwaita::AlertDialog::new(Some(title), Some(&body));
@@ -109,6 +145,7 @@ mod tests {
         FirstSyncFacts {
             local_empty,
             remote_empty,
+            remote_size: None,
             journal_names: journals.iter().map(|name| name.to_string()).collect(),
         }
     }
@@ -116,7 +153,7 @@ mod tests {
     #[test]
     fn merge_facts_add_the_merge_section() {
         set_locale(Locale::English);
-        let sections = review_sections(&facts(&[], false, Some(false)));
+        let sections = review_sections(&facts(&[], false, Some(false)), None, "/tmp/nc");
         assert_eq!(sections.len(), 1);
         assert!(sections[0].contains("merge"));
         reset_locale();
@@ -125,7 +162,11 @@ mod tests {
     #[test]
     fn journal_facts_list_the_file_names() {
         set_locale(Locale::English);
-        let sections = review_sections(&facts(&[".sync_1.db", ".sync_2.db"], true, Some(true)));
+        let sections = review_sections(
+            &facts(&[".sync_1.db", ".sync_2.db"], true, Some(true)),
+            None,
+            "/tmp/nc",
+        );
         assert_eq!(sections.len(), 1);
         assert!(sections[0].contains(".sync_1.db, .sync_2.db"));
         assert!(sections[0].contains("trash"));
@@ -133,9 +174,31 @@ mod tests {
     }
 
     #[test]
+    fn oversized_facts_add_the_size_section() {
+        set_locale(Locale::English);
+        let oversized = FirstSyncFacts {
+            local_empty: true,
+            remote_empty: Some(false),
+            remote_size: Some(600 * 1024 * 1024),
+            journal_names: Vec::new(),
+        };
+        let sections = review_sections(&oversized, Some(500 * 1024 * 1024), "/tmp/nc");
+        assert_eq!(sections.len(), 1);
+        assert!(
+            sections[0].contains("600.0 MiB"),
+            "section was: {sections:?}"
+        );
+        assert!(sections[0].contains("/tmp/nc"));
+        // Below the threshold there is nothing to say.
+        assert!(review_sections(&oversized, Some(1024 * 1024 * 1024), "/tmp/nc").is_empty());
+        reset_locale();
+    }
+
+    #[test]
     fn both_warnings_stack_in_order() {
         set_locale(Locale::English);
-        let sections = review_sections(&facts(&[".sync_1.db"], false, Some(false)));
+        let sections =
+            review_sections(&facts(&[".sync_1.db"], false, Some(false)), None, "/tmp/nc");
         assert_eq!(sections.len(), 2);
         assert!(sections[0].contains("merge"));
         assert!(sections[1].contains(".sync_1.db"));
@@ -145,8 +208,8 @@ mod tests {
     #[test]
     fn quiet_facts_have_no_sections() {
         set_locale(Locale::English);
-        assert!(review_sections(&facts(&[], true, Some(true))).is_empty());
-        assert!(review_sections(&facts(&[], true, None)).is_empty());
+        assert!(review_sections(&facts(&[], true, Some(true)), None, "/tmp/nc").is_empty());
+        assert!(review_sections(&facts(&[], true, None), None, "/tmp/nc").is_empty());
         reset_locale();
     }
 
@@ -169,14 +232,19 @@ mod tests {
             let facts = FirstSyncFacts {
                 local_empty: false,
                 remote_empty: Some(false),
+                remote_size: Some(600 * 1024 * 1024),
                 journal_names: vec![".sync_1.db".to_string()],
             };
             present_first_sync_review(
                 window.upcast_ref::<gtk4::Widget>(),
-                "Start Synchronizing?",
-                "base wording",
-                &facts,
-                "Back to setup",
+                FirstSyncReview {
+                    title: "Start Synchronizing?",
+                    base_body: "base wording",
+                    facts: &facts,
+                    threshold_bytes: Some(500 * 1024 * 1024),
+                    size_target: "/tmp/nc",
+                    cancel_label: "Back to setup",
+                },
                 Rc::new(|_| {}),
                 Rc::new(|| {}),
             );
