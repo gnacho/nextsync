@@ -2441,3 +2441,15 @@ msgstr "Exportar configuración"
 msgid "Import configuration"
 msgstr "Importar configuración"
 
+
+#: src/ui/setup.rs
+msgid "App Token"
+msgstr "Token de aplicación"
+
+#: src/ui/setup.rs
+msgid "Create an App Token in the server web UI: account settings, App Tokens, + New. Your account password does not work here."
+msgstr "Crea un Token de aplicación en la web del servidor (ajustes de la cuenta, App Tokens, + Nuevo). Tu contraseña de cuenta no sirve aquí."
+
+#: src/ui/setup.rs
+msgid "Create an App Token in the server web UI (account settings, App Tokens, + New) and paste it here. Your account password does not work for OpenCloud."
+msgstr "Crea un Token de aplicación en la web del servidor (ajustes de la cuenta, App Tokens, + Nuevo) y pégalo aquí. Tu contraseña de cuenta no sirve para OpenCloud."

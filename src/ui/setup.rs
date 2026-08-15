@@ -186,7 +186,7 @@ struct SetupWidgets {
     trust_invalid: gtk4::CheckButton,
     server_error: gtk4::Label,
     auth_title: gtk4::Label,
-    opencloud_hint: gtk4::Label,
+    opencloud_hint: gtk4::Box,
     browser_group: libadwaita::PreferencesGroup,
     browser_row: libadwaita::ActionRow,
     waiting_box: gtk4::Box,
@@ -227,8 +227,8 @@ impl SetupWidgets {
         let server_error = error_label("");
 
         let auth_title = title_label(t("Sign In"));
-        let opencloud_hint = dim_label(
-            t("OpenCloud requires an app password. Create one in the server account settings (App Tokens) and enter it below."),
+        let opencloud_hint = info_box(
+            t("Create an App Token in the server web UI (account settings, App Tokens, + New) and paste it here. Your account password does not work for OpenCloud."),
         );
         opencloud_hint.set_visible(false);
 
@@ -633,7 +633,7 @@ fn build_folders_page(ctx: &SetupContext) {
 
     let actions = action_box();
     actions.append(&back_button(&ctx.stack, "authentication"));
-    let review = gtk4::Button::with_label(t("Review Setup"));
+    let review = gtk4::Button::with_label(t("Sign In"));
     review.add_css_class("suggested-action");
     {
         let ctx = ctx.clone();
@@ -692,9 +692,14 @@ fn configure_authentication(ctx: &SetupContext) {
         t("Sign In")
     });
     ctx.widgets.password_entry.set_title(if opencloud {
-        t("App password")
+        t("App Token")
     } else {
         t("Password or app password")
+    });
+    ctx.widgets.password_entry.set_tooltip_text(if opencloud {
+        Some(t("Create an App Token in the server web UI: account settings, App Tokens, + New. Your account password does not work here."))
+    } else {
+        Some(t("Your account password or app password"))
     });
     ctx.widgets.opencloud_hint.set_visible(opencloud);
     // The browser flow is Nextcloud-only (OpenCloud has no login/v2 endpoint).
@@ -1741,6 +1746,29 @@ fn centered_label(text: &str) -> gtk4::Label {
         .wrap(true)
         .justify(gtk4::Justification::Center)
         .build()
+}
+
+/// An informational bubble: an info icon beside a wrap-aware hint, so
+/// guidance is visible without being confused with an error.
+fn info_box(text: &str) -> gtk4::Box {
+    let box_container = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let icon = gtk4::Image::builder()
+        .icon_name("dialog-information-symbolic")
+        .pixel_size(16)
+        .valign(gtk4::Align::Start)
+        .build();
+    let label = gtk4::Label::builder()
+        .label(text)
+        .wrap(true)
+        .xalign(0.0)
+        .css_classes(["dim-label"])
+        .build();
+    box_container.append(&icon);
+    box_container.append(&label);
+    box_container
 }
 
 fn error_label(text: &str) -> gtk4::Label {
