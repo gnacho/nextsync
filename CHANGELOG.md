@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.52.0] - 2026-08-15
+
+Correcciones del panel de ajustes y de la carpeta remota OpenCloud.
+
+### Corregido
+- **El panel "Ajustes de la cuenta" se renderiza bien**: los grupos de preferencias se mostraban en un contenedor plano sin el estilo de AdwPreferencesPage, por lo que parecía roto; ahora viven en una página real dentro de un scroll.
+- **La carpeta remota OpenCloud vuelve a funcionar**: al añadir la primera carpeta de una cuenta OpenCloud, el flujo de revisión descartaba el space id descubierto y guardaba la carpeta sin él, así que la carpeta remota no se creaba ni sincronizaba. El space id ahora se conserva en la carpeta nueva.
+
 ## [0.100.0] - 2026-08-15
 
 Credenciales que sí se guardan: la app usa el llavero de la sesión.
