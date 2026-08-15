@@ -176,6 +176,14 @@ pub struct AccountView {
 }
 
 impl AccountView {
+    /// Append a widget under the folder list (used by the account-settings
+    /// toggle row and panel, issue #56).
+    pub fn append_widget(&self, widget: &impl IsA<gtk4::Widget>) {
+        self.root.append(widget);
+    }
+}
+
+impl AccountView {
     /// Build the folder-focused view for one account.
     pub fn new(
         account_runtime: AccountRuntime,
@@ -1140,25 +1148,18 @@ impl MainWindow {
         let Some(account_id) = self.active_account_id.clone() else {
             return;
         };
-        let Some(account) = self
+        if !self
             .config
             .accounts
             .iter()
-            .find(|account| account.id == account_id)
-            .cloned()
-        else {
+            .any(|account| account.id == account_id)
+        {
             return;
-        };
+        }
         if self.settings_view.is_none() {
             let host = SettingsHost::new(&self.window, &self.toast_overlay);
             let callbacks = self.build_settings_callbacks();
-            let view = SettingsView::new(
-                self.config_store.clone(),
-                account,
-                account_id,
-                callbacks,
-                &host,
-            );
+            let view = SettingsView::new(self.config_store.clone(), callbacks, &host);
             self.root_stack.add_named(view.widget(), Some("settings"));
             self.settings_view = Some(view);
         }
@@ -1218,6 +1219,9 @@ impl MainWindow {
         // may have changed in Settings; push the fresh values to the
         // schedulers.
         self.account_manager.apply_environment(&self.config);
+        // Network overrides (proxy/trust, per-account or global) also feed
+        // future engine runs.
+        self.account_manager.refresh_network(&self.config);
         self.refresh_sidebar();
         let account_id = self.active_account_id.clone();
         self.present_account(account_id.as_deref());
@@ -1609,6 +1613,55 @@ impl MainWindow {
             },
         };
         let view = AccountView::new(runtime, callbacks, self.logger.clone());
+
+        // Account settings panel (issue #56): a toggle row under the folder
+        // list reveals the per-account preferences (server, connection,
+        // synchronization, deletion guard, credentials).
+        if let Some(account) = self
+            .config
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .cloned()
+        {
+            let store = self.config_store.clone();
+            let settings_callbacks = self.build_settings_callbacks();
+            let host = SettingsHost::new(&self.window, &self.toast_overlay);
+            let panel = crate::ui::account_settings::build_account_settings_panel(
+                &store,
+                &account,
+                account_id,
+                &settings_callbacks,
+                &host,
+            );
+            panel.set_visible(false);
+            let toggle = libadwaita::ActionRow::builder()
+                .title(t("Account settings"))
+                .subtitle(t(
+                    "Server, proxy and synchronization options for this account",
+                ))
+                .activatable(true)
+                .build();
+            let gear = gtk4::Image::builder()
+                .icon_name("preferences-system-symbolic")
+                .pixel_size(16)
+                .build();
+            toggle.add_prefix(&gear);
+            let chevron = gtk4::Image::builder()
+                .icon_name("go-next-symbolic")
+                .pixel_size(16)
+                .build();
+            toggle.add_suffix(&chevron);
+            {
+                let panel = panel.clone();
+                toggle.connect_activated(move |_| {
+                    panel.set_visible(!panel.is_visible());
+                });
+            }
+            view.append_widget(&toggle);
+            view.append_widget(&panel);
+        }
+
         self.content_stack.add_named(&view.root, Some("account"));
         self.content_stack.set_visible_child_name("account");
         self.account_view = Some(view);

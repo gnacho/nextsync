@@ -288,6 +288,8 @@ mod tests {
             delete_guard: DeleteGuardConfig::default(),
             runtime: RuntimeConfig::default(),
             id: "test-account".to_string(),
+            custom_proxy: None,
+            trust_invalid_certificates: false,
         }
     }
 

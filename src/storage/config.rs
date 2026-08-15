@@ -110,6 +110,14 @@ pub struct AccountConfig {
     pub sync: SyncConfig,
     pub delete_guard: DeleteGuardConfig,
     pub runtime: RuntimeConfig,
+    /// Per-account HTTP proxy override (issue #56); falls back to the
+    /// global `network.custom_proxy` when unset.
+    #[serde(default)]
+    pub custom_proxy: Option<String>,
+    /// Per-account invalid-certificate acceptance (issue #56); OR-ed with
+    /// the global preference.
+    #[serde(default)]
+    pub trust_invalid_certificates: bool,
 }
 
 impl Default for AccountConfig {
@@ -124,6 +132,8 @@ impl Default for AccountConfig {
             sync: SyncConfig::default(),
             delete_guard: DeleteGuardConfig::default(),
             runtime: RuntimeConfig::default(),
+            custom_proxy: None,
+            trust_invalid_certificates: false,
         }
     }
 }
@@ -948,6 +958,11 @@ fn validate_account(raw: &Value) -> Result<AccountConfig, ConfigError> {
         sync,
         delete_guard,
         runtime,
+        custom_proxy: match obj.get("custom_proxy") {
+            Some(Value::String(text)) if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        },
+        trust_invalid_certificates: get_bool(obj, "trust_invalid_certificates", false),
     })
 }
 
@@ -1816,6 +1831,8 @@ mod tests {
             sync: SyncConfig::default(),
             delete_guard: DeleteGuardConfig::default(),
             runtime: RuntimeConfig::default(),
+            custom_proxy: None,
+            trust_invalid_certificates: false,
         });
 
         store.save(&config).unwrap();
@@ -2013,6 +2030,8 @@ mod tests {
             sync: SyncConfig::default(),
             delete_guard: DeleteGuardConfig::default(),
             runtime: RuntimeConfig::default(),
+            custom_proxy: None,
+            trust_invalid_certificates: false,
         }
     }
 

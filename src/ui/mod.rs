@@ -1,6 +1,7 @@
 //! GTK4/libadwaita user interface. Fase 5.
 
 pub mod about;
+pub mod account_settings;
 pub mod activity;
 pub mod conflict_resolver;
 pub mod folder_emblems;
