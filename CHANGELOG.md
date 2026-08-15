@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.100.0] - 2026-08-15
+
+Credenciales que sí se guardan: la app usa el llavero de la sesión.
+
+### Corregido
+- **Credenciales en el llavero de la sesión (#58)**: la app guardaba las contraseñas en la colección por defecto del Secret Service, que en GNOME puede ser un llavero separado que nunca se desbloquea; cada escritura fallaba con un error de bloqueo y ninguna cuenta podía sincronizar (avatares incluidos). Ahora se prefiere el llavero `login` (el que la sesión desbloquea al iniciar), con la colección por defecto como respaldo, y el borrado solo toca elementos desbloqueados. Verificado: la suite de credenciales vuelve a pasar (antes 2 tests fallaban con el llavero bloqueado).
+
 ## [0.90.0] - 2026-08-15
 
 Ajustes separados: lo de cada cuenta, en la ventana principal; lo global, en Preferencias.
