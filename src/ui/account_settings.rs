@@ -45,11 +45,11 @@ pub fn build_account_settings_panel(
     proxy.set_tooltip_text(Some(t("Save the custom HTTP proxy")));
     let trust = libadwaita::SwitchRow::builder()
         .title(t("Allow invalid or self-signed certificates"))
-        .subtitle(t(
-            "This weakens connection security. Enable only for a server you trust.",
-        ))
         .active(account.trust_invalid_certificates)
         .build();
+    trust.set_tooltip_text(Some(t(
+        "This weakens connection security. Enable only for a server you trust.",
+    )));
     {
         let store = store.clone();
         let account_id = account_id.to_string();

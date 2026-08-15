@@ -31,11 +31,6 @@ pub fn window_title() -> &'static str {
     t("NextSync")
 }
 
-/// Translated window subtitle.
-pub fn window_subtitle() -> &'static str {
-    t("File synchronization for GNOME")
-}
-
 /// What a main-window close-request should do.
 ///
 /// With a StatusNotifier tray registered the close hides the window and keeps
@@ -168,37 +163,29 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary as plain text (issues #64/#65): avatar, the user
-        // name, the state light and the storage usage, with an Add Folder
-        // button beside them. No boxed/button background.
+        // Account summary as plain text (issues #64/#69): green state icon,
+        // server name, used GB — the same line for every provider — with an
+        // Add Folder button beside them. The user identity lives in the
+        // sidebar; no avatar, no login name here.
         let summary_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(10)
             .margin_bottom(4)
             .build();
-        // Issue #50: the account avatar leads the card; the initials
-        // fallback covers accounts without one.
-        let avatar = libadwaita::Avatar::new(40, Some(&account.login_name), true);
-        if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
-            paint_avatar(&avatar, &bytes);
-        }
-        summary_box.append(&avatar);
         let light = gtk4::Image::builder().pixel_size(14).build();
         light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
         summary_box.append(&light);
-        // The name doubles as the anti-race guard for the background quota
-        // and avatar fetches (same pattern the boxed row used).
+        // The server label doubles as the anti-race guard for the
+        // background quota fetch (detached rows keep their text).
         let name_label = gtk4::Label::builder()
-            .label(&account.login_name)
+            .label(server_host(&account.server_url))
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .css_classes(["heading"])
             .build();
         summary_box.append(&name_label);
         let usage_label = gtk4::Label::builder()
-            .css_classes(["dim-label", "caption"])
-            .halign(gtk4::Align::End)
-            .hexpand(true)
+            .css_classes(["dim-label"])
+            .halign(gtk4::Align::Start)
             .build();
         summary_box.append(&usage_label);
         // Add Folder as a real button next to the summary (issue #66).
@@ -215,7 +202,6 @@ impl AccountView {
             });
             summary_box.append(&add_button);
         }
-        root.append(&summary_box);
         {
             // Quota fetch: only plain data crosses to the blocking thread;
             // widget clones are captured in the main-loop continuation.
@@ -262,59 +248,6 @@ impl AccountView {
                     parts.push(usage);
                 }
                 usage_label.set_text(&parts.join(" · "));
-            });
-        }
-
-        // Avatar fetch (issue #50): the cached copy painted above renders
-        // instantly; the background refresh follows the same row-title
-        // guard as the quota fetch so a rebuilt view never receives a
-        // stale image, caches the bytes for the next startup and notifies
-        // the sidebar.
-        {
-            let account_for_avatar = account.clone();
-            let account_id_for_avatar = account.id.clone();
-            let provider = account.provider;
-            let avatar = avatar.clone();
-            let name_label = name_label.clone();
-            let title_for_check = name_label.text().to_string();
-            let on_avatar_cached = callbacks.on_avatar_cached.clone();
-            let handle = gio::spawn_blocking(move || {
-                crate::nextcloud::credentials::CredentialsStore::get_for_account(
-                    &account_for_avatar.id,
-                    &account_for_avatar.server_url,
-                    &account_for_avatar.login_name,
-                )
-                .ok()
-                .flatten()
-                .and_then(|password| {
-                    crate::nextcloud::api::NextcloudApi::new()
-                        .fetch_avatar(
-                            provider,
-                            &account_for_avatar.server_url,
-                            &account_for_avatar.login_name,
-                            &password,
-                        )
-                        .ok()
-                        .flatten()
-                })
-                .inspect(|bytes| {
-                    // Cache for the next startup and the sidebar (best
-                    // effort: a failed write must not discard a valid
-                    // image); the file write stays on the blocking thread.
-                    let _ = crate::util::avatar_cache::store_avatar(&account_for_avatar.id, bytes);
-                })
-            });
-            glib::spawn_future_local(async move {
-                let Ok(Some(bytes)) = handle.await else {
-                    return;
-                };
-                if name_label.text() != title_for_check {
-                    return;
-                }
-                paint_avatar(&avatar, &bytes);
-                if let Some(callback) = &on_avatar_cached {
-                    callback(&account_id_for_avatar, &bytes);
-                }
             });
         }
 
@@ -448,6 +381,9 @@ impl AccountView {
         }
 
         root.append(&account_list);
+        // The summary sits BELOW the folders and above the account settings
+        // (issue #69).
+        root.append(&summary_box);
 
         // Live update of the summary state light from the account state
         // (the Sync/Pause buttons are gone; the light carries the state).
@@ -583,7 +519,7 @@ impl MainWindow {
 
         let toolbar = libadwaita::ToolbarView::new();
         let header = gtk4::HeaderBar::new();
-        let title = libadwaita::WindowTitle::new(window_title(), window_subtitle());
+        let title = libadwaita::WindowTitle::new(window_title(), "");
         header.set_title_widget(Some(&title));
 
         // gnome-text-editor layout: the back-to-sync button sits at the left
@@ -616,6 +552,16 @@ impl MainWindow {
         let actions = gio::SimpleActionGroup::new();
         actions.add_action(&{
             let weak = self_weak.clone();
+            let action = gio::SimpleAction::new("add-account", None);
+            action.connect_activate(move |_action, _param| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().show_add_account();
+                }
+            });
+            action
+        });
+        actions.add_action(&{
+            let weak = self_weak.clone();
             let action = gio::SimpleAction::new("preferences", None);
             action.connect_activate(move |_action, _param| {
                 if let Some(main) = weak.upgrade() {
@@ -646,7 +592,7 @@ impl MainWindow {
         split.set_sidebar_width_fraction(0.28);
         split.set_min_sidebar_width(220.0);
 
-        let (sidebar, accounts_list, add_button) = build_sidebar();
+        let (sidebar, accounts_list) = build_sidebar();
         // Activating a sidebar row presents that account's sync view
         // (issue #49): the handler resolves the row back to its account id
         // through the id -> row map kept by `refresh_sidebar`.
@@ -663,12 +609,6 @@ impl MainWindow {
         });
         let sidebar_page = libadwaita::NavigationPage::new(&sidebar, t("Accounts"));
         let add_account_handler: AddAccountHandler = Rc::new(RefCell::new(None));
-        let handler_for_add = add_account_handler.clone();
-        add_button.connect_clicked(move |_button| {
-            if let Some(handler) = handler_for_add.borrow_mut().as_mut() {
-                handler();
-            }
-        });
 
         let content_stack = gtk4::Stack::builder()
             .transition_type(gtk4::StackTransitionType::Crossfade)
@@ -1575,6 +1515,9 @@ impl MainWindow {
 fn hamburger_menu_model() -> gio::Menu {
     let menu = gio::Menu::new();
     let items = gio::Menu::new();
+    let add_account_item = gio::MenuItem::new(Some(t("Add Account")), Some("app.add-account"));
+    add_account_item.set_icon(&gio::ThemedIcon::new("list-add-symbolic"));
+    items.append_item(&add_account_item);
     let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
     preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
     items.append_item(&preferences_item);
@@ -1625,7 +1568,7 @@ pub fn account_id_for_row<'a>(
 
 /// Build the sidebar: the container, the accounts list and the Add Account
 /// button.
-fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
+fn build_sidebar() -> (gtk4::Box, gtk4::ListBox) {
     let sidebar = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(6)
@@ -1650,15 +1593,9 @@ fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
         .build();
     sidebar.append(&accounts_list);
 
-    let add_button = gtk4::Button::builder()
-        .label(t("Add Account"))
-        .icon_name("list-add-symbolic")
-        .tooltip_text(t("Add a new account"))
-        .halign(gtk4::Align::Fill)
-        .css_classes(["flat"])
-        .build();
-    sidebar.append(&add_button);
-    (sidebar, accounts_list, add_button)
+    // The Add Account action moved to the main menu (issue #70); the
+    // sidebar shows the accounts only.
+    (sidebar, accounts_list)
 }
 
 #[cfg(test)]
@@ -1671,7 +1608,6 @@ mod tests {
     fn window_constants_are_stable() {
         set_locale(Locale::English);
         assert_eq!(window_title(), "NextSync");
-        assert_eq!(window_subtitle(), "File synchronization for GNOME");
         reset_locale();
     }
 
@@ -1943,14 +1879,6 @@ mod tests {
     }
 
     #[test]
-    fn window_subtitle_translates_to_spanish() {
-        set_locale(Locale::Spanish);
-        assert_eq!(window_title(), "NextSync");
-        assert_eq!(window_subtitle(), "Sincronización de archivos para GNOME");
-        reset_locale();
-    }
-
-    #[test]
     fn main_window_construction_smoke() {
         // Must run through the shared GTK test worker: a second `gtk4::init()`
         // on a separate test thread panics (see `ui::test_helpers`).
@@ -2009,7 +1937,7 @@ mod tests {
         let items_section = menu
             .item_link(0, gio::MENU_LINK_SECTION)
             .expect("items section");
-        let labels: Vec<String> = (0..2)
+        let labels: Vec<String> = (0..3)
             .map(|index| {
                 let mut label = None;
                 let iter = items_section.iterate_item_attributes(index);
@@ -2023,7 +1951,11 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            vec!["Preferencias".to_string(), "Acerca de".to_string(),]
+            vec![
+                "Añadir cuenta".to_string(),
+                "Preferencias".to_string(),
+                "Acerca de".to_string(),
+            ]
         );
         reset_locale();
     }

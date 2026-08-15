@@ -219,15 +219,17 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
 
     let notifications = libadwaita::SwitchRow::builder()
         .title(t("Show desktop notifications"))
-        .subtitle(t("Authentication and synchronization failures"))
         .active(general.show_notifications)
         .build();
+    notifications.set_tooltip_text(Some(t("Authentication and synchronization failures")));
 
     let server_notifications = libadwaita::SwitchRow::builder()
         .title(t("Show server notifications"))
-        .subtitle(t("New shares, comments and mentions from your account"))
         .active(general.show_server_notifications)
         .build();
+    server_notifications.set_tooltip_text(Some(t(
+        "New shares, comments and mentions from your account",
+    )));
 
     let quiet = libadwaita::SwitchRow::builder()
         .title(t("Quiet hours"))
@@ -431,9 +433,9 @@ pub(crate) fn sync_option_groups(
         .build();
     let inotify = libadwaita::SwitchRow::builder()
         .title(t("Monitor filesystem changes"))
-        .subtitle(t("Synchronizes shortly after a local file changes."))
         .active(sync.local_inotify_enabled)
         .build();
+    inotify.set_tooltip_text(Some(t("Synchronizes shortly after a local file changes.")));
     let local_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a local interval"))
         .active(sync.local_interval_enabled)
@@ -455,14 +457,16 @@ pub(crate) fn sync_option_groups(
         .build();
     let push = libadwaita::SwitchRow::builder()
         .title(t("Use server push notifications"))
-        .subtitle(t("Near-real-time detection when notify_push is supported."))
         .active(sync.remote_push_enabled)
         .build();
+    push.set_tooltip_text(Some(t(
+        "Near-real-time detection when notify_push is supported.",
+    )));
     let remote_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a remote interval"))
-        .subtitle(t("Recommended because push delivery is best effort."))
         .active(sync.remote_interval_enabled)
         .build();
+    remote_timer.set_tooltip_text(Some(t("Recommended because push delivery is best effort.")));
     let remote_minutes = spin_row(
         t("Remote interval (minutes)"),
         1.0,
@@ -480,9 +484,11 @@ pub(crate) fn sync_option_groups(
         .build();
     let exclusions_enabled = libadwaita::SwitchRow::builder()
         .title(t("Exclude disposable files"))
-        .subtitle(t("Hidden files remain synchronized unless a rule matches."))
         .active(sync.exclude_patterns_enabled)
         .build();
+    exclusions_enabled.set_tooltip_text(Some(t(
+        "Hidden files remain synchronized unless a rule matches.",
+    )));
     excluded.add(&exclusions_enabled);
     let edit_row = libadwaita::ActionRow::builder()
         .title(t("File patterns"))
@@ -988,7 +994,6 @@ pub(crate) fn account_action_groups(
         .build();
     let sign_in_again = libadwaita::ActionRow::builder()
         .title(t("Sign in again"))
-        .subtitle(t("Re-enter the username and password for this account"))
         .tooltip_text(t("Re-enter credentials without removing the account"))
         .activatable(true)
         .build();
@@ -1024,7 +1029,6 @@ pub(crate) fn account_action_groups(
         .build();
     let remove = libadwaita::ActionRow::builder()
         .title(t("Remove account"))
-        .subtitle(t("Rarely needed. Keeps all local files."))
         .tooltip_text(t("Disconnect this account; local files are kept"))
         .activatable(true)
         .build();

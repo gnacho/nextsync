@@ -50,9 +50,7 @@ pub fn build_about_dialog(version: &str) -> libadwaita::AboutDialog {
         .application_icon(APPLICATION_ID)
         .version(version)
         .developer_name(DEVELOPER_NAME)
-        .comments(t(
-            "A lightweight Nextcloud synchronization client for Linux.",
-        ))
+        .comments(t("A lightweight desktop synchronizer for your files."))
         .website(WEBSITE_URL)
         .issue_url(ISSUES_URL)
         .license_type(gtk4::License::Gpl30)
