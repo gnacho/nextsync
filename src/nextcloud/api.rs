@@ -868,6 +868,42 @@ impl NextcloudApi {
         }
     }
 
+    /// Fetch the account's avatar image bytes (issue #50).
+    ///
+    /// Nextcloud serves `GET /avatar/{login}/64` (200 = image bytes; 404 or
+    /// a redirect mean the account has no avatar) and OpenCloud exposes the
+    /// LibreGraph user photo at `GET /graph/v1.0/me/photo/$value` (200 =
+    /// image bytes, 404 = none). 401/403 map to
+    /// [`ApiError::AuthRejected`]; any other status is an error. Note that
+    /// the production agent follows redirects by default, so a redirecting
+    /// avatar URL is judged by its final response.
+    pub fn fetch_avatar(
+        &self,
+        provider: crate::nextcloud::driver::Provider,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Option<Vec<u8>>, ApiError> {
+        let base = server.trim_end_matches('/');
+        let url = match provider {
+            crate::nextcloud::driver::Provider::Nextcloud => {
+                format!("{base}/avatar/{username}/64")
+            }
+            crate::nextcloud::driver::Provider::OpenCloud => {
+                format!("{base}/graph/v1.0/me/photo/$value")
+            }
+        };
+        let authorization = basic_authorization(username, password);
+        let headers = [("Authorization", authorization.as_str())];
+        let response = self.http.request("GET", &url, &headers, None)?;
+        match response.status {
+            200 if !response.body.is_empty() => Ok(Some(response.body)),
+            200 | 404 | 301..=308 => Ok(None),
+            401 | 403 => Err(ApiError::AuthRejected),
+            status => Err(ApiError::Http { status }),
+        }
+    }
+
     /// Run a Depth-1 PROPFIND and parse the multistatus response.
     fn propfind(
         &self,
@@ -2244,5 +2280,94 @@ mod tests {
         assert_eq!(format_bytes(512), "512 B");
         assert_eq!(format_bytes(2048), "2.0 KiB");
         assert_eq!(format_bytes(1024 * 1024 * 5), "5.0 MiB");
+    }
+
+    // ---- fetch_avatar (issue #50) -------------------------------------------
+
+    const AVATAR_PNG: &[u8] = b"\x89PNG\r\n\x1a\nfake-avatar-bytes";
+
+    #[test]
+    fn nextcloud_avatar_is_returned_on_200() {
+        let http = FakeHttp::new(200, AVATAR_PNG);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        let avatar = api
+            .fetch_avatar(
+                crate::nextcloud::driver::Provider::Nextcloud,
+                "https://cloud.example.com",
+                "alice",
+                "secret",
+            )
+            .unwrap();
+        assert_eq!(avatar.as_deref(), Some(AVATAR_PNG));
+        let requests = requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(requests[0].url, "https://cloud.example.com/avatar/alice/64");
+        assert!(header_value(&requests[0], "Authorization").is_some());
+    }
+
+    #[test]
+    fn opencloud_avatar_uses_the_graph_photo_endpoint() {
+        let http = FakeHttp::new(200, AVATAR_PNG);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        let avatar = api
+            .fetch_avatar(
+                crate::nextcloud::driver::Provider::OpenCloud,
+                "https://cloud.example.com",
+                "alice",
+                "token",
+            )
+            .unwrap();
+        assert_eq!(avatar.as_deref(), Some(AVATAR_PNG));
+        let requests = requests.borrow();
+        assert_eq!(
+            requests[0].url,
+            "https://cloud.example.com/graph/v1.0/me/photo/$value"
+        );
+    }
+
+    #[test]
+    fn avatar_is_none_on_404_redirect_or_empty_body() {
+        for status in [404u16, 301, 302, 200] {
+            let body = if status == 200 { b"" } else { AVATAR_PNG };
+            let api = NextcloudApi::with_http(Box::new(FakeHttp::new(status, body)));
+            let avatar = api
+                .fetch_avatar(
+                    crate::nextcloud::driver::Provider::Nextcloud,
+                    "https://cloud.example.com",
+                    "alice",
+                    "secret",
+                )
+                .unwrap();
+            assert_eq!(avatar, None, "status {status}");
+        }
+    }
+
+    #[test]
+    fn avatar_maps_auth_and_http_failures() {
+        let api = NextcloudApi::with_http(Box::new(FakeHttp::new(401, b"")));
+        assert_eq!(
+            api.fetch_avatar(
+                crate::nextcloud::driver::Provider::Nextcloud,
+                "https://cloud.example.com",
+                "alice",
+                "wrong",
+            )
+            .unwrap_err(),
+            ApiError::AuthRejected
+        );
+        let api = NextcloudApi::with_http(Box::new(FakeHttp::new(500, b"")));
+        assert_eq!(
+            api.fetch_avatar(
+                crate::nextcloud::driver::Provider::OpenCloud,
+                "https://cloud.example.com",
+                "alice",
+                "token",
+            )
+            .unwrap_err(),
+            ApiError::Http { status: 500 }
+        );
     }
 }

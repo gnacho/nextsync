@@ -2034,9 +2034,6 @@ msgstr "Error de sincronización — consulta el registro"
 #~ msgid "Your Nextcloud account needs attention"
 #~ msgstr "Tu cuenta de Nextcloud necesita atención"
 
-#~ msgid "Synchronization failed — view the log"
-#~ msgstr "La sincronización ha fallado: consulta el registro"
-
 #~ msgid "Synchronization is paused"
 #~ msgstr "La sincronización está en pausa"
 
@@ -2125,13 +2122,6 @@ msgstr "Error de sincronización — consulta el registro"
 #~ msgid "Choose Local Folder"
 #~ msgstr "Elegir carpeta local"
 
-#~ msgid ""
-#~ "The file tree from the selected remote folder will be mirrored into this "
-#~ "local folder."
-#~ msgstr ""
-#~ "El árbol de archivos de la carpeta remota seleccionada se reflejará en "
-#~ "esta carpeta local."
-
 #~ msgid "Local NextCloud folder"
 #~ msgstr "Carpeta local de NextCloud"
 
@@ -2214,6 +2204,35 @@ msgstr "Estilo oscuro"
 #: src/ui/settings.rs
 msgid "Desktop Integration"
 msgstr "Integración con el escritorio"
+
+#: src/ui/main_window.rs
+msgid "Move folder to trash?"
+msgstr "¿Mover la carpeta a la papelera?"
+
+#: src/ui/main_window.rs
+msgid ""
+"Remove the synchronization and move the local folder to the trash, or keep "
+"the folder on disk without synchronizing it."
+msgstr ""
+"Quita la sincronización y mueve la carpeta local a la papelera, o conserva "
+"la carpeta en el disco sin sincronizarla."
+
+#: src/ui/main_window.rs
+msgid "Keep Folder"
+msgstr "Conservar carpeta"
+
+#: src/ui/main_window.rs
+msgid "Move Folder to Trash"
+msgstr "Mover carpeta a la papelera"
+
+#: src/ui/main_window.rs
+msgid "The folder could not be moved to the trash."
+msgstr "No se pudo mover la carpeta a la papelera."
+
+#: src/ui/folder_status.rs
+msgid "{size} local"
+msgstr "{size} en local"
+
 
 #: src/core/scheduler.rs
 msgid "Another synchronization engine ({name}) is already running on this folder. Close it and try again."
@@ -2326,3 +2345,4 @@ msgstr "Cambios locales desde la última sincronización, comparando el árbol l
 #: src/ui/pending_changes.rs
 msgid "This folder has no synchronization journal yet, so every local file counts as new. Remote changes are not included."
 msgstr "Esta carpeta aún no tiene registro de sincronización, así que cada archivo local cuenta como nuevo. Los cambios remotos no se incluyen."
+

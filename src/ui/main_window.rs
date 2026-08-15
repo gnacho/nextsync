@@ -119,6 +119,31 @@ pub type EditIgnoredCallback = Rc<dyn Fn()>;
 /// local changes (issue #46).
 pub type PendingChangesCallback = Rc<dyn Fn(&str, &str)>;
 
+/// Callback invoked with the account id and image bytes once a fresh
+/// avatar has been fetched and cached (issue #50), so other surfaces
+/// (the sidebar) can repaint.
+pub type AvatarCachedCallback = Rc<dyn Fn(&str, &[u8])>;
+
+/// What to do with the local folder when its synchronization is removed
+/// (issue #37).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderRemoval {
+    /// Unconfigure only; the local folder stays on disk untouched.
+    Keep,
+    /// Unconfigure and move the local folder to the system trash.
+    Trash,
+}
+
+/// Map a removal-dialog response to the action it stands for. Unknown
+/// responses (including closures) map to `None` and change nothing.
+pub fn folder_removal_for_response(response: &str) -> Option<FolderRemoval> {
+    match response {
+        "keep" => Some(FolderRemoval::Keep),
+        "trash" => Some(FolderRemoval::Trash),
+        _ => None,
+    }
+}
+
 /// Shared holder for the Settings header-button handler, installed after the
 /// window lives in a shared cell.
 pub type SettingsHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
@@ -135,6 +160,8 @@ pub struct AccountCallbacks {
     pub on_add_folder: Option<Rc<dyn Fn()>>,
     /// Invoked when the user opens the per-folder pending-changes view.
     pub on_pending_changes: Option<PendingChangesCallback>,
+    /// Invoked when a fresh avatar was fetched and cached (issue #50).
+    pub on_avatar_cached: Option<AvatarCachedCallback>,
 }
 
 /// One account rendered as the content of the split view: a list of folder
@@ -143,11 +170,18 @@ pub struct AccountView {
     pub root: gtk4::Box,
     _account_runtime: AccountRuntime,
     _subscription: Option<crate::state::Subscription>,
+    /// Per-folder state subscriptions (used-space refreshes after each
+    /// completed synchronization, issue #43).
+    _folder_subscriptions: Vec<crate::state::Subscription>,
 }
 
 impl AccountView {
     /// Build the folder-focused view for one account.
-    pub fn new(account_runtime: AccountRuntime, callbacks: AccountCallbacks) -> Self {
+    pub fn new(
+        account_runtime: AccountRuntime,
+        callbacks: AccountCallbacks,
+        logger: crate::core::log::LogBuffer,
+    ) -> Self {
         let account = account_runtime.account.clone();
         let runtime = account_runtime.clone();
 
@@ -165,9 +199,10 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary card: login@server, storage used and an all-ok
-        // light driven by the aggregate state. The quota fetch runs off the
-        // UI thread; on any failure the card simply shows no usage line.
+        // Account summary card: avatar, login@server, storage used and an
+        // all-ok light driven by the aggregate state. The quota and avatar
+        // fetches run off the UI thread; on any failure the card simply
+        // shows no usage line.
         let summary_row = libadwaita::ActionRow::builder()
             .title(format!(
                 "{}@{}",
@@ -175,6 +210,13 @@ impl AccountView {
                 server_host(&account.server_url)
             ))
             .build();
+        // Issue #50: the account avatar leads the card; the initials
+        // fallback covers accounts without one.
+        let avatar = libadwaita::Avatar::new(40, Some(&account.login_name), true);
+        if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
+            paint_avatar(&avatar, &bytes);
+        }
+        summary_row.add_prefix(&avatar);
         let light = gtk4::Image::builder().pixel_size(14).build();
         light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
         summary_row.add_prefix(&light);
@@ -233,7 +275,61 @@ impl AccountView {
             });
         }
 
+        // Avatar fetch (issue #50): the cached copy painted above renders
+        // instantly; the background refresh follows the same row-title
+        // guard as the quota fetch so a rebuilt view never receives a
+        // stale image, caches the bytes for the next startup and notifies
+        // the sidebar.
+        {
+            let account_for_avatar = account.clone();
+            let account_id_for_avatar = account.id.clone();
+            let provider = account.provider;
+            let avatar = avatar.clone();
+            let summary_row = summary_row.clone();
+            let title_for_check = summary_row.title().to_string();
+            let on_avatar_cached = callbacks.on_avatar_cached.clone();
+            let handle = gio::spawn_blocking(move || {
+                crate::nextcloud::credentials::CredentialsStore::get_for_account(
+                    &account_for_avatar.id,
+                    &account_for_avatar.server_url,
+                    &account_for_avatar.login_name,
+                )
+                .ok()
+                .flatten()
+                .and_then(|password| {
+                    crate::nextcloud::api::NextcloudApi::new()
+                        .fetch_avatar(
+                            provider,
+                            &account_for_avatar.server_url,
+                            &account_for_avatar.login_name,
+                            &password,
+                        )
+                        .ok()
+                        .flatten()
+                })
+                .inspect(|bytes| {
+                    // Cache for the next startup and the sidebar (best
+                    // effort: a failed write must not discard a valid
+                    // image); the file write stays on the blocking thread.
+                    let _ = crate::util::avatar_cache::store_avatar(&account_for_avatar.id, bytes);
+                })
+            });
+            glib::spawn_future_local(async move {
+                let Ok(Some(bytes)) = handle.await else {
+                    return;
+                };
+                if summary_row.title() != title_for_check {
+                    return;
+                }
+                paint_avatar(&avatar, &bytes);
+                if let Some(callback) = &on_avatar_cached {
+                    callback(&account_id_for_avatar, &bytes);
+                }
+            });
+        }
+
         let pairs = pair_folder_runtimes(&account.folders, runtime.folders());
+        let mut folder_subscriptions: Vec<crate::state::Subscription> = Vec::new();
         for (folder, folder_runtime) in pairs {
             let local_root = folder.local_root.clone();
             let account_id = account.id.clone();
@@ -303,6 +399,49 @@ impl AccountView {
             let state = folder_runtime.as_ref().map(|fr| fr.state());
             let row =
                 FolderStatusRow::new(folder, state, row_callbacks, format_last_sync, is_paused);
+            // Issue #43: show the folder's local used space, refreshed
+            // whenever a synchronization completes.
+            spawn_local_size_refresh(&row.row, &row.local_size, std::path::Path::new(&local_root));
+            if let Some(fr) = &folder_runtime {
+                let controller = fr.state();
+                let row_for_updates = row.row.clone();
+                let size_for_updates = row.local_size.clone();
+                let local_root_for_updates = std::path::PathBuf::from(local_root.clone());
+                let local_root_for_emblems = local_root_for_updates.clone();
+                let logger_for_emblems = logger.clone();
+                let previous = Rc::new(Cell::new(controller.snapshot().state));
+                let subscription = controller.subscribe(move |snapshot| {
+                    // Issue #44: mirror the live state onto the folder as a
+                    // file manager emblem (metadata::emblems via GIO).
+                    let emblem = crate::ui::folder_emblems::folder_emblem_for(snapshot.state);
+                    let emblem_root = local_root_for_emblems.clone();
+                    let handle = gio::spawn_blocking(move || {
+                        crate::ui::folder_emblems::set_folder_emblem(&emblem_root, emblem)
+                    });
+                    let logger_for_emblems = logger_for_emblems.clone();
+                    let local_root_for_log = local_root_for_emblems.clone();
+                    glib::spawn_future_local(async move {
+                        if let Ok(Err(error)) = handle.await {
+                            logger_for_emblems.append(&format!(
+                                "emblem update failed for {}: {error}",
+                                local_root_for_log.display()
+                            ));
+                        }
+                    });
+                    // Issue #43: refresh the used space when a
+                    // synchronization completes.
+                    let now = snapshot.state;
+                    let was = previous.replace(now);
+                    if was == AppState::Syncing && now != AppState::Syncing {
+                        spawn_local_size_refresh(
+                            &row_for_updates,
+                            &size_for_updates,
+                            &local_root_for_updates,
+                        );
+                    }
+                });
+                folder_subscriptions.push(subscription);
+            }
             account_list.append(&row.row);
         }
         if account.folders.is_empty() {
@@ -435,8 +574,47 @@ impl AccountView {
             root,
             _account_runtime: account_runtime,
             _subscription: Some(subscription),
+            _folder_subscriptions: folder_subscriptions,
         }
     }
+}
+
+/// Paint image bytes onto an avatar widget as a circular custom image
+/// (issue #50), keeping the initials fallback when the bytes do not decode.
+fn paint_avatar(avatar: &libadwaita::Avatar, bytes: &[u8]) {
+    let bytes = glib::Bytes::from(bytes);
+    if let Ok(texture) = gtk4::gdk::Texture::from_bytes(&bytes) {
+        avatar.set_custom_image(Some(&texture));
+    }
+}
+
+/// Measure a folder's local used space off the UI thread and paint it into
+/// the row's size suffix (issue #43).
+///
+/// Like the quota fetch of the summary card, the row title captured at walk
+/// start guards against the view having been rebuilt for another folder
+/// while the walk ran (detached rows keep their title).
+fn spawn_local_size_refresh(
+    row: &libadwaita::ActionRow,
+    size: &gtk4::Label,
+    local_root: &std::path::Path,
+) {
+    let local_root = local_root.to_path_buf();
+    let title_for_check = row.title().to_string();
+    let handle =
+        gio::spawn_blocking(move || crate::ui::folder_status::local_tree_size(&local_root));
+    let row = row.clone();
+    let size = size.clone();
+    glib::spawn_future_local(async move {
+        let Ok(bytes) = handle.await else {
+            return;
+        };
+        if row.title() != title_for_check {
+            return;
+        }
+        size.set_text(&crate::ui::folder_status::local_size_label(bytes));
+        size.set_visible(true);
+    });
 }
 
 /// The main application window.
@@ -461,6 +639,9 @@ pub struct MainWindow {
     content_stack: gtk4::Stack,
     toast_overlay: libadwaita::ToastOverlay,
     account_rows: std::collections::HashMap<String, gtk4::ListBoxRow>,
+    /// Sidebar avatar widgets by account id, for avatar repaints (issue
+    /// #50); rebuilt together with the rows.
+    avatar_widgets: std::collections::HashMap<String, libadwaita::Avatar>,
     account_view: Option<AccountView>,
     settings_handler: SettingsHandler,
     add_account_handler: AddAccountHandler,
@@ -584,6 +765,20 @@ impl MainWindow {
         split.set_min_sidebar_width(220.0);
 
         let (sidebar, accounts_list, add_button) = build_sidebar();
+        // Activating a sidebar row presents that account's sync view
+        // (issue #49): the handler resolves the row back to its account id
+        // through the id -> row map kept by `refresh_sidebar`.
+        let weak = self_weak.clone();
+        accounts_list.connect_row_activated(move |_list, row| {
+            if let Some(main) = weak.upgrade() {
+                let mut main = main.borrow_mut();
+                if let Some(account_id) =
+                    account_id_for_row(&main.account_rows, row).map(str::to_string)
+                {
+                    main.present_account(Some(&account_id));
+                }
+            }
+        });
         let sidebar_page = libadwaita::NavigationPage::new(&sidebar, t("Accounts"));
         let add_account_handler: AddAccountHandler = Rc::new(RefCell::new(None));
         let handler_for_add = add_account_handler.clone();
@@ -670,6 +865,7 @@ impl MainWindow {
             content_stack,
             toast_overlay,
             account_rows: std::collections::HashMap::new(),
+            avatar_widgets: std::collections::HashMap::new(),
             account_view: None,
             settings_handler,
             add_account_handler,
@@ -1108,6 +1304,7 @@ impl MainWindow {
     pub fn refresh_sidebar(&mut self) {
         self.accounts_list.remove_all();
         self.account_rows.clear();
+        self.avatar_widgets.clear();
         for account in &self.config.accounts {
             let row = gtk4::ListBoxRow::builder()
                 .activatable(true)
@@ -1121,10 +1318,12 @@ impl MainWindow {
                 .margin_start(8)
                 .margin_end(8)
                 .build();
-            let avatar = gtk4::Image::builder()
-                .icon_name("avatar-default-symbolic")
-                .pixel_size(28)
-                .build();
+            // Issue #50: the cached account avatar when we have one, the
+            // initials fallback when we do not.
+            let avatar = libadwaita::Avatar::new(28, Some(&account.login_name), true);
+            if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
+                paint_avatar(&avatar, &bytes);
+            }
             box_container.append(&avatar);
             let text = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Vertical)
@@ -1147,8 +1346,22 @@ impl MainWindow {
             row.set_child(Some(&box_container));
             let account_id = account.id.clone();
             self.accounts_list.append(&row);
-            self.account_rows.insert(account_id, row);
+            self.account_rows.insert(account_id.clone(), row);
+            self.avatar_widgets.insert(account_id, avatar);
         }
+        // Keep the highlight on the active account across rebuilds so a
+        // refresh never leaves the sidebar without a selection (issue #49).
+        self.select_active_sidebar_row();
+    }
+
+    /// Select the sidebar row of the active account (or none when no
+    /// account is active).
+    fn select_active_sidebar_row(&self) {
+        let row = self
+            .active_account_id
+            .as_ref()
+            .and_then(|account_id| self.account_rows.get(account_id));
+        self.accounts_list.select_row(row);
     }
 
     /// Present the account with the given id (or the first one when `None`).
@@ -1162,6 +1375,7 @@ impl MainWindow {
                 .map(|account| account.id.clone()),
         };
         self.active_account_id = account_id.clone();
+        self.select_active_sidebar_row();
         self.reset_settings_view();
         self.show_account(account_id.as_deref());
     }
@@ -1202,11 +1416,98 @@ impl MainWindow {
             on_remove_folder: {
                 let weak = self.self_weak.clone();
                 let store = self.config_store.clone();
-                Some(Rc::new(move |account_id, folder_id| {
-                    let _ = store.remove_folder(account_id, folder_id);
-                    if let Some(main) = weak.upgrade() {
-                        main.borrow_mut().refresh_after_config_change();
-                    }
+                let overlay = self.toast_overlay.clone();
+                let logger = self.logger.clone();
+                Some(Rc::new(move |account_id: &str, folder_id: &str| {
+                    let Some(main) = weak.upgrade() else {
+                        return;
+                    };
+                    let main = main.borrow_mut();
+                    // Resolve the folder's local root before anything
+                    // changes so the trash action always sees the path.
+                    let local_root = main
+                        .config
+                        .accounts
+                        .iter()
+                        .find(|account| account.id == account_id)
+                        .and_then(|account| {
+                            account
+                                .folders
+                                .iter()
+                                .find(|folder| folder.id == folder_id)
+                                .map(|folder| folder.local_root.clone())
+                        });
+                    // Issue #37: confirm before removing. "Keep Folder"
+                    // only unconfigures (the previous behavior); "Move
+                    // Folder to Trash" also trashes the local folder.
+                    let dialog = libadwaita::AlertDialog::new(
+                        Some(t("Move folder to trash?")),
+                        Some(t(
+                            "Remove the synchronization and move the local folder to the \
+                             trash, or keep the folder on disk without synchronizing it.",
+                        )),
+                    );
+                    dialog.add_response("keep", t("Keep Folder"));
+                    dialog.add_response("trash", t("Move Folder to Trash"));
+                    dialog.set_response_appearance(
+                        "trash",
+                        libadwaita::ResponseAppearance::Destructive,
+                    );
+                    dialog.set_default_response(Some("keep"));
+                    let store = store.clone();
+                    let weak = weak.clone();
+                    let overlay = overlay.clone();
+                    let logger = logger.clone();
+                    let account_id = account_id.to_string();
+                    let folder_id = folder_id.to_string();
+                    dialog.connect_response(None, move |_dialog, response| {
+                        let Some(action) = folder_removal_for_response(response) else {
+                            return;
+                        };
+                        // The configuration changes identically for both
+                        // answers; only the folder's fate differs.
+                        let _ = store.remove_folder(&account_id, &folder_id);
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow_mut().refresh_after_config_change();
+                        }
+                        // Either way the folder leaves the app, so it must
+                        // not keep a stale sync emblem (issue #44).
+                        if let Some(local_root) = local_root.clone() {
+                            let path = std::path::PathBuf::from(&local_root);
+                            std::mem::drop(gio::spawn_blocking(move || {
+                                crate::ui::folder_emblems::set_folder_emblem(&path, None)
+                            }));
+                        }
+                        if action == FolderRemoval::Trash {
+                            let Some(local_root) = local_root.clone() else {
+                                return;
+                            };
+                            // Trash off the UI thread; a failure surfaces as
+                            // a toast plus a log line (the removal itself
+                            // already succeeded).
+                            let local_root_for_trash = local_root.clone();
+                            let handle = gio::spawn_blocking(move || {
+                                gio::File::for_path(&local_root_for_trash)
+                                    .trash(None::<&gio::Cancellable>)
+                            });
+                            let local_root = local_root.clone();
+                            let logger = logger.clone();
+                            let overlay = overlay.clone();
+                            glib::spawn_future_local(async move {
+                                if let Ok(Err(error)) = handle.await {
+                                    logger.append(&format!(
+                                        "folder removal: could not move {} to the trash: \
+                                         {error}",
+                                        local_root
+                                    ));
+                                    overlay.add_toast(libadwaita::Toast::new(t(
+                                        "The folder could not be moved to the trash.",
+                                    )));
+                                }
+                            });
+                        }
+                    });
+                    dialog.present(Some(main.window.upcast_ref::<gtk4::Widget>()));
                 }))
             },
             on_edit_ignored: {
@@ -1261,8 +1562,19 @@ impl MainWindow {
                     );
                 }))
             },
+            on_avatar_cached: {
+                let weak = self.self_weak.clone();
+                Some(Rc::new(move |account_id: &str, bytes: &[u8]| {
+                    if let Some(main) = weak.upgrade() {
+                        let main = main.borrow();
+                        if let Some(avatar) = main.avatar_widgets.get(account_id) {
+                            paint_avatar(avatar, bytes);
+                        }
+                    }
+                }))
+            },
         };
-        let view = AccountView::new(runtime, callbacks);
+        let view = AccountView::new(runtime, callbacks, self.logger.clone());
         self.content_stack.add_named(&view.root, Some("account"));
         self.content_stack.set_visible_child_name("account");
         self.account_view = Some(view);
@@ -1445,6 +1757,20 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
 /// `cloud.example.com`); the raw URL when it does not parse as expected.
 pub use crate::util::url::server_host;
 
+/// Resolve an activated sidebar row back to its account id through the
+/// id -> row map maintained by [`MainWindow::refresh_sidebar`].
+///
+/// GTK widgets compare by identity (reference-counted objects), so a row
+/// detached by a later refresh no longer matches any entry.
+pub fn account_id_for_row<'a>(
+    rows: &'a std::collections::HashMap<String, gtk4::ListBoxRow>,
+    row: &gtk4::ListBoxRow,
+) -> Option<&'a str> {
+    rows.iter()
+        .find(|(_, candidate)| candidate == &row)
+        .map(|(account_id, _)| account_id.as_str())
+}
+
 /// Build the sidebar: the container, the accounts list and the Add Account
 /// button.
 fn build_sidebar() -> (gtk4::Box, gtk4::ListBox, gtk4::Button) {
@@ -1500,6 +1826,225 @@ mod tests {
     fn close_action_hides_with_tray_and_quits_without() {
         assert_eq!(close_action(true), CloseAction::Hide);
         assert_eq!(close_action(false), CloseAction::Quit);
+    }
+
+    #[test]
+    fn folder_removal_responses_map_to_actions() {
+        assert_eq!(
+            folder_removal_for_response("keep"),
+            Some(FolderRemoval::Keep)
+        );
+        assert_eq!(
+            folder_removal_for_response("trash"),
+            Some(FolderRemoval::Trash)
+        );
+        assert_eq!(folder_removal_for_response("other"), None);
+        assert_eq!(folder_removal_for_response(""), None);
+    }
+
+    /// The real GIO trash round-trip for removed folders (issue #37). Like
+    /// the keyring test, it skips when the environment cannot trash (no
+    /// home-owned filesystem); the dialog logic itself is covered by the
+    /// pure response-mapping test above.
+    #[test]
+    fn gio_trash_moves_a_home_directory() {
+        let _env = crate::util::test_env::lock();
+        let Ok(home) = std::env::var("HOME") else {
+            eprintln!("skipped: no HOME to trash within");
+            return;
+        };
+        let dir =
+            std::path::Path::new(&home).join(format!("nextsync-trash-test-{}", std::process::id()));
+        if std::fs::create_dir_all(&dir).is_err() {
+            eprintln!("skipped: could not create the trash test directory");
+            return;
+        }
+        std::fs::write(dir.join("marker.txt"), b"nextsync").unwrap();
+        match gio::File::for_path(&dir).trash(None::<&gio::Cancellable>) {
+            Ok(()) => {
+                assert!(!dir.exists(), "the directory was moved to the trash");
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                eprintln!("skipped: gio trash is unavailable here: {error}");
+            }
+        }
+    }
+
+    /// A minimal 1x1 PNG (generated with correct chunk CRCs) used to
+    /// exercise the avatar paint path.
+    const AVATAR_PNG: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+        0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    /// The sidebar shows the cached account avatar (issue #50) and paint
+    /// failures keep the initials fallback.
+    #[test]
+    fn sidebar_avatar_uses_the_cached_image() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let _env = crate::util::test_env::lock();
+            let state = tempfile::tempdir().unwrap();
+            std::env::set_var("XDG_STATE_HOME", state.path());
+            crate::util::avatar_cache::store_avatar("acct-avatar-1", AVATAR_PNG).unwrap();
+
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let mut account = window_account();
+            account.folders.clear();
+            account.id = "acct-avatar-1".to_string();
+            let config = Config {
+                accounts: vec![account],
+                ..Config::default()
+            };
+            let window = MainWindow::new(
+                &app,
+                config,
+                ConfigStore::with_path(
+                    std::env::temp_dir()
+                        .join(format!("nextsync-avatar-{}.json", std::process::id())),
+                ),
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            // The account with a cached avatar paints it on the sidebar.
+            assert!(
+                window
+                    .avatar_widgets
+                    .get("acct-avatar-1")
+                    .unwrap()
+                    .custom_image()
+                    .is_some(),
+                "cached avatar is painted on the sidebar"
+            );
+
+            // Decoding failures keep the initials fallback.
+            let fresh = libadwaita::Avatar::new(28, Some("bob"), true);
+            paint_avatar(&fresh, b"not an image");
+            assert!(fresh.custom_image().is_none());
+            paint_avatar(&fresh, AVATAR_PNG);
+            assert!(fresh.custom_image().is_some());
+
+            std::env::remove_var("XDG_STATE_HOME");
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn account_id_for_row_resolves_rows_by_identity() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let row_a = gtk4::ListBoxRow::new();
+            let row_b = gtk4::ListBoxRow::new();
+            let mut rows = std::collections::HashMap::new();
+            rows.insert("acct-a".to_string(), row_a.clone());
+            rows.insert("acct-b".to_string(), row_b.clone());
+            assert_eq!(account_id_for_row(&rows, &row_a), Some("acct-a"));
+            assert_eq!(account_id_for_row(&rows, &row_b), Some("acct-b"));
+            // A row the sidebar no longer tracks resolves to nothing.
+            let detached = gtk4::ListBoxRow::new();
+            assert_eq!(account_id_for_row(&rows, &detached), None);
+        });
+    }
+
+    /// Activating a sidebar row presents that account, and the selection
+    /// survives a sidebar rebuild (issue #49).
+    #[test]
+    fn sidebar_activation_switches_the_presented_account() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            use crate::storage::config::AccountConfig;
+            let dir = tempfile::tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+
+            let mut account_a = window_account();
+            account_a.folders.clear();
+            account_a.server_url = "https://cloud-a.example.com".to_string();
+            let mut account_b = AccountConfig {
+                id: "acct-window-2".to_string(),
+                server_url: "https://cloud-b.example.com".to_string(),
+                login_name: "bob".to_string(),
+                ..AccountConfig::default()
+            };
+            account_b.folders.clear();
+            let id_a = store.add_account(&account_a).unwrap();
+            let id_b = store.add_account(&account_b).unwrap();
+            account_a.id = id_a.clone();
+            account_b.id = id_b.clone();
+
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let mut manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let config = crate::storage::config::Config {
+                accounts: vec![account_a.clone(), account_b.clone()],
+                ..Default::default()
+            };
+            manager.start(&config);
+            // The activation handler goes through the shared cell, so build
+            // the window with a real weak pointer (what the launcher does).
+            let main = std::rc::Rc::new_cyclic(|weak: &Weak<std::cell::RefCell<MainWindow>>| {
+                std::cell::RefCell::new(MainWindow::new(
+                    &app,
+                    config,
+                    store,
+                    manager,
+                    crate::core::log::LogBuffer::new(),
+                    None,
+                    weak.clone(),
+                ))
+            });
+
+            // Startup presents the first account with its row selected.
+            assert_eq!(
+                main.borrow().active_account_id.as_deref(),
+                Some(id_a.as_str())
+            );
+            assert_eq!(
+                main.borrow().accounts_list.selected_row().as_ref(),
+                main.borrow().account_rows.get(&id_a)
+            );
+
+            // Activating the second row (what a click does) switches the
+            // presented account and the selection.
+            let row_b = main.borrow().account_rows.get(&id_b).unwrap().clone();
+            row_b.activate();
+            assert_eq!(
+                main.borrow().active_account_id.as_deref(),
+                Some(id_b.as_str())
+            );
+            assert_eq!(
+                main.borrow().accounts_list.selected_row().as_ref(),
+                main.borrow().account_rows.get(&id_b)
+            );
+            assert_eq!(
+                main.borrow()
+                    .account_view
+                    .as_ref()
+                    .unwrap()
+                    ._account_runtime
+                    .account
+                    .id,
+                id_b
+            );
+
+            // A sidebar rebuild (refresh after a config change) keeps the
+            // highlight on the active account.
+            main.borrow_mut().refresh_sidebar();
+            assert_eq!(
+                main.borrow().accounts_list.selected_row().as_ref(),
+                main.borrow().account_rows.get(&id_b)
+            );
+        });
     }
 
     #[test]

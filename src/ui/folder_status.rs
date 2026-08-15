@@ -45,6 +45,43 @@ pub fn remote_label(remote_path: &str) -> String {
     t("Remote: {remote}").replace("{remote}", remote_path)
 }
 
+/// The translated suffix for a folder's local used space ("{size} local",
+/// issue #43).
+pub fn local_size_label(bytes: u64) -> String {
+    t("{size} local").replace("{size}", &crate::nextcloud::api::format_bytes(bytes))
+}
+
+/// Recursively sum the size of the regular files below `root`, skipping
+/// symlinks entirely (their targets are not part of the synchronized tree).
+///
+/// Iterative like [`crate::core::delete_guard::scan_local_files`] so deep
+/// trees cannot overflow the stack; unreadable directories contribute
+/// nothing.
+pub fn local_tree_size(root: &Path) -> u64 {
+    use std::fs;
+    if !root.is_dir() {
+        return 0;
+    }
+    let mut total: u64 = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(children) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for child in children.flatten() {
+            let Ok(kind) = child.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                stack.push(child.path());
+            } else if kind.is_file() {
+                total += child.metadata().map(|meta| meta.len()).unwrap_or(0);
+            }
+        }
+    }
+    total
+}
+
 /// How a last-sync stamp is rendered, mirroring `AccountView._format_sync_stamp`.
 ///
 /// Not-yet-synced folders show a "Not yet synchronized" label; otherwise the
@@ -100,6 +137,9 @@ pub struct FolderStatusRow {
     pub row: libadwaita::ActionRow,
     icon: gtk4::Image,
     spinner: gtk4::Spinner,
+    /// Suffix label with the folder's local used space (issue #43); hidden
+    /// until a size is known.
+    pub local_size: gtk4::Label,
     _menu_button: gtk4::MenuButton,
     _actions: std::collections::HashMap<String, gio::SimpleAction>,
     format_last_sync: Option<Rc<dyn Fn() -> String>>,
@@ -134,6 +174,15 @@ impl FolderStatusRow {
             .pixel_size(16)
             .build();
         row.add_prefix(&icon);
+
+        // Local used-space suffix (issue #43); stays hidden until the
+        // background walk delivers a size.
+        let local_size = gtk4::Label::builder()
+            .css_classes(["dim-label"])
+            .valign(gtk4::Align::Center)
+            .visible(false)
+            .build();
+        row.add_suffix(&local_size);
 
         let spinner = gtk4::Spinner::builder().build();
         spinner.set_visible(false);
@@ -220,6 +269,7 @@ impl FolderStatusRow {
             row,
             icon,
             spinner,
+            local_size,
             _menu_button: menu_button,
             _actions: actions,
             format_last_sync,
@@ -259,6 +309,12 @@ impl FolderStatusRow {
             }
         }
         this
+    }
+
+    /// Show (or clear) the local used-space suffix (issue #43).
+    pub fn set_local_size(&self, text: &str) {
+        self.local_size.set_text(text);
+        self.local_size.set_visible(!text.is_empty());
     }
 }
 
@@ -433,7 +489,48 @@ mod tests {
                 row.row.subtitle().as_deref(),
                 Some("Synchronized · Remote: /docs")
             );
+            // The local-size suffix stays hidden until a size arrives and
+            // leaves the subtitle alone (issue #43).
+            assert!(!row.local_size.is_visible());
+            row.set_local_size("12.4 KiB local");
+            assert_eq!(row.local_size.label(), "12.4 KiB local");
+            assert!(row.local_size.is_visible());
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Synchronized · Remote: /docs")
+            );
+            row.set_local_size("");
+            assert!(!row.local_size.is_visible());
             reset_locale();
         });
+    }
+
+    #[test]
+    fn local_tree_size_sums_files_and_skips_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), vec![0u8; 100]).unwrap();
+        std::fs::create_dir(dir.path().join("nested")).unwrap();
+        std::fs::write(dir.path().join("nested/b.txt"), vec![0u8; 1024]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path().join("a.txt"), dir.path().join("link")).unwrap();
+        assert_eq!(local_tree_size(dir.path()), 100 + 1024);
+        // A missing root contributes nothing.
+        assert_eq!(
+            local_tree_size(std::path::Path::new("/nonexistent-nextsync")),
+            0
+        );
+    }
+
+    #[test]
+    fn local_size_label_formats_and_translates() {
+        set_locale(Locale::English);
+        assert_eq!(local_size_label(512), "512 B local");
+        assert_eq!(local_size_label(12 * 1024 * 1024 * 1024), "12.0 GiB local");
+        set_locale(Locale::Spanish);
+        assert_eq!(
+            local_size_label(12 * 1024 * 1024 * 1024),
+            "12.0 GiB en local"
+        );
+        reset_locale();
     }
 }

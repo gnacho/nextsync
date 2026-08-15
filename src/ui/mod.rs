@@ -3,6 +3,7 @@
 pub mod about;
 pub mod activity;
 pub mod conflict_resolver;
+pub mod folder_emblems;
 pub mod folder_status;
 pub mod main_window;
 pub use main_window::color_scheme_for;
