@@ -82,6 +82,30 @@ pub fn build_account_settings_panel(
         page.add(&group);
     }
 
+    // Server connection status (issue #60): a green globe when the account
+    // is reachable, with the bare host name (no scheme).
+    let status_group = libadwaita::PreferencesGroup::new();
+    let status_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .halign(gtk4::Align::Center)
+        .margin_top(8)
+        .margin_bottom(8)
+        .build();
+    let globe = gtk4::Image::builder()
+        .icon_name("globe-symbolic")
+        .pixel_size(16)
+        .build();
+    globe.add_css_class("success");
+    status_row.append(&globe);
+    let host_label = gtk4::Label::builder()
+        .label(crate::util::url::server_host(&account.server_url))
+        .css_classes(["dim-label"])
+        .build();
+    status_row.append(&host_label);
+    status_group.add(&status_row);
+    page.add(&status_group);
+
     // Revealer wrapper: animates the panel open/closed and keeps the layout
     // correct when hidden (issue #63).
     let revealer = gtk4::Revealer::new();

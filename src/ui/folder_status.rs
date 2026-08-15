@@ -329,8 +329,16 @@ fn render(
     snapshot: &StateSnapshot,
 ) {
     let (icon_name, status) = folder_status_presentation(snapshot.state);
-    icon.set_icon_name(Some(icon_name));
     let syncing = snapshot.state == AppState::Syncing;
+    // Issue #62: while syncing the spinner IS the status (no static icon);
+    // a synchronized folder shows a green check via the success color.
+    icon.set_visible(!syncing);
+    icon.set_icon_name(Some(icon_name));
+    if snapshot.state == AppState::IdleOk {
+        icon.add_css_class("success");
+    } else {
+        icon.remove_css_class("success");
+    }
     spinner.set_visible(syncing);
     if syncing {
         spinner.start();
