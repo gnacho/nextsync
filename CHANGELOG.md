@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.70.0] - 2026-08-15
+
+### Cambiado
+- **Icono de sincronizado en verde (#61/#62)**: la carpeta sincronizada muestra un check verde (color de éxito sobre el emblema ok); mientras sincroniza, solo se ve el spinner girando (fuera el emblema estático).
+- **Fila de conexión en el panel (#60)**: un globo verde centrado junto al host del servidor (sin esquema) al pie de los ajustes de la cuenta.
+
 ## [0.68.0] - 2026-08-15
 
 ### Cambiado
