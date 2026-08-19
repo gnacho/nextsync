@@ -433,8 +433,7 @@ mod tests {
                 "Configuración",
                 "Registro",
                 "Pausar todo",
-                // "Quit" is not in the catalog: English fallback.
-                "Quit"
+                "Salir"
             ]
         );
         reset_locale();

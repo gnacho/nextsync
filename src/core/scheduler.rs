@@ -1774,17 +1774,17 @@ mod tests {
     }
 
     #[test]
-    fn untranslated_scheduler_message_falls_back_to_english_in_spanish() {
-        // "Waiting for local changes to settle" is not in the catalog yet, so
-        // t() falls back to the English source even under a Spanish locale.
-        // This pins the real behavior until po/es.po adds the translation.
+    fn scheduler_messages_translate_to_spanish() {
+        // Every scheduler state message is in the Spanish catalog (the
+        // i18n coverage test enforces this for the whole crate); this pins
+        // the live behavior for one queued-state message.
         let (scheduler, _source, _runner) = make_scheduler(None);
         crate::util::i18n::set_locale(crate::util::i18n::Locale::Spanish);
         scheduler.request(Trigger::LocalInotify);
         assert_eq!(scheduler.state().snapshot().state, AppState::SyncQueued);
         assert_eq!(
             scheduler.state().snapshot().message,
-            "Waiting for local changes to settle"
+            "Esperando a que los cambios locales se asienten"
         );
     }
 
