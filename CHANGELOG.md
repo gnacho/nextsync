@@ -2,6 +2,15 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.78.0] - 2026-08-19
+
+### Corregido
+- **Pausa ante credenciales rechazadas (#72)**: cuando el servidor rechaza las credenciales de una cuenta (app password revocada o caducada), la app deja de reintentar automáticamente. Hasta ahora los reintentos (retries del motor + intervalo remoto + inotify) seguían golpeando el servidor con una contraseña muerta hasta disparar su protección anti fuerza bruta (HTTP 429) y bloquear la cuenta de red. Ahora:
+  - El scheduler arma una puerta de credenciales tras un resultado *AuthFailed*: los disparadores automáticos se encolan sin ejecutar ninguna corrida nueva; solo una sincronización manual (o "Iniciar sesión de nuevo") vuelve a intentar.
+  - El estado de la cuenta y la bandeja muestran "Credenciales rechazadas: vuelve a iniciar sesión para reanudar la sincronización" de forma persistente (ya no vuelve al verde "Sincronizado" tras pausar/reanudar).
+  - **"Iniciar sesión de nuevo" reanuda**: al guardar credenciales nuevas se levanta la puerta en todas las carpetas de la cuenta y se lanza una reconciliación manual inmediata; si la contraseña sigue siendo mala, la puerta se rearma con una única corrida fallida (sin bucle).
+  - Una corrida con éxito (manual o automática) desarma la puerta y los disparadores automáticos vuelven a fluir.
+
 ## [0.76.0] - 2026-08-15
 
 ### Cambiado
