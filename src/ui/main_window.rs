@@ -1076,6 +1076,16 @@ impl MainWindow {
         }
     }
 
+    /// The user re-entered credentials for the active account (issue #72):
+    /// refresh the runtime (the login name may have changed), lift the
+    /// credential-rejection gate and reconcile immediately.
+    fn credentials_renewed_for_active(&mut self) {
+        self.reconfigure_active_account();
+        if let Some(account_id) = self.active_account_id.clone() {
+            self.account_manager.credentials_renewed(&account_id);
+        }
+    }
+
     /// Build the Settings callbacks against this window's shared cell.
     fn build_settings_callbacks(&mut self) -> SettingsCallbacks {
         let weak = self.self_weak.clone();
@@ -1093,6 +1103,14 @@ impl MainWindow {
                 Some(Rc::new(move || {
                     if let Some(main) = weak.upgrade() {
                         main.borrow_mut().reconfigure_active_account();
+                    }
+                }))
+            },
+            on_credentials_renewed: {
+                let weak = weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().credentials_renewed_for_active();
                     }
                 }))
             },

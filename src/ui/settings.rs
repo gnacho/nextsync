@@ -65,6 +65,9 @@ pub struct SettingsCallbacks {
     /// Invoked after trigger/logging settings change (hot-reconfigures the
     /// account runtimes).
     pub on_reconfigure: Option<SettingsCallback>,
+    /// Invoked after the user re-enters credentials ("Sign in again",
+    /// issue #72): lifts the credential-rejection gate and reconciles.
+    pub on_credentials_renewed: Option<SettingsCallback>,
 }
 
 /// Where an in-app settings view anchors its dialogs and toasts.
@@ -990,12 +993,14 @@ pub(crate) fn account_action_groups(
     let account_id_for_signin = account_id.to_string();
     let account_for_signin = account.clone();
     let host_for_signin = host.clone();
+    let callbacks_for_signin = callbacks.clone();
     sign_in_again.connect_activated(move |_| {
         present_sign_in_again_dialog(
             &store_for_signin,
             &account_id_for_signin,
             &account_for_signin,
             &host_for_signin,
+            &callbacks_for_signin,
         );
     });
     auth_group.add(&sign_in_again);
@@ -1950,6 +1955,7 @@ fn present_sign_in_again_dialog(
     account_id: &str,
     account: &AccountConfig,
     host: &SettingsHost,
+    callbacks: &SettingsCallbacks,
 ) {
     let dialog = libadwaita::AlertDialog::new(
         Some(t("Sign in again")),
@@ -1988,6 +1994,7 @@ fn present_sign_in_again_dialog(
     let password_w = password.clone();
     let status_w = status.clone();
     let parent_w = host.clone();
+    let callbacks_w = callbacks.clone();
     dialog.connect_response(None, move |dialog, response| {
         if response == "cancel" {
             dialog.force_close();
@@ -2018,6 +2025,9 @@ fn present_sign_in_again_dialog(
         let status_w2 = status_w.clone();
         let parent_w2 = parent_w.clone();
         let dialog_w = dialog.clone();
+        // The response handler is `Fn` (the user may retry), so clone the
+        // callback out of the shared struct for each async run.
+        let on_credentials_renewed = callbacks_w.on_credentials_renewed.clone();
         glib::spawn_future_local(async move {
             let result = match handle.await {
                 Ok(r) => r,
@@ -2039,6 +2049,9 @@ fn present_sign_in_again_dialog(
                             .set_text(&format!("{} {err}", t("Could not update the account.")));
                         return;
                     }
+                    // Issue #72: the renewed credentials lift the
+                    // credential-rejection gate and reconcile right away.
+                    invoke(&on_credentials_renewed);
                     let toast = libadwaita::Toast::new(t("Signed in."));
                     parent_w2.add_toast(toast);
                     dialog_w.force_close();

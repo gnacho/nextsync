@@ -380,6 +380,12 @@ impl FolderRuntime {
             .configure(&crate::core::triggers::TriggerSettings::from(&account.sync));
     }
 
+    /// Lift the credential-rejection gate on this folder (issue #72): the
+    /// scheduler then reconciles manually with the renewed credentials.
+    pub fn credentials_renewed(&self) {
+        self.scheduler.credentials_renewed();
+    }
+
     /// Stop the scheduler, cancelling pending work and timers.
     pub fn stop(&mut self) {
         self.scheduler.stop();
@@ -843,6 +849,14 @@ impl AccountRuntime {
         self.sync_targets();
     }
 
+    /// Lift the credential-rejection gate on every folder (issue #72):
+    /// called after the user re-enters credentials for this account.
+    pub fn credentials_renewed(&self) {
+        for runtime in self.folders.values() {
+            runtime.credentials_renewed();
+        }
+    }
+
     fn ensure_folder(&mut self, folder: FolderConfig) {
         if self.folders.contains_key(&folder.id) {
             return;
@@ -1080,6 +1094,14 @@ impl AccountManager {
         }
         self.aggregate_sources.clear();
         self.aggregate.clear();
+    }
+
+    /// Lift the credential-rejection gate on every folder of one account
+    /// (issue #72). No-op for unknown accounts.
+    pub fn credentials_renewed(&mut self, account_id: &str) {
+        if let Some(runtime) = self.runtimes.get(account_id) {
+            runtime.credentials_renewed();
+        }
     }
 }
 
@@ -1338,6 +1360,37 @@ mod tests {
         assert_eq!(runtime.state().snapshot().state, AppState::PausedUser);
     }
 
+    /// Issue #72: "Sign in again" must reach every folder scheduler of the
+    /// account, lifting the credential gate and queuing a manual run each.
+    #[test]
+    fn credentials_renewed_fans_out_to_every_folder() {
+        let source = fake_source();
+        let mut runtime = AccountRuntime::new(
+            sample_account(true),
+            NetworkConfig::default(),
+            source.clone(),
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        let mut account = sample_account(true);
+        account.folders.push(FolderConfig {
+            id: "folder-2".to_string(),
+            local_root: "/tmp/nsync-folder-2".to_string(),
+            remote_path: "/photos".to_string(),
+            space_id: None,
+            size_confirmed: false,
+        });
+        runtime.account = account;
+        runtime.sync_folders();
+        assert_eq!(runtime.folders().len(), 2);
+        assert_eq!(source.borrow().pending(), 0);
+
+        runtime.credentials_renewed();
+        // One queued manual start per folder scheduler.
+        assert_eq!(source.borrow().pending(), 2);
+    }
+
     #[test]
     fn sync_folders_starts_and_removes_runtimes() {
         let source = fake_source();
@@ -1433,6 +1486,39 @@ mod tests {
             manager.aggregate_state().snapshot().state,
             AppState::Unconfigured
         );
+    }
+
+    /// Issue #72: the manager fans "credentials renewed" out to the right
+    /// account and ignores unknown ids.
+    #[test]
+    fn manager_credentials_renewed_targets_one_account() {
+        let source = fake_source();
+        let mut manager = AccountManager::new(source.clone());
+        manager.set_watcher_factory(inert_watcher_factory());
+        let mut config = Config {
+            accounts: vec![sample_account(true), sample_account(true)],
+            ..Config::default()
+        };
+        config.accounts[1].id = "acc-2".to_string();
+        manager.start(&config);
+
+        // Each foldered account queued its startup reconciliation; the
+        // renewed-credentials manual run joins acc-1's scheduler queue
+        // (its startup idle is already pending, so counting idle sources
+        // would not move).
+        manager.credentials_renewed("acc-1");
+        let folder = manager
+            .get("acc-1")
+            .unwrap()
+            .folders()
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        assert!(folder.scheduler().queue_len() >= 2);
+
+        // Unknown ids are ignored instead of panicking.
+        manager.credentials_renewed("missing");
     }
 
     #[test]

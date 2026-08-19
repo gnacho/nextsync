@@ -135,6 +135,10 @@ struct SchedulerInner {
     /// Quiet-hours window in local time; blocks new runs inside it
     /// (issue #45).
     quiet_hours: Option<(String, String)>,
+    /// The server rejected the credentials on the last run (issue #72):
+    /// automatic triggers stay queued until the user signs in again, so a
+    /// revoked password cannot hammer the server into a brute-force lockout.
+    auth_required: bool,
 }
 
 impl Scheduler {
@@ -181,6 +185,7 @@ impl Scheduler {
             allowed_ssids: Vec::new(),
             active_ssid: None,
             quiet_hours: None,
+            auth_required: false,
         };
         let inner = Rc::new(RefCell::new(inner));
         {
@@ -325,6 +330,20 @@ impl Scheduler {
         self.inner.borrow().keyring_locked
     }
 
+    /// Whether automatic syncs are suspended because the server rejected
+    /// the credentials (issue #72).
+    pub fn auth_required(&self) -> bool {
+        self.inner.borrow().auth_required
+    }
+
+    /// Clear the credential-rejection gate and reconcile immediately
+    /// (issue #72). Called after the user re-enters credentials ("Sign in
+    /// again"); the manual reconciliation verifies them right away and
+    /// re-arms the gate if they are still wrong.
+    pub fn credentials_renewed(&self) {
+        self.inner.borrow_mut().credentials_renewed();
+    }
+
     /// Whether a reconciliation is currently running.
     pub fn is_running(&self) -> bool {
         self.inner.borrow().running
@@ -400,6 +419,17 @@ impl SchedulerInner {
             }
             return;
         }
+        // Issue #72: once the server rejects the credentials, automatic
+        // triggers only queue up; a revoked password must not keep hitting
+        // the server until it trips the brute-force protection.
+        if self.auth_required && trigger != Trigger::Manual {
+            self.queue.add(trigger);
+            self.state.set(
+                AppState::AuthRequired,
+                t("Credentials rejected — sign in again to resume synchronization"),
+            );
+            return;
+        }
         if !self.online {
             self.queue.add(trigger);
             self.state
@@ -469,6 +499,17 @@ impl SchedulerInner {
         }
         if self.paused() && !reasons.contains(&Trigger::Manual) {
             self.local_dirty = true;
+            return;
+        }
+        // Issue #72: re-check the credential gate here too — automatic
+        // reasons may reach `start` through paths that bypass `request`
+        // (permit release, cooldown finish).
+        if self.auth_required && !reasons.contains(&Trigger::Manual) {
+            self.queue.extend(reasons.iter().copied());
+            self.state.set(
+                AppState::AuthRequired,
+                t("Credentials rejected — sign in again to resume synchronization"),
+            );
             return;
         }
         if let Some(alert) = &self.delete_alert {
@@ -572,12 +613,14 @@ impl SchedulerInner {
         let ran = match outcome {
             SyncOutcome::Success => {
                 self.keyring_locked = false;
+                self.auth_required = false;
                 self.ever_synced = true;
                 self.set_idle_state();
                 true
             }
             SyncOutcome::Conflict => {
                 self.keyring_locked = false;
+                self.auth_required = false;
                 self.ever_synced = true;
                 self.state.set(
                     AppState::IdleOk,
@@ -587,9 +630,12 @@ impl SchedulerInner {
             }
             SyncOutcome::AuthFailed => {
                 self.keyring_locked = false;
+                // Issue #72: arm the credential gate so the periodic and
+                // inotify triggers stop retrying a dead password.
+                self.auth_required = true;
                 self.state.set(
                     AppState::AuthRequired,
-                    t("Your Nextcloud account needs attention"),
+                    t("Credentials rejected — sign in again to resume synchronization"),
                 );
                 false
             }
@@ -781,6 +827,11 @@ impl SchedulerInner {
         } else if !self.online {
             self.state
                 .set(AppState::Offline, t("Waiting for a network connection"));
+        } else if self.auth_required {
+            self.state.set(
+                AppState::AuthRequired,
+                t("Credentials rejected — sign in again to resume synchronization"),
+            );
         } else if self.manual_only() {
             self.state.set(
                 AppState::IdleManualOnly,
@@ -809,6 +860,16 @@ impl SchedulerInner {
         }
         self.delete_alert = None;
         self.delete_bypass_once = true;
+        self.request(Trigger::Manual);
+    }
+
+    /// Issue #72: lift the credential gate after the user re-entered the
+    /// password, then reconcile manually to verify the new credentials.
+    fn credentials_renewed(&mut self) {
+        if self.stopped {
+            return;
+        }
+        self.auth_required = false;
         self.request(Trigger::Manual);
     }
 
@@ -1325,6 +1386,117 @@ mod tests {
         scheduler.request(Trigger::Manual);
         run_idle(&source);
         finish(&runner, SyncOutcome::AuthFailed);
+        assert_eq!(scheduler.state().snapshot().state, AppState::AuthRequired);
+    }
+
+    /// Issue #72: after an AuthFailed run, automatic triggers queue up
+    /// without starting a new reconciliation (a revoked password must not
+    /// keep hitting the server).
+    #[test]
+    fn auth_required_defers_automatic_triggers() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::AuthFailed);
+        assert!(scheduler.auth_required());
+
+        scheduler.request(Trigger::LocalInotify);
+        scheduler.request(Trigger::RemoteInterval);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+        assert_eq!(scheduler.queue_len(), 2);
+        assert_eq!(scheduler.state().snapshot().state, AppState::AuthRequired);
+    }
+
+    /// Issue #72: a manual sync bypasses the credential gate (the user
+    /// decides to try again), and a successful manual run lifts the gate so
+    /// automatic triggers flow once more.
+    #[test]
+    fn manual_sync_bypasses_and_success_lifts_the_auth_gate() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::AuthFailed);
+
+        scheduler.request(Trigger::Manual);
+        assert_eq!(source.borrow().pending(), 1);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        // Queue the automatic trigger while the run is in flight so the
+        // post-success cooldown carries it (queued=true at finish time).
+        scheduler.request(Trigger::RemoteInterval);
+        finish(&runner, SyncOutcome::Success);
+        assert!(!scheduler.auth_required());
+
+        // Fire the cooldown, then the queued automatic start.
+        run_idle(&source);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 3);
+        finish(&runner, SyncOutcome::Success);
+    }
+
+    /// Issue #72: `credentials_renewed` (the "Sign in again" path) lifts
+    /// the gate and reconciles immediately; still-wrong credentials re-arm
+    /// it with a single failing run instead of a retry loop.
+    #[test]
+    fn credentials_renewed_reconciles_and_rearms_on_failure() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::AuthFailed);
+        assert!(scheduler.auth_required());
+
+        scheduler.credentials_renewed();
+        assert!(!scheduler.auth_required());
+        assert_eq!(source.borrow().pending(), 1);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        // The renewed password is still wrong: the gate re-arms.
+        finish(&runner, SyncOutcome::AuthFailed);
+        assert!(scheduler.auth_required());
+        assert_eq!(scheduler.state().snapshot().state, AppState::AuthRequired);
+
+        scheduler.request(Trigger::LocalInterval);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+    }
+
+    /// Issue #72: automatic reasons queued while the gate is armed never
+    /// start a run on their own (also covers the defensive re-check in
+    /// `start` for queued reasons).
+    #[test]
+    fn auth_gate_rechecks_in_start_for_queued_reasons() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::AuthFailed);
+        // Queue an automatic reason directly (what a permit waiter does).
+        scheduler.request(Trigger::RemoteInterval);
+        assert_eq!(scheduler.queue_len(), 1);
+        // A manual sync starts and fails again; the queued automatic reason
+        // must not trigger a follow-up run.
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::AuthFailed);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        assert!(scheduler.auth_required());
+    }
+
+    /// Issue #72: the idle state keeps surfacing the credential problem, so
+    /// a pause/resume cycle cannot paint the account green again.
+    #[test]
+    fn idle_state_prefers_auth_required_over_synchronized() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        // Drain the post-success cooldown before the next run.
+        run_idle(&source);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::AuthFailed);
+
+        scheduler.set_user_paused(true);
+        assert_eq!(scheduler.state().snapshot().state, AppState::PausedUser);
+        scheduler.set_user_paused(false);
         assert_eq!(scheduler.state().snapshot().state, AppState::AuthRequired);
     }
 
