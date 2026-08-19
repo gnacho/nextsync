@@ -2,6 +2,16 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
 
+## [0.82.0] - 2026-08-19
+
+### Corregido
+- **Catálogo español completo (#57)**: todas las cadenas visibles de la app están traducidas al español. Un barrido del código contra el catálogo encontró tres grupos de huecos que caían a inglés en un sistema es_ES:
+  - 23 cadenas sin entrada en el catálogo (wizard de configuración, "Conectar a OpenCloud", "Aceptar", "Papelera del servidor", tooltips del navegador, avisos de binarios ausentes, descripciones del About, etc.).
+  - 17 cadenas CON entrada pero con traducción vacía (elementos del resolutor de conflictos "Refrescar/Recientes/Conflictos", opciones del guard de borrados, "Salir" del menú de bandeja, diálogo de quitar cuenta).
+  - 10 cadenas de estado del scheduler que solo existían como entradas obsoletas (`#~`) heredadas del Python ("Sincronizando archivos…", "En pausa por batería", "La sincronización está en pausa", mensajes de espera…), muy visibles en el día a día.
+- **Test de cobertura de traducciones (nuevo)**: `every_translatable_literal_has_a_spanish_translation` escanea todo `src/` extrayendo los literales `t("...")` (incluidas concatenaciones multilínea) y exige traducción no vacía para cada uno; cualquier cadena nueva sin traducir rompe el gate. Los tests que usaban la caída a inglés como fixture se actualizaron al comportamiento traducido real.
+- **Nota de numeración**: v0.80.0 colisionaba con un tag histórico del fork y se salta (regla de colisiones ya aplicada en v0.62 y v0.72).
+
 ## [0.78.0] - 2026-08-19
 
 ### Corregido
