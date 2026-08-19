@@ -98,6 +98,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Create an App Token in the server web UI (account settings, App Tokens, + New) and paste it here. Your account password does not work for OpenCloud.", "Crea un Token de aplicación en la web del servidor (ajustes de la cuenta, App Tokens, + Nuevo) y pégalo aquí. Tu contraseña de cuenta no sirve para OpenCloud."),
     ("Create an App Token in the server web UI: account settings, App Tokens, + New. Your account password does not work here.", "Crea un Token de aplicación en la web del servidor (ajustes de la cuenta, App Tokens, + Nuevo). Tu contraseña de cuenta no sirve aquí."),
     ("Creates a link to the synchronized folder on the desktop.", "Crea un acceso a la carpeta sincronizada en el escritorio."),
+    ("Credentials rejected — sign in again to resume synchronization", "Credenciales rechazadas: vuelve a iniciar sesión para reanudar la sincronización"),
     ("Custom HTTP proxy", "Proxy HTTP personalizado"),
     ("Daily file naming", "Nombre de archivos diarios"),
     ("Dark", "Oscuro"),

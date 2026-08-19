@@ -2472,3 +2472,7 @@ msgstr "Ajustes de la cuenta"
 #: src/ui/account_settings.rs
 msgid "Connection"
 msgstr "Conexión"
+
+#: src/core/scheduler.rs
+msgid "Credentials rejected — sign in again to resume synchronization"
+msgstr "Credenciales rechazadas: vuelve a iniciar sesión para reanudar la sincronización"
