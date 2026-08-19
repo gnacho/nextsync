@@ -845,19 +845,19 @@ msgstr "Actividad y conflictos de sincronización"
 
 #: src/nextsync/ui/conflict_resolver.py:71
 msgid "Refresh"
-msgstr ""
+msgstr "Refrescar"
 
 #: src/nextsync/ui/conflict_resolver.py:88
 msgid "Recent"
-msgstr ""
+msgstr "Recientes"
 
 #: src/nextsync/ui/conflict_resolver.py:102
 msgid "Conflicts"
-msgstr ""
+msgstr "Conflictos"
 
 #: src/nextsync/ui/conflict_resolver.py:110
 msgid "No Conflicts"
-msgstr ""
+msgstr "Sin conflictos"
 
 #: src/nextsync/ui/conflict_resolver.py:111
 msgid "No Nextcloud conflicted copies were found in this folder."
@@ -884,7 +884,7 @@ msgstr "Conservar la local"
 
 #: src/nextsync/ui/conflict_resolver.py:239
 msgid "Delete the conflicted copy, keep the working file."
-msgstr ""
+msgstr "Eliminar la copia en conflicto y conservar el archivo de trabajo."
 
 #: src/nextsync/ui/conflict_resolver.py:243
 msgid "Keep Remote"
@@ -892,11 +892,11 @@ msgstr "Conservar la remota"
 
 #: src/nextsync/ui/conflict_resolver.py:244
 msgid "Replace the working file with the conflicted copy."
-msgstr ""
+msgstr "Reemplazar el archivo de trabajo con la copia en conflicto."
 
 #: src/nextsync/ui/conflict_resolver.py:249
 msgid "Open in Files"
-msgstr ""
+msgstr "Abrir en Archivos"
 
 #: src/nextsync/ui/conflict_resolver.py:258
 #, python-brace-format
@@ -1210,11 +1210,11 @@ msgstr "Carpeta local"
 
 #: src/nextsync/ui/settings.py:252
 msgid "Remote folder (empty: use the local folder name)"
-msgstr ""
+msgstr "Carpeta remota (vacía: se usa el nombre de la carpeta local)"
 
 #: src/nextsync/ui/settings.py:258
 msgid "Choose an existing remote folder"
-msgstr ""
+msgstr "Elige una carpeta remota existente"
 
 #: src/nextsync/ui/settings.py:264 src/nextsync/ui/setup.py:332
 msgid "Add"
@@ -1252,7 +1252,7 @@ msgstr "Sincroniza poco después de que un archivo local cambie."
 
 #: src/nextsync/ui/settings.py:435
 msgid "Run a local interval"
-msgstr ""
+msgstr "Ejecutar un intervalo local"
 
 #: src/nextsync/ui/settings.py:438
 msgid "Local interval (minutes)"
@@ -1305,7 +1305,7 @@ msgstr "Patrones de archivos"
 
 #: src/nextsync/ui/settings.py:486
 msgid "Names, extensions, and wildcard patterns"
-msgstr ""
+msgstr "Nombres, extensiones y patrones con comodines"
 
 #: src/nextsync/ui/settings.py:494
 msgid "Reliability"
@@ -1391,7 +1391,7 @@ msgstr ""
 
 #: src/nextsync/ui/settings.py:573
 msgid "Protect against mass local deletion"
-msgstr ""
+msgstr "Proteger contra el borrado masivo local"
 
 #: src/nextsync/ui/settings.py:574
 msgid "Recommended. Stops sync when the local folder loses many files at once."
@@ -1401,11 +1401,11 @@ msgstr ""
 
 #: src/nextsync/ui/settings.py:580
 msgid "Review after this many missing files"
-msgstr ""
+msgstr "Revisar tras este número de archivos desaparecidos"
 
 #: src/nextsync/ui/settings.py:586
 msgid "Review after this percentage is missing"
-msgstr ""
+msgstr "Revisar tras este porcentaje de desaparición"
 
 #: src/nextsync/ui/settings.py:596
 msgid "Diagnostics"
@@ -1449,7 +1449,7 @@ msgstr "Rara vez necesario. Conserva todos los archivos locales."
 
 #: src/nextsync/ui/settings.py:699
 msgid "Invalid HTTP proxy URL"
-msgstr ""
+msgstr "URL de proxy HTTP no válida"
 
 #: src/nextsync/ui/settings.py:708
 msgid "Remove Nextcloud Account?"
@@ -1459,7 +1459,7 @@ msgstr "¿Eliminar la cuenta de Nextcloud?"
 msgid ""
 "The account credential will be removed from the password keyring. Your local "
 "NextCloud folder and all files inside it will remain untouched."
-msgstr ""
+msgstr "La credencial de la cuenta se eliminará del almacén de contraseñas. Tu carpeta local de NextCloud y todos los archivos que contiene quedarán intactos."
 
 #: src/nextsync/ui/settings.py:712 src/nextsync/ui/setup.py:133
 msgid "Continue"
@@ -1778,7 +1778,7 @@ msgstr "Registro"
 
 #: src/nextsync/ui/tray.py:347
 msgid "Quit"
-msgstr ""
+msgstr "Salir"
 
 #: src/nextsync/ui/update_window.py:29
 msgid "Required Update"
@@ -2001,8 +2001,6 @@ msgstr "Sincronización fallida: credenciales rechazadas"
 msgid "Synchronization failed — view the log"
 msgstr "Error de sincronización — consulta el registro"
 
-#~ msgid "Connected. Add folders from Settings."
-#~ msgstr "Conectado. Añade carpetas desde Ajustes."
 
 #~ msgid "The local synchronization folder is missing or unavailable."
 #~ msgstr "La carpeta de sincronización local no existe o no está disponible."
@@ -2010,41 +2008,23 @@ msgstr "Error de sincronización — consulta el registro"
 #~ msgid "A previously populated synchronization folder is now empty."
 #~ msgstr "Una carpeta de sincronización antes con contenido está ahora vacía."
 
-#~ msgid "Synchronization scheduled"
-#~ msgstr "Sincronización programada"
 
-#~ msgid "Waiting for a network connection"
-#~ msgstr "Esperando una conexión de red"
 
 #~ msgid "Checking the local folder…"
 #~ msgstr "Comprobando la carpeta local…"
 
-#~ msgid "Synchronizing files…"
-#~ msgstr "Sincronizando archivos…"
 
 #~ msgid "Could not read the account credential"
 #~ msgstr "No se pudo leer la credencial de la cuenta"
 
-#~ msgid "Waiting for another account to finish…"
-#~ msgstr "Esperando a que otra cuenta termine…"
 
-#~ msgid "Synchronized with conflicts — review the log"
-#~ msgstr "Sincronizado con conflictos: revisa el registro"
 
 #~ msgid "Your Nextcloud account needs attention"
 #~ msgstr "Tu cuenta de Nextcloud necesita atención"
 
-#~ msgid "Synchronization is paused"
-#~ msgstr "La sincronización está en pausa"
 
-#~ msgid "Paused on battery"
-#~ msgstr "En pausa por batería"
 
-#~ msgid "Will pause after the current synchronization"
-#~ msgstr "Se pausará al terminar la sincronización actual"
 
-#~ msgid "Automatic synchronization is off"
-#~ msgstr "La sincronización automática está desactivada"
 
 #~ msgid "Last Successful Sync"
 #~ msgstr "Última sincronización correcta"
@@ -2476,3 +2456,137 @@ msgstr "Conexión"
 #: src/core/scheduler.rs
 msgid "Credentials rejected — sign in again to resume synchronization"
 msgstr "Credenciales rechazadas: vuelve a iniciar sesión para reanudar la sincronización"
+
+
+#: src/ui/setup.rs
+msgid "A lightweight desktop synchronizer for Nextcloud and OpenCloud."
+msgstr "Un sincronizador de escritorio ligero para Nextcloud y OpenCloud."
+
+#: src/ui/about.rs
+msgid "A lightweight desktop synchronizer for your files."
+msgstr "Un sincronizador de escritorio ligero para tus archivos."
+
+#: src/ui/setup.rs
+msgid "Cancel the browser sign-in"
+msgstr "Cancelar el inicio de sesión en el navegador"
+
+#: src/ui/setup.rs
+msgid "Connect to OpenCloud"
+msgstr "Conectar a OpenCloud"
+
+#: src/ui/setup.rs
+msgid "Copy the login link to the clipboard"
+msgstr "Copiar el enlace de inicio de sesión al portapapeles"
+
+#: src/ui/setup.rs
+msgid "Could Not Add the Account"
+msgstr "No se pudo añadir la cuenta"
+
+#: src/ui/setup.rs
+msgid "Enter the address you normally use to open the server in a browser."
+msgstr "Introduce la dirección que usas normalmente para abrir el servidor en un navegador."
+
+#: src/ui/setup.rs
+msgid "OK"
+msgstr "Aceptar"
+
+#: src/ui/setup.rs
+msgid "Open the login page in the browser again"
+msgstr "Abrir de nuevo la página de inicio de sesión en el navegador"
+
+#: src/ui/conflict_resolver.rs
+msgid "Original: {name} · {modified} · {size} bytes"
+msgstr "Original: {name} · {modified} · {size} bytes"
+
+#: src/ui/settings.rs
+msgid "Password"
+msgstr "Contraseña"
+
+#: src/core/scheduler.rs
+msgid "Password keyring is locked"
+msgstr "El almacén de contraseñas está bloqueado"
+
+#: src/ui/setup.rs
+msgid "Provider"
+msgstr "Proveedor"
+
+#: src/ui/main_window.rs
+msgid "Select an account to see its synchronization"
+msgstr "Selecciona una cuenta para ver su sincronización"
+
+#: src/ui/server_trash.rs
+msgid "Server Trash"
+msgstr "Papelera del servidor"
+
+#: src/ui/main_window.rs
+msgid "Server, proxy and synchronization options for this account"
+msgstr "Opciones de servidor, proxy y sincronización para esta cuenta"
+
+#: src/ui/setup.rs
+msgid "Sign in by authorizing the app in your browser"
+msgstr "Inicia sesión autorizando la aplicación en tu navegador"
+
+#: src/ui/setup.rs
+msgid "Space"
+msgstr "Espacio"
+
+#: src/ui/setup.rs
+msgid "Sync provider"
+msgstr "Proveedor de sincronización"
+
+#: src/core/account_runtime.rs
+msgid "Synchronization blocked: password keyring is locked"
+msgstr "Sincronización bloqueada: el almacén de contraseñas está bloqueado"
+
+#: src/core/scheduler.rs
+msgid "Waiting for local changes to settle"
+msgstr "Esperando a que los cambios locales se asienten"
+
+#: src/ui/setup.rs
+msgid "Your complete file tree will be stored physically on this computer and synchronized in both directions."
+msgstr "Tu árbol de archivos completo se almacenará físicamente en este equipo y se sincronizará en ambas direcciones."
+
+#: src/ui/setup.rs
+msgid "opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization."
+msgstr "Falta opencloudcmd. Instala el paquete de escritorio de OpenCloud antes de la primera sincronización."
+
+
+#: src/core/scheduler.rs
+msgid "Automatic synchronization is off"
+msgstr "La sincronización automática está desactivada"
+
+#: src/ui/main_window.rs
+msgid "Connected. Add folders from Settings."
+msgstr "Conectado. Añade carpetas desde Ajustes."
+
+#: src/core/scheduler.rs
+msgid "Paused on battery"
+msgstr "En pausa por batería"
+
+#: src/core/scheduler.rs
+msgid "Synchronization is paused"
+msgstr "La sincronización está en pausa"
+
+#: src/core/scheduler.rs
+msgid "Synchronization scheduled"
+msgstr "Sincronización programada"
+
+#: src/core/scheduler.rs
+msgid "Synchronized with conflicts — review the log"
+msgstr "Sincronizado con conflictos: revisa el registro"
+
+#: src/core/scheduler.rs
+msgid "Synchronizing files…"
+msgstr "Sincronizando archivos…"
+
+#: src/core/scheduler.rs
+msgid "Waiting for a network connection"
+msgstr "Esperando una conexión de red"
+
+#: src/core/scheduler.rs
+msgid "Waiting for another account to finish…"
+msgstr "Esperando a que otra cuenta termine…"
+
+#: src/core/scheduler.rs
+msgid "Will pause after the current synchronization"
+msgstr "Se pausará al terminar la sincronización actual"

@@ -164,6 +164,160 @@ mod tests {
         }
     }
 
+    /// Issue #57: every `t("...")` literal in the crate must have a
+    /// non-empty Spanish translation in the embedded catalog, so a Spanish
+    /// user never silently falls back to English.
+    #[test]
+    fn every_translatable_literal_has_a_spanish_translation() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        // The two deliberate fallback fixtures in this module's tests.
+        let allowed = ["untranslated string", "not in the catalog"];
+        let mut scanned = 0usize;
+        let mut missing: Vec<String> = Vec::new();
+
+        let mut files = Vec::new();
+        let mut stack = vec![manifest.join("src")];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        assert!(!files.is_empty(), "the source tree must be found");
+
+        for path in &files {
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            // Doc and line comments may quote `t(...)` call shapes; drop
+            // whole-line comments so they are not scanned as call sites.
+            let text: String = text
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            for message in extract_translatable_literals(&text) {
+                if message.is_empty() || allowed.contains(&message.as_str()) {
+                    continue;
+                }
+                scanned += 1;
+                let translated = es::CATALOG
+                    .iter()
+                    .any(|(key, value)| *key == message && !value.is_empty());
+                if !translated {
+                    missing.push(format!("{}: {message:?}", path.display()));
+                }
+            }
+        }
+        assert!(
+            scanned > 300,
+            "the scan must cover the whole crate (only {scanned} literals found)"
+        );
+        assert!(
+            missing.is_empty(),
+            "missing Spanish translations:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    /// Extract the string literals passed to `t(...)` calls: one or more
+    /// adjacent Rust string literals (implicit concatenation) between the
+    /// opening parenthesis and the following `,` or `)`.
+    fn extract_translatable_literals(text: &str) -> Vec<String> {
+        fn is_ident(byte: u8) -> bool {
+            byte.is_ascii_alphanumeric() || byte == b'_'
+        }
+        let bytes = text.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'('
+                && i > 0
+                && bytes[i - 1] == b't'
+                && (i == 1 || !is_ident(bytes[i - 2]))
+            {
+                let mut cursor = i + 1;
+                let mut message = String::new();
+                let mut matched = false;
+                loop {
+                    // Skip whitespace between/around the literals.
+                    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                        cursor += 1;
+                    }
+                    if cursor < bytes.len() && bytes[cursor] == b'"' {
+                        cursor += 1;
+                        let mut literal = String::new();
+                        let mut closed = false;
+                        while cursor < bytes.len() {
+                            match bytes[cursor] {
+                                b'\\' if cursor + 1 < bytes.len() => {
+                                    let escaped = bytes[cursor + 1];
+                                    if escaped == b'\n' {
+                                        // Rust line continuation: swallow the
+                                        // newline and the following whitespace.
+                                        cursor += 2;
+                                        while cursor < bytes.len()
+                                            && bytes[cursor].is_ascii_whitespace()
+                                        {
+                                            cursor += 1;
+                                        }
+                                    } else {
+                                        literal.push(match escaped {
+                                            b'n' => '\n',
+                                            b't' => '\t',
+                                            b'r' => '\r',
+                                            other => other as char,
+                                        });
+                                        cursor += 2;
+                                    }
+                                }
+                                b'"' => {
+                                    cursor += 1;
+                                    closed = true;
+                                    break;
+                                }
+                                _ => {
+                                    // Advance over one full UTF-8 scalar.
+                                    let start = cursor;
+                                    cursor += 1;
+                                    while cursor < bytes.len() && bytes[cursor] & 0xC0 == 0x80 {
+                                        cursor += 1;
+                                    }
+                                    literal.push_str(&text[start..cursor]);
+                                }
+                            }
+                        }
+                        if !closed {
+                            break;
+                        }
+                        message.push_str(&literal);
+                        matched = true;
+                    } else {
+                        break;
+                    }
+                }
+                if matched
+                    && cursor < bytes.len()
+                    && (bytes[cursor] == b',' || bytes[cursor] == b')')
+                {
+                    out.push(message);
+                }
+                i = cursor.max(i + 1);
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
     #[test]
     fn environment_detection_selects_spanish() {
         let _env = crate::util::test_env::lock();
