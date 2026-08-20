@@ -1,15 +1,13 @@
 {
   "schema_version": 1,
-  "version": "0.88.0",
+  "version": "0.92.0",
   "mandatory": false,
-  "summary": "Per-state Lucide icons on folder rows, live run progress bar, pending-changes menu gating, and a keyring/auth state fix.",
+  "summary": "Official Lucide icons across the tray, folder rows and tray menu.",
   "changelog": [
-    "Folder rows show a Lucide glyph and tint per state instead of the old generic icons (issue #94).",
-    "Row status icons are sized at 22 px so they no longer look like empty circles.",
-    "The 'Synced in local' subtitle only appears while the folder is actually synchronized.",
-    "A slim green run-progress bar pulses under a folder row while it is syncing (issue #90).",
-    "The folder-row menu offers 'Pending changes…' only when a scan has found pending items (issue #92).",
-    "A locked password keyring is reported as such and retried, instead of being misread as missing credentials and showing 'Account Needs Attention' on every account (issue #98)."
+    "Folder rows use official Lucide icons with a 2 px stroke at 22 px (issue #100).",
+    "Tray status icons use official Lucide cloud glyphs with a 3 px stroke (issue #100).",
+    "Tray menu items use Lucide external-link and log-out icons (issue #100).",
+    "Old custom tray SVGs and the unused per-state glyph variants have been removed."
   ],
-  "released_at": "2026-08-20T19:00:00Z"
+  "released_at": "2026-08-20T21:00:00Z"
 }
