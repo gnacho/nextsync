@@ -41,9 +41,12 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
     }
 }
 
-/// The translated subtitle segment for a remote path ("Remote: {remote}").
+/// The translated subtitle segment for a synced folder ("Synced in local
+/// {folder}", issue #78). The folder is the remote path without its leading
+/// slash: the name is what matters, the slash is noise.
 pub fn remote_label(remote_path: &str) -> String {
-    t("Remote: {remote}").replace("{remote}", remote_path)
+    let folder = remote_path.trim_start_matches('/');
+    t("Synced in local {folder}").replace("{folder}", folder)
 }
 
 /// The translated suffix for a folder's local used space ("{size} local",
@@ -169,6 +172,9 @@ impl FolderStatusRow {
             .activatable(true)
             .selectable(false)
             .build();
+        // The bold folder name (issue #78) comes from the app-wide style
+        // provider; the internal title label has no public handle.
+        row.add_css_class("folder-source");
 
         let icon = gtk4::Image::builder()
             .icon_name("folder-symbolic")
@@ -414,7 +420,8 @@ mod tests {
         assert_eq!(label, "Sincronizado");
         let (_, label) = folder_status_presentation(AppState::Offline);
         assert_eq!(label, "Sin conexión");
-        assert_eq!(remote_label("/docs"), "Remoto: /docs");
+        assert_eq!(remote_label("/docs"), "Sincronizado en local docs");
+        assert_eq!(remote_label("docs"), "Sincronizado en local docs");
         reset_locale();
     }
 
@@ -496,7 +503,7 @@ mod tests {
             assert_eq!(row.row.title(), "a");
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Remote: /docs")
+                Some("Synchronized · Synced in local docs")
             );
             // The local-size suffix stays hidden until a size arrives and
             // leaves the subtitle alone (issue #43).
@@ -506,7 +513,7 @@ mod tests {
             assert!(row.local_size.is_visible());
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Remote: /docs")
+                Some("Synchronized · Synced in local docs")
             );
             row.set_local_size("");
             assert!(!row.local_size.is_visible());

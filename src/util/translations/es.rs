@@ -365,6 +365,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Sync Now", "Sincronizar ahora"),
     ("Sync Once", "Sincronizar una vez"),
     ("Sync provider", "Proveedor de sincronización"),
+    ("Synced in local {folder}", "Sincronizado en local {folder}"),
     ("Synchronization", "Sincronización"),
     ("Synchronization Engine", "Motor de sincronización"),
     ("Synchronization Error", "Error de sincronización"),

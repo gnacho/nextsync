@@ -36,6 +36,21 @@ fn main() {
         .application_id(APPLICATION_ID)
         .build();
 
+    // App-wide style: the folder rows show their title in bold (issue #78).
+    // The internal title label has no public handle, so the weight is set
+    // through CSS on every folder-source row.
+    if let Some(display) = gtk4::gdk::Display::default() {
+        let provider = gtk4::CssProvider::new();
+        provider.load_from_bytes(&gtk4::glib::Bytes::from(
+            "row.folder-source .title label { font-weight: 700; }".as_bytes(),
+        ));
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+
     let window_slot: WindowSlot = Rc::new(RefCell::new(None));
     let tray_slot: TraySlot = Rc::new(RefCell::new(None));
     let tray_subscription: TraySubscriptionSlot = Rc::new(RefCell::new(None));
