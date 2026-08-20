@@ -1393,6 +1393,13 @@ impl MainWindow {
             if let Some(mut sub) = view._subscription.take() {
                 sub.unsubscribe();
             }
+            // The per-folder subscriptions capture row widgets that leave the
+            // tree when the view is dropped; without an explicit unsubscribe
+            // the callbacks stay registered on the state controllers and keep
+            // touching detached widgets (intermittent GTK layout crash).
+            for sub in view._folder_subscriptions.iter_mut() {
+                sub.unsubscribe();
+            }
             self.content_stack.remove(&view.root);
         }
         let Some(account_id) = account_id else {
