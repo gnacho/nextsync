@@ -27,7 +27,8 @@
 //! The item publishes the bare themed icon name and lets the tray host resolve
 //! it, mirroring the fix #18 decision of the Python client (no rasterized
 //! pixmaps). The monochrome SVGs (`nextsync-tray-cloud.svg`,
-//! `nextsync-tray-cloud-check.svg`, `nextsync-tray-cloud-off.svg`,
+//! `nextsync-tray-cloud-check.svg`, `nextsync-tray-cloud-sync.svg`,
+//! `nextsync-tray-cloud-alert.svg`, `nextsync-tray-cloud-off.svg`,
 //! `nextsync-status-<key>-symbolic.svg`) are
 //! installed into the hicolor symbolic theme by the packaging (Task 6.2).
 
@@ -79,17 +80,20 @@ pub struct TrayCallbacks {
 
 /// Icon name published on the StatusNotifier item for a state.
 ///
-/// Mirrors `StatusNotifier._tray_icon_name` in tray.py (v0.4.0) with one
-/// addition: an unconfigured install shows the struck-out cloud so the user
-/// is not left guessing that sync is merely paused, and the all-synced
-/// aggregate (`icon_key` "ok", IdleOk) shows a cloud with a check so healthy
-/// is visible at a glance; every other state (including `Offline`) uses the
-/// plain cloud glyph.
+/// One glyph per situation (issues #76 and #87): unconfigured shows the
+/// crossed-out cloud, the all-synced aggregate (`icon_key` "ok") a cloud
+/// with a check, syncing states (`icon_key` "syncing") the cloud-sync
+/// swirl, and problem states (`icon_key` "error") cloud-alert. Everything
+/// else (paused, battery, plain offline) keeps the plain cloud.
 pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'static str {
     if presentation.icon_key == "offline" && state == AppState::Unconfigured {
         "nextsync-tray-cloud-off"
     } else if presentation.icon_key == "ok" {
         "nextsync-tray-cloud-check"
+    } else if presentation.icon_key == "syncing" {
+        "nextsync-tray-cloud-sync"
+    } else if presentation.icon_key == "error" {
+        "nextsync-tray-cloud-alert"
     } else {
         "nextsync-tray-cloud"
     }
@@ -435,11 +439,21 @@ mod tests {
         let (idle, _rx) = item_with(AppState::IdleOk);
         assert_eq!(idle.icon_name(), "nextsync-tray-cloud-check");
 
-        // Paused and error states keep the plain cloud.
+        // A running or queued sync shows the swirl (issue #87).
+        let (syncing, _rx) = item_with(AppState::Syncing);
+        assert_eq!(syncing.icon_name(), "nextsync-tray-cloud-sync");
+        let (queued, _rx) = item_with(AppState::SyncQueued);
+        assert_eq!(queued.icon_name(), "nextsync-tray-cloud-sync");
+
+        // Problem states show cloud-alert (issue #87).
+        let (error, _rx) = item_with(AppState::Error);
+        assert_eq!(error.icon_name(), "nextsync-tray-cloud-alert");
+        let (auth, _rx) = item_with(AppState::AuthRequired);
+        assert_eq!(auth.icon_name(), "nextsync-tray-cloud-alert");
+
+        // Paused keeps the plain cloud.
         let (paused, _rx) = item_with(AppState::PausedUser);
         assert_eq!(paused.icon_name(), "nextsync-tray-cloud");
-        let (error, _rx) = item_with(AppState::Error);
-        assert_eq!(error.icon_name(), "nextsync-tray-cloud");
     }
 
     #[test]
