@@ -457,6 +457,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Waiting for another account to finish…", "Esperando a que otra cuenta termine…"),
     ("Waiting for authorization in your browser…", "Esperando autorización en el navegador…"),
     ("Waiting for local changes to settle", "Esperando a que los cambios locales se asienten"),
+    ("Waiting to synchronize", "Esperando para sincronizar"),
     ("What's New", "Novedades"),
     ("When a remote folder is configured, the --path argument is passed to nextcloudcmd; leaving the field as / keeps the previous root-to-root behaviour.", "Cuando se configura una carpeta remota, se pasa el argumento --path a nextcloudcmd; dejar el campo como / mantiene el comportamiento anterior de raíz a raíz."),
     ("Wi-Fi", "Wi-Fi"),

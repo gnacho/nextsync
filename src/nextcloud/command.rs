@@ -158,7 +158,12 @@ const AUTH_ERROR_MARKERS: [&str; 6] = [
 ];
 
 /// Text markers that indicate a conflicted copy was created, in lower case.
-const CONFLICT_MARKERS: [&str; 3] = ["conflict", "conflicted copy", "csync_exclude_conflict"];
+/// Deliberately no bare "conflict": with progress logging enabled, ordinary
+/// file names can contain the word (a test fixture called
+/// file_case_conflict.txt does). The discovery instruction token lives in
+/// parsed progress lines and reaches the classifier through the explicit
+/// conflict signal instead.
+const CONFLICT_MARKERS: [&str; 2] = ["conflicted copy", "csync_exclude_conflict"];
 
 /// Outcome categories of a finished `nextcloudcmd` run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +179,19 @@ pub enum Classification {
 }
 
 impl Classification {
+    /// Fold the engine's explicit conflict signal (parsed progress lines
+    /// with the discovery instruction token or a created conflicted copy)
+    /// into this classification: a signal upgrades a plain success to
+    /// Conflict and never downgrades anything.
+    #[must_use]
+    pub const fn with_conflict_signal(self, signal: bool) -> Self {
+        if signal && matches!(self, Self::Success) {
+            Self::Conflict
+        } else {
+            self
+        }
+    }
+
     /// Stable machine-readable name (Python `BoundedOutputCapture` labels).
     pub const fn as_str(self) -> &'static str {
         match self {

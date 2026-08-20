@@ -358,11 +358,18 @@ fn engine_thread(
         spec.to_command()
     };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    // Qt writes its debug output straight to the systemd journal via
-    // sd_journal_send when it detects systemd, bypassing the pipes; the
-    // per-file progress would never reach the parser. Forcing text logging
-    // on stderr brings it into the drained pipe instead.
+    // Under systemd Qt sends its debug output straight to the journal via
+    // sd_journal_send, bypassing the pipes, and without the journal those
+    // debug categories are off by default. Force text logging and enable
+    // exactly the two categories that carry per-file progress; the rest stay
+    // off so benign lines (a file named "file_case_conflict.txt", a push
+    // notification probe saying "authentication failed") cannot trip the
+    // output classifiers.
     command.env("QT_FORCE_STDERR_LOGGING", "1");
+    command.env(
+        "QT_LOGGING_RULES",
+        "nextcloud.sync.discovery.debug=true;nextcloud.sync.propagator.debug=true",
+    );
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => return EngineRun::Direct(SyncOutcome::Failed),
@@ -372,21 +379,36 @@ fn engine_thread(
     *process.lock().expect("process mutex poisoned") = Some(child);
     let capture = Arc::new(Mutex::new(BoundedOutputCapture::new(DEFAULT_MAX_LINES)));
     let processed = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let conflict_signal = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stdout_handle = drain_stream(
         stdout,
         progress.clone(),
         Arc::clone(&capture),
         Arc::clone(&processed),
+        Arc::clone(&conflict_signal),
     );
-    let stderr_handle = drain_stream(stderr, progress, capture.clone(), processed);
+    let stderr_handle = drain_stream(
+        stderr,
+        progress,
+        capture.clone(),
+        processed.clone(),
+        conflict_signal.clone(),
+    );
     let exit_code = wait_for_exit(&process);
     let _ = stdout_handle.join();
     let _ = stderr_handle.join();
+    // Ops diagnostics: how many progress events the run produced (visible in
+    // the user journal through the app's stderr).
+    eprintln!(
+        "[nextsync] progress events parsed: {}",
+        processed.load(std::sync::atomic::Ordering::Relaxed)
+    );
     let output = capture.lock().expect("capture mutex poisoned").output();
     let classification = capture
         .lock()
         .expect("capture mutex poisoned")
-        .classification(exit_code);
+        .classification(exit_code)
+        .with_conflict_signal(conflict_signal.load(std::sync::atomic::Ordering::Relaxed));
     let result = SyncResult {
         exit_code,
         duration: started.elapsed(),
@@ -405,6 +427,7 @@ fn drain_stream(
     progress: async_channel::Sender<SyncProgress>,
     capture: Arc<Mutex<BoundedOutputCapture>>,
     processed: Arc<std::sync::atomic::AtomicU32>,
+    conflict_signal: Arc<std::sync::atomic::AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stream);
@@ -420,11 +443,19 @@ fn drain_stream(
                         path: parsed.path,
                         processed,
                     });
+                    // The real conflict signal for a run lives in the parsed
+                    // lines: the discovery instruction token and the
+                    // conflicted-copy file names the propagator creates.
+                    if line.contains("CSYNC_INSTRUCTION_CONFLICT")
+                        || line.contains("(conflicted copy ")
+                    {
+                        conflict_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     // Progress lines stay out of the diagnostic tail: the
                     // discovery flood (14k+ lines on a first sync) would
-                    // drown the end-of-run markers and its literal
-                    // CSYNC_INSTRUCTION_CONFLICT token would trip the
-                    // conflict classifier on every run.
+                    // drown the end-of-run markers, and their file names
+                    // could trip the classifiers (a file literally named
+                    // "file_case_conflict.txt" exists in the wild).
                 }
                 None => {
                     capture.lock().expect("capture mutex poisoned").feed(&line);

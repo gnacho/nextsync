@@ -29,7 +29,7 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
         AppState::IdleOk => ("emblem-ok-symbolic", t("Synchronized")),
         AppState::IdleManualOnly => ("media-playback-pause-symbolic", t("Automatic Sync Is Off")),
         AppState::IdleNotSynced => ("appointment-soon-symbolic", t("Not Synchronized Yet")),
-        AppState::SyncQueued => ("appointment-soon-symbolic", t("Synchronization Scheduled")),
+        AppState::SyncQueued => ("appointment-soon-symbolic", t("Waiting to synchronize")),
         AppState::Syncing => ("emblem-synchronizing-symbolic", t("Synchronizing…")),
         AppState::PausedUser => ("media-playback-pause-symbolic", t("Paused")),
         AppState::PausedBattery => ("battery-symbolic", t("Paused on Battery")),
@@ -410,7 +410,10 @@ fn render(
         spinner.stop();
     }
     let mut parts = vec![status.to_string()];
-    if !remote_path.is_empty() {
+    // The synced-in-local segment belongs to the synchronized state only:
+    // with the green check visible. While queued, syncing or in trouble the
+    // line would read as a stale claim.
+    if !remote_path.is_empty() && snapshot.state == AppState::IdleOk {
         parts.push(remote_label(remote_path));
     }
     if let Some(last_sync) = last_sync {
@@ -559,7 +562,7 @@ mod tests {
             let state = StateController::new(AppState::IdleOk);
             let row = FolderStatusRow::new(
                 folder,
-                Some(state),
+                Some(state.clone()),
                 FolderRowCallbacks::default(),
                 None,
                 None,
@@ -581,6 +584,18 @@ mod tests {
             );
             row.set_local_size("");
             assert!(!row.local_size.is_visible());
+            // Outside the synchronized state the synced-in-local segment
+            // disappears: queued and syncing rows show only the status.
+            state.set(AppState::SyncQueued, "queued");
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Waiting to synchronize")
+            );
+            state.set(AppState::IdleOk, "ok");
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Synchronized · Synced in local docs")
+            );
             reset_locale();
         });
     }

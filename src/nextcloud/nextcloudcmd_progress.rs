@@ -82,7 +82,7 @@ const ACTION_ALIASES: [(&str, &str); 13] = [
 /// Returns `None` for lines that do not look like progress so the caller can
 /// forward them verbatim without guessing.
 pub fn parse_progress_line(line: &str) -> Option<SyncProgress> {
-    let stripped = line.trim();
+    let stripped = strip_log_prefix(line.trim());
     if stripped.is_empty() {
         return None;
     }
@@ -106,6 +106,21 @@ pub fn parse_progress_line(line: &str) -> Option<SyncProgress> {
         .iter()
         .find_map(|(key, value)| (*key == raw_action).then_some(value.to_string()))?;
     Some(SyncProgress::new(action, path.to_string()))
+}
+
+/// Strip the Qt text-logging prefix the binary emits under
+/// `QT_FORCE_STDERR_LOGGING`: a timestamp, `[ level category ]` and, for
+/// debug lines, a second `[ function ]` bracket. Both shapes end the prefix
+/// with `]:\t` right before the message, so everything up to the LAST
+/// `]:\t` is prefix on lines that carry one.
+fn strip_log_prefix(line: &str) -> &str {
+    if !line.contains(" [ ") {
+        return line;
+    }
+    match line.rfind("]:\t") {
+        Some(position) => &line[position + 3..],
+        None => line,
+    }
 }
 
 /// `Completed propagation of "x" by OCC::PropagateDownloadFile(...) with
@@ -281,6 +296,31 @@ mod tests {
         )
         .expect("a real STARTING line should parse");
         assert_eq!(starting.action, "checking");
+    }
+
+    #[test]
+    fn parses_qt_text_logging_prefixed_lines() {
+        // Under QT_FORCE_STDERR_LOGGING every message carries a timestamp,
+        // a `[ level category ]` bracket and (debug lines) a second
+        // `[ function ]` bracket before the message itself.
+        let starting = parse_progress_line(
+            "08-20 17:29:00:572 [ info nextcloud.sync.discovery ]:\tSTARTING \"Gestion\" OCC::ProcessDirectoryJob::NormalQuery \"Gestion\" OCC::ProcessDirectoryJob::ParentDontExist",
+        )
+        .expect("a prefixed info line should parse");
+        assert_eq!(starting.action, "checking");
+        assert_eq!(starting.path, "Gestion");
+
+        let completed = parse_progress_line(
+            "08-20 17:30:12:750 [ debug nextcloud.sync.propagator ]\t[ OCC::PropagateDownloadFile::start ]:\tCompleted propagation of \"Akon - Right Now Na Na Na.mp3\" by OCC::PropagateDownloadFile(0x55acf9c79ec0) with status OCC::SyncFileItem::Success",
+        )
+        .expect("a prefixed debug propagation line should parse");
+        assert_eq!(completed.action, "download");
+        assert_eq!(completed.path, "Akon - Right Now Na Na Na.mp3");
+
+        // The prefix must not break the plain colon format either.
+        let plain =
+            parse_progress_line("Downloading: /tmp/a.pdf").expect("plain line still parses");
+        assert_eq!(plain.action, "download");
     }
 
     #[test]
