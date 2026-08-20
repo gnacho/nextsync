@@ -1068,7 +1068,35 @@ fn present_add_folder_dialog(
     } else {
         &previous_remote
     });
+    // Existing remote folders as a dropdown (issue #82), with the manual
+    // entry as the source of truth for new paths.
+    let remote_list = gtk4::StringList::new(&[]);
+    let picker = gtk4::DropDown::from_strings(&[]);
+    picker.set_model(Some(&remote_list));
+    picker.set_selected(u32::MAX);
+    picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
+    let entry_for_pick = remote_entry.clone();
+    picker.connect_selected_notify(move |picker| {
+        if let Some(item) = picker.selected_item() {
+            if let Ok(item) = item.downcast::<gtk4::StringObject>() {
+                entry_for_pick.set_text(&item.string());
+                picker.set_selected(u32::MAX);
+            }
+        }
+    });
+    remote_entry.add_suffix(&picker);
     entry_box.append(&remote_entry);
+
+    let picker_status = gtk4::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["caption"])
+        .build();
+    entry_box.append(&picker_status);
+
+    if !opencloud {
+        populate_wizard_remote_picker(ctx, &remote_list, &picker_status);
+    }
 
     if let Some(message) = error {
         entry_box.append(&error_label(&message));
@@ -1728,6 +1756,48 @@ fn fold_home_with(home: Option<&str>, path: &str) -> String {
         return format!("~/{rest}");
     }
     path.to_string()
+}
+
+/// Fill the wizard's remote-folder dropdown with the server's existing
+/// folders (issue #82). The credentials come from the wizard itself: the
+/// user signed in on the previous page but the account is not persisted
+/// yet, so there is nothing in the keyring to look up. Nextcloud only; the
+/// OpenCloud wizard keeps the manual entry until its listing lands.
+fn populate_wizard_remote_picker(
+    ctx: &SetupContext,
+    list: &gtk4::StringList,
+    status: &gtk4::Label,
+) {
+    let (server, username) = {
+        let state = ctx.state.borrow();
+        (state.server.clone(), state.username.clone())
+    };
+    let password = ctx.widgets.password_entry.text().to_string();
+    let list = list.clone();
+    let status = status.clone();
+    let handle = gio::spawn_blocking(move || {
+        if server.is_empty() || username.is_empty() || password.is_empty() {
+            return None;
+        }
+        crate::nextcloud::api::NextcloudApi::new()
+            .list_remote_folders(&server, &username, &password)
+            .ok()
+    });
+    glib::spawn_future_local(async move {
+        let Ok(folders) = handle.await else {
+            return;
+        };
+        match folders {
+            Some(folders) => {
+                for folder in folders {
+                    list.append(&folder);
+                }
+            }
+            // The dialog stays usable: the manual entry is the source of
+            // truth, an empty dropdown just offers no shortcuts.
+            None => status.set_text(t("Could not list the remote folders.")),
+        }
+    });
 }
 
 /// Present a folder chooser and write the selection into the entry row.

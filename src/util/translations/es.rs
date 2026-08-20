@@ -97,6 +97,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Could Not Add the Account", "No se pudo añadir la cuenta"),
     ("Could Not Check for Updates", "No se pudieron buscar actualizaciones"),
     ("Could not authenticate with the server.", "No se pudo autenticar con el servidor."),
+    ("Could not list the remote folders.", "No se pudieron listar las carpetas remotas."),
     ("Could not reach the server.", "No se pudo contactar con el servidor."),
     ("Could not remove the folder", "No se pudo eliminar la carpeta"),
     ("Could not save credentials.", "No se han podido guardar las credenciales."),
