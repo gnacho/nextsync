@@ -62,6 +62,18 @@ package() {
     local colored=(
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
+        nextsync-menu-log
+        nextsync-menu-open
+        nextsync-menu-quit
+        nextsync-row-battery
+        nextsync-row-error
+        nextsync-row-not-configured
+        nextsync-row-offline
+        nextsync-row-ok
+        nextsync-row-paused
+        nextsync-row-syncing
+        nextsync-state-globe
+        nextsync-state-globe-off
         nextsync-tray-cloud
         nextsync-tray-cloud-alert
         nextsync-tray-cloud-check
@@ -80,19 +92,7 @@ package() {
         io.github.gnacho.nextsync-symbolic
         nextsync-info-symbolic
         nextsync-list-checks-symbolic
-        nextsync-menu-log-symbolic
-        nextsync-menu-open-symbolic
-        nextsync-menu-quit-symbolic
-        nextsync-row-battery-symbolic
-        nextsync-row-circle-check-symbolic
-        nextsync-row-circle-pause-symbolic
-        nextsync-row-cloud-alert-symbolic
-        nextsync-row-cloud-off-symbolic
-        nextsync-row-cloud-sync-symbolic
-        nextsync-row-help-circle-symbolic
         nextsync-settings-2-symbolic
-        nextsync-state-globe-off-symbolic
-        nextsync-state-globe-symbolic
         nextsync-status-battery-symbolic
         nextsync-status-error-symbolic
         nextsync-status-offline-symbolic

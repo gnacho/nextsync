@@ -25,37 +25,19 @@ use crate::util::i18n::t;
 /// `'static` lifetimes.
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("nextsync-row-help-circle-symbolic", t("Not Configured")),
-        AppState::IdleOk => ("nextsync-row-circle-check-symbolic", t("Synchronized")),
-        AppState::IdleManualOnly => (
-            "nextsync-row-circle-pause-symbolic",
-            t("Automatic Sync Is Off"),
-        ),
-        AppState::IdleNotSynced => (
-            "nextsync-row-circle-pause-symbolic",
-            t("Not Synchronized Yet"),
-        ),
-        AppState::SyncQueued => (
-            "nextsync-row-circle-pause-symbolic",
-            t("Synchronization Scheduled"),
-        ),
-        AppState::Syncing => ("nextsync-row-cloud-sync-symbolic", t("Synchronizing…")),
-        AppState::PausedUser => ("nextsync-row-circle-pause-symbolic", t("Paused")),
-        AppState::PausedBattery => ("nextsync-row-battery-symbolic", t("Paused on Battery")),
-        AppState::Offline => ("nextsync-row-cloud-off-symbolic", t("Offline")),
-        AppState::Error => (
-            "nextsync-row-cloud-alert-symbolic",
-            t("Synchronization Error"),
-        ),
-        AppState::AuthRequired => (
-            "nextsync-row-cloud-alert-symbolic",
-            t("Account Needs Attention"),
-        ),
-        AppState::KeyringLocked => (
-            "nextsync-row-cloud-alert-symbolic",
-            t("Password Keyring Locked"),
-        ),
-        AppState::DeleteReview => ("nextsync-row-cloud-alert-symbolic", t("Review Deletions")),
+        AppState::Unconfigured => ("nextsync-row-not-configured", t("Not Configured")),
+        AppState::IdleOk => ("nextsync-row-ok", t("Synchronized")),
+        AppState::IdleManualOnly => ("nextsync-row-paused", t("Automatic Sync Is Off")),
+        AppState::IdleNotSynced => ("nextsync-row-paused", t("Not Synchronized Yet")),
+        AppState::SyncQueued => ("nextsync-row-paused", t("Synchronization Scheduled")),
+        AppState::Syncing => ("nextsync-row-syncing", t("Synchronizing…")),
+        AppState::PausedUser => ("nextsync-row-paused", t("Paused")),
+        AppState::PausedBattery => ("nextsync-row-battery", t("Paused on Battery")),
+        AppState::Offline => ("nextsync-row-offline", t("Offline")),
+        AppState::Error => ("nextsync-row-error", t("Synchronization Error")),
+        AppState::AuthRequired => ("nextsync-row-error", t("Account Needs Attention")),
+        AppState::KeyringLocked => ("nextsync-row-error", t("Password Keyring Locked")),
+        AppState::DeleteReview => ("nextsync-row-error", t("Review Deletions")),
     }
 }
 
@@ -496,16 +478,10 @@ fn render(
     let (icon_name, status) = folder_status_presentation(snapshot.state);
     let syncing = snapshot.state == AppState::Syncing;
     let queued = snapshot.state == AppState::SyncQueued;
-    // Use the theme's native icons; while syncing the spinner is the status.
+    // The state glyph carries its own color (fixed-color SVGs), so no CSS
+    // tint class is needed; while syncing the spinner is the status.
     icon.set_visible(!syncing);
     icon.set_icon_name(Some(icon_name));
-    // Issue #99: avoid an invalid state where the icon carries both the
-    // success and error tint classes at the same time.
-    icon.remove_css_class("success");
-    icon.remove_css_class("error");
-    if let Some(color) = folder_status_color(snapshot.state) {
-        icon.add_css_class(color);
-    }
     spinner.set_visible(syncing);
     if syncing {
         spinner.start();
@@ -567,7 +543,7 @@ mod tests {
     fn idle_ok_presents_as_synchronized() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::IdleOk);
-        assert_eq!(icon, "nextsync-row-circle-check-symbolic");
+        assert_eq!(icon, "nextsync-row-ok");
         assert_eq!(label, "Synchronized");
         assert_eq!(folder_status_color(AppState::IdleOk), Some("success"));
         reset_locale();
@@ -577,7 +553,7 @@ mod tests {
     fn syncing_presents_with_spinner_icon() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::Syncing);
-        assert_eq!(icon, "nextsync-row-cloud-sync-symbolic");
+        assert_eq!(icon, "nextsync-row-syncing");
         assert_eq!(label, "Synchronizing…");
         assert_eq!(folder_status_color(AppState::Syncing), None);
         reset_locale();
@@ -588,7 +564,7 @@ mod tests {
         // Native theme icons; attention states turn red.
         assert_eq!(
             folder_status_presentation(AppState::SyncQueued).0,
-            "nextsync-row-circle-pause-symbolic"
+            "nextsync-row-paused"
         );
         assert_eq!(folder_status_color(AppState::SyncQueued), None);
         for state in [
@@ -597,15 +573,16 @@ mod tests {
             AppState::KeyringLocked,
             AppState::DeleteReview,
         ] {
-            assert!(
-                folder_status_presentation(state).0.ends_with("-symbolic"),
+            assert_eq!(
+                folder_status_presentation(state).0,
+                "nextsync-row-error",
                 "state {state:?}"
             );
             assert_eq!(folder_status_color(state), Some("error"));
         }
         assert_eq!(
             folder_status_presentation(AppState::Offline).0,
-            "nextsync-row-cloud-off-symbolic"
+            "nextsync-row-offline"
         );
     }
 

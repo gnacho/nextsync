@@ -166,7 +166,7 @@ impl TrayItem {
         let quit = self.actions.clone();
         let mut items: Vec<MenuItem<Self>> = vec![StandardItem {
             label: t("Open NextSync").into(),
-            icon_name: "nextsync-menu-open-symbolic".into(),
+            icon_name: "nextsync-menu-open".into(),
             activate: Box::new(move |_this: &mut Self| {
                 let _ = open.try_send(TrayAction::Open);
             }),
@@ -181,7 +181,7 @@ impl TrayItem {
                     // and Conflicts"): renaming the menu item must not change
                     // the window title (issue #32).
                     label: t("Log").into(),
-                    icon_name: "nextsync-menu-log-symbolic".into(),
+                    icon_name: "nextsync-menu-log".into(),
                     activate: Box::new(move |_this: &mut Self| {
                         let _ = conflicts.try_send(TrayAction::Conflicts);
                     }),
@@ -193,7 +193,7 @@ impl TrayItem {
         items.push(
             StandardItem {
                 label: t("Quit").into(),
-                icon_name: "nextsync-menu-quit-symbolic".into(),
+                icon_name: "nextsync-menu-quit".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = quit.try_send(TrayAction::Quit);
                 }),
