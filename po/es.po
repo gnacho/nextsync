@@ -2617,3 +2617,7 @@ msgstr "No hay credenciales guardadas para esta cuenta."
 #: src/core/account_runtime.rs
 msgid "Synchronization blocked: no saved credentials"
 msgstr "Sincronización bloqueada: no hay credenciales guardadas"
+
+#: src/ui/folder_status.rs
+msgid "{action} · {count} files"
+msgstr "{action} · {count} archivos"

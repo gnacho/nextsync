@@ -85,7 +85,7 @@ pub fn progress_line_text(
     }
     .replace("{file}", file);
     if progress.processed > 0 {
-        t("{action} · {count}")
+        t("{action} · {count} files")
             .replace("{action}", &action)
             .replace("{count}", &progress.processed.to_string())
     } else {
@@ -241,16 +241,16 @@ impl FolderStatusRow {
             .build();
         row.add_suffix(&local_size);
 
-        // Live per-file progress (issue #86): small dim text next to the
-        // status icon while a run is in flight, gone when it ends.
+        // Live per-file progress (issue #86): a full-width caption under the
+        // run bar, matching the bar's width while a run is in flight, gone
+        // when it ends.
         let progress_label = gtk4::Label::builder()
             .css_classes(["dim-label", "caption"])
-            .valign(gtk4::Align::Center)
-            .ellipsize(gtk4::pango::EllipsizeMode::Middle)
-            .max_width_chars(28)
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
             .visible(false)
             .build();
-        row.add_suffix(&progress_label);
 
         let spinner = gtk4::Spinner::builder().build();
         spinner.set_visible(false);
@@ -258,8 +258,9 @@ impl FolderStatusRow {
 
         // The green run progress under the row (issue #90): a slim
         // indeterminate bar while the run is in flight (the engine reports
-        // operations done, never a total), gone when it ends. The row and
-        // the bar share a vertical slot that the folder list appends.
+        // operations done, never a total), gone when it ends. The row, the
+        // bar and the progress caption share a vertical slot that the folder
+        // list appends.
         let progress_bar = gtk4::ProgressBar::builder()
             .hexpand(true)
             .valign(gtk4::Align::End)
@@ -273,6 +274,7 @@ impl FolderStatusRow {
             .build();
         slot.append(&row);
         slot.append(&progress_bar);
+        slot.append(&progress_label);
 
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("view-more-symbolic")
@@ -652,7 +654,10 @@ mod tests {
             crate::nextcloud::nextcloudcmd_progress::SyncProgress::new("upload", "/tmp/a/b.txt");
         assert_eq!(progress_line_text(&progress, "b.txt"), "subiendo b.txt");
         progress.processed = 7;
-        assert_eq!(progress_line_text(&progress, "b.txt"), "subiendo b.txt · 7");
+        assert_eq!(
+            progress_line_text(&progress, "b.txt"),
+            "subiendo b.txt · 7 archivos"
+        );
         reset_locale();
     }
 
@@ -759,7 +764,7 @@ mod tests {
                 processed: 3,
             }));
             assert!(row.progress_label.is_visible());
-            assert_eq!(row.progress_label.label(), "downloading song.mp3 · 3");
+            assert_eq!(row.progress_label.label(), "downloading song.mp3 · 3 files");
             state.set_progress(None);
             assert!(!row.progress_label.is_visible());
             reset_locale();

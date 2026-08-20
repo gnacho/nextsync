@@ -488,6 +488,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("uploading {file}", "subiendo {file}"),
     ("{account}: open NextSync to check the account credential.", "{account}: abre NextSync para comprobar la credencial de la cuenta."),
     ("{action} · {count}", "{action} · {count}"),
+    ("{action} · {count} files", "{action} · {count} archivos"),
     ("{count} changes in this release", "{count} cambios en esta versión"),
     ("{count} conflicted copy(ies) found in {folder}.", "Se encontraron {count} copia(s) en conflicto en {folder}."),
     ("{count} of {total} items were restored from the server trash.", "Se restauraron {count} de {total} elementos de la papelera del servidor."),
