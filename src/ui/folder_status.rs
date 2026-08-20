@@ -494,12 +494,14 @@ fn render(
     if syncing {
         progress_bar.pulse();
     }
-    let mut parts = vec![status.to_string()];
-    // The synced-in-local segment belongs to the synchronized state only:
-    // with the green check visible. While queued, syncing or in trouble the
-    // line would read as a stale claim.
+    // The synced-in-local segment belongs to the synchronized state only and
+    // already says "Synced in local {folder}", so the redundant "Synchronized"
+    // status is dropped there (issue #108): the green check already conveys it.
+    let mut parts: Vec<String> = Vec::new();
     if !remote_path.is_empty() && snapshot.state == AppState::IdleOk {
         parts.push(remote_label(remote_path));
+    } else {
+        parts.push(status.to_string());
     }
     if let Some(last_sync) = last_sync {
         parts.push(last_sync);
@@ -684,7 +686,7 @@ mod tests {
             assert_eq!(row.row.title(), "a");
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Synced in local docs")
+                Some("Synced in local docs")
             );
             // The local-size suffix stays hidden until a size arrives and
             // leaves the subtitle alone (issue #43).
@@ -694,7 +696,7 @@ mod tests {
             assert!(row.local_size.is_visible());
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Synced in local docs")
+                Some("Synced in local docs")
             );
             row.set_local_size("");
             assert!(!row.local_size.is_visible());
@@ -708,7 +710,7 @@ mod tests {
             state.set(AppState::IdleOk, "ok");
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Synced in local docs")
+                Some("Synced in local docs")
             );
             // Live progress (issue #86): a progress event shows the line,
             // clearing it hides the label again.
