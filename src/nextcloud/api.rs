@@ -544,7 +544,10 @@ impl NextcloudApi {
             }) {
                 continue;
             }
-            let name = entry.href_path.rsplit('/').next().unwrap_or_default();
+            // WebDAV hrefs arrive percent-encoded; decode so pickers show
+            // and store the real name (issue #88). The engine re-encodes
+            // when building URLs.
+            let name = percent_decode_path(entry.href_path.rsplit('/').next().unwrap_or_default());
             folders.push(format!("/{name}"));
         }
         folders.sort();
@@ -1003,6 +1006,31 @@ fn percent_encode_path(value: &str) -> String {
     encoded
 }
 
+/// Percent-decode a path segment: `%XX` escapes (and bare `+`, never used
+/// for spaces in paths) back to their bytes. WebDAV hrefs arrive encoded,
+/// so folder names must be decoded before display or storage (issue #88);
+/// the engine re-encodes when it builds URLs, keeping a single encoding
+/// end-to-end.
+fn percent_decode_path(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            // Two hex digits must follow the percent sign; anything else is
+            // kept literally.
+            if let Ok(byte) = u8::from_str_radix(&value[i + 1..i + 3], 16) {
+                decoded.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 /// Base URL of the per-user WebDAV root.
 fn dav_base(server: &str, username: &str) -> String {
     format!(
@@ -1231,6 +1259,13 @@ mod tests {
   </d:response>
   <d:response>
     <d:href>/remote.php/dav/files/alice/Photos/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/M%C3%BAsica%20Albums/</d:href>
     <d:propstat>
       <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
       <d:status>HTTP/1.1 200 OK</d:status>
@@ -1841,7 +1876,7 @@ mod tests {
         let folders = api
             .list_remote_folders("https://cloud.example.com", "alice", "secret")
             .unwrap();
-        assert_eq!(folders, ["/Documents", "/Photos"]);
+        assert_eq!(folders, ["/Documents", "/Música Albums", "/Photos"]);
     }
 
     #[test]
@@ -2340,8 +2375,24 @@ mod tests {
 
         let api = NextcloudApi::new();
         let folders = api.list_remote_folders(&base, "alice", "secret").unwrap();
-        assert_eq!(folders, ["/Documents", "/Photos"]);
+        // Percent-encoded hrefs decode to the real names (issue #88).
+        assert_eq!(folders, ["/Documents", "/Música Albums", "/Photos"]);
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn percent_decode_round_trips_spaces_and_accents() {
+        // The inverse of the encoder used when building URLs: decoding what
+        // the encoder produced must return the original, so the engine's
+        // single re-encoding yields exactly one %XX per special byte. The
+        // picker works with single-segment names (the folder name).
+        for name in ["Música Albums", "a b&c", "plain", "100% seguro", "üñïçø∂é"] {
+            let encoded = percent_encode_path(name);
+            assert_eq!(percent_decode_path(&encoded), name, "name: {name}");
+        }
+        // Malformed escapes and bare percents stay literal.
+        assert_eq!(percent_decode_path("100%"), "100%");
+        assert_eq!(percent_decode_path("%zz"), "%zz");
     }
 
     /// The real transport maps a local 401 to `AuthRejected`.
