@@ -318,6 +318,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Required Update", "Actualización obligatoria"),
     ("Reset the exclusion patterns to the recommended defaults", "Restablece los patrones de exclusión a los valores recomendados"),
     ("Resolve All Conflicts", "Resolver todos los conflictos"),
+    ("Resolve conflicts", "Resolver conflictos"),
     ("Restore All", "Restaurar todo"),
     ("Restore Defaults", "Restaurar valores predeterminados"),
     ("Restore from Nextcloud", "Restaurar desde Nextcloud"),

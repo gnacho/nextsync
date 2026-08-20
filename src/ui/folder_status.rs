@@ -173,6 +173,7 @@ pub struct FolderRowCallbacks {
     pub on_remove: Option<Rc<dyn Fn()>>,
     pub on_pending_changes: Option<Rc<dyn Fn()>>,
     pub on_review_deletions: Option<Rc<dyn Fn()>>,
+    pub on_resolve_conflicts: Option<Rc<dyn Fn()>>,
 }
 
 /// A GTK action row rendering one synchronized folder with live status.
@@ -294,6 +295,7 @@ impl FolderStatusRow {
             ("remove", callbacks.on_remove.clone()),
             ("pending-changes", callbacks.on_pending_changes.clone()),
             ("review-deletions", callbacks.on_review_deletions.clone()),
+            ("resolve-conflicts", callbacks.on_resolve_conflicts.clone()),
         ] {
             let Some(callback) = callback else { continue };
             let action = gio::SimpleAction::new(name, None);
@@ -317,6 +319,14 @@ impl FolderStatusRow {
         if actions.contains_key("force-sync") {
             let item = gio::MenuItem::new(Some(t("Force sync now")), Some("folder.force-sync"));
             item.set_icon(&gio::ThemedIcon::new("emblem-synchronizing-symbolic"));
+            menu.append_item(&item);
+        }
+        if actions.contains_key("resolve-conflicts") {
+            let item = gio::MenuItem::new(
+                Some(t("Resolve conflicts")),
+                Some("folder.resolve-conflicts"),
+            );
+            item.set_icon(&gio::ThemedIcon::new("nextsync-list-checks-symbolic"));
             menu.append_item(&item);
         }
         if actions.contains_key("toggle-pause") {

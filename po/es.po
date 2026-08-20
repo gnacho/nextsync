@@ -2593,3 +2593,7 @@ msgstr "Esperando a que otra cuenta termine…"
 #: src/core/scheduler.rs
 msgid "Will pause after the current synchronization"
 msgstr "Se pausará al terminar la sincronización actual"
+
+#: src/ui/folder_status.rs
+msgid "Resolve conflicts"
+msgstr "Resolver conflictos"

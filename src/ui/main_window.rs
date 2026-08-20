@@ -119,6 +119,9 @@ pub struct AccountCallbacks {
     /// Invoked when the user opens the deletion review for a folder (issue
     /// #105). Carries the account and folder ids.
     pub on_review_deletions: Option<PendingChangesCallback>,
+    /// Invoked when the user opens the conflict resolver for a folder (issue
+    /// #110). Carries the account and folder ids.
+    pub on_resolve_conflicts: Option<PendingChangesCallback>,
     /// Invoked when a fresh avatar was fetched and cached (issue #50).
     pub on_avatar_cached: Option<AvatarCachedCallback>,
 }
@@ -334,6 +337,16 @@ impl AccountView {
                 },
                 on_review_deletions: {
                     let cb = callbacks.on_review_deletions.clone();
+                    let folder_id = folder.id.clone();
+                    let account_id = account_id.clone();
+                    Some(Rc::new(move || {
+                        if let Some(cb) = &cb {
+                            cb(&account_id, &folder_id);
+                        }
+                    }))
+                },
+                on_resolve_conflicts: {
+                    let cb = callbacks.on_resolve_conflicts.clone();
                     let folder_id = folder.id.clone();
                     let account_id = account_id.clone();
                     Some(Rc::new(move || {
@@ -858,22 +871,37 @@ impl MainWindow {
     /// Open (or bring to front) the activity/conflicts window for the active
     /// account's first synchronized folder.
     pub fn show_conflicts(&mut self) {
+        let Some(account_id) = self.active_account_id.clone() else {
+            return;
+        };
+        let Some(folder_id) = self
+            .config
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .and_then(|account| account.folders.first())
+            .map(|folder| folder.id.clone())
+        else {
+            return;
+        };
+        self.show_conflicts_for(&account_id, &folder_id);
+    }
+
+    /// Open (or raise) the conflict resolver for one folder (issue #110).
+    pub fn show_conflicts_for(&mut self, account_id: &str, folder_id: &str) {
         if let Some(window) = &self.conflicts_window {
             window.present();
             return;
         }
-        let Some(account_id) = &self.active_account_id else {
-            return;
-        };
         let Some(account) = self
             .config
             .accounts
             .iter()
-            .find(|account| &account.id == account_id)
+            .find(|account| account.id == account_id)
         else {
             return;
         };
-        let Some(folder) = account.folders.first() else {
+        let Some(folder) = account.folders.iter().find(|folder| folder.id == folder_id) else {
             return;
         };
         let matcher = crate::core::exclusions::ExclusionMatcher::new(
@@ -1645,6 +1673,14 @@ impl MainWindow {
                 Some(Rc::new(move |account_id: &str, folder_id: &str| {
                     if let Some(main) = weak.upgrade() {
                         main.borrow().present_delete_review(account_id, folder_id);
+                    }
+                }))
+            },
+            on_resolve_conflicts: {
+                let weak = self.self_weak.clone();
+                Some(Rc::new(move |account_id: &str, folder_id: &str| {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().show_conflicts_for(account_id, folder_id);
                     }
                 }))
             },
