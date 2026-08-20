@@ -63,6 +63,7 @@ package() {
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
         nextsync-tray-cloud
+        nextsync-tray-cloud-check
         nextsync-tray-cloud-off
         nextsync-tray-settings
     )

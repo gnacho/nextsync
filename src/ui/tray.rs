@@ -27,7 +27,8 @@
 //! The item publishes the bare themed icon name and lets the tray host resolve
 //! it, mirroring the fix #18 decision of the Python client (no rasterized
 //! pixmaps). The monochrome SVGs (`nextsync-tray-cloud.svg`,
-//! `nextsync-tray-cloud-off.svg`, `nextsync-status-<key>-symbolic.svg`) are
+//! `nextsync-tray-cloud-check.svg`, `nextsync-tray-cloud-off.svg`,
+//! `nextsync-status-<key>-symbolic.svg`) are
 //! installed into the hicolor symbolic theme by the packaging (Task 6.2).
 
 use std::rc::Rc;
@@ -78,13 +79,17 @@ pub struct TrayCallbacks {
 
 /// Icon name published on the StatusNotifier item for a state.
 ///
-/// Mirrors `StatusNotifier._tray_icon_name` in tray.py (v0.4.0): an
-/// unconfigured install shows the struck-out cloud so the user is not left
-/// guessing that sync is merely paused; every other state (including
-/// `Offline`) uses the plain cloud glyph.
+/// Mirrors `StatusNotifier._tray_icon_name` in tray.py (v0.4.0) with one
+/// addition: an unconfigured install shows the struck-out cloud so the user
+/// is not left guessing that sync is merely paused, and the all-synced
+/// aggregate (`icon_key` "ok", IdleOk) shows a cloud with a check so healthy
+/// is visible at a glance; every other state (including `Offline`) uses the
+/// plain cloud glyph.
 pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'static str {
     if presentation.icon_key == "offline" && state == AppState::Unconfigured {
         "nextsync-tray-cloud-off"
+    } else if presentation.icon_key == "ok" {
+        "nextsync-tray-cloud-check"
     } else {
         "nextsync-tray-cloud"
     }
@@ -476,8 +481,15 @@ mod tests {
         let (offline, _rx) = item_with(AppState::Offline);
         assert_eq!(offline.icon_name(), "nextsync-tray-cloud");
 
+        // Everything synced and OK gets the cloud-check glyph (issue #76).
         let (idle, _rx) = item_with(AppState::IdleOk);
-        assert_eq!(idle.icon_name(), "nextsync-tray-cloud");
+        assert_eq!(idle.icon_name(), "nextsync-tray-cloud-check");
+
+        // Paused and error states keep the plain cloud.
+        let (paused, _rx) = item_with(AppState::PausedUser);
+        assert_eq!(paused.icon_name(), "nextsync-tray-cloud");
+        let (error, _rx) = item_with(AppState::Error);
+        assert_eq!(error.icon_name(), "nextsync-tray-cloud");
     }
 
     #[test]
