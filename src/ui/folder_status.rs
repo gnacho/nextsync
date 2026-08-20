@@ -596,6 +596,17 @@ mod tests {
                 row.row.subtitle().as_deref(),
                 Some("Synchronized · Synced in local docs")
             );
+            // Live progress (issue #86): a progress event shows the line,
+            // clearing it hides the label again.
+            state.set_progress(Some(crate::nextcloud::sync_engine::SyncProgress {
+                action: "download".to_string(),
+                path: "/tmp/a/song.mp3".to_string(),
+                processed: 3,
+            }));
+            assert!(row.progress_label.is_visible());
+            assert_eq!(row.progress_label.label(), "downloading song.mp3 · 3");
+            state.set_progress(None);
+            assert!(!row.progress_label.is_visible());
             reset_locale();
         });
     }
