@@ -237,7 +237,7 @@ impl FolderStatusRow {
 
         let icon = gtk4::Image::builder()
             .icon_name("folder-symbolic")
-            .pixel_size(16)
+            .pixel_size(22)
             .build();
         row.add_prefix(&icon);
 
@@ -443,7 +443,10 @@ fn render(
     spinner.set_visible(false);
     spinner.stop();
     let mut parts = vec![status.to_string()];
-    if !remote_path.is_empty() {
+    // The synced-in-local segment belongs to the synchronized state only:
+    // with the green check visible. While queued, syncing or in trouble the
+    // line would read as a stale claim.
+    if !remote_path.is_empty() && snapshot.state == AppState::IdleOk {
         parts.push(remote_label(remote_path));
     }
     if let Some(last_sync) = last_sync {
