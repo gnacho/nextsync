@@ -1132,7 +1132,7 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
         .title(fold_home(&folder.local_root))
         // The folded path is for display; the absolute one stays a tooltip
         // away (issue #75).
-        .tooltip_text(Some(folder.local_root.as_str()))
+        .tooltip_text(folder.local_root.as_str())
         .subtitle(t("Remote: {remote}").replacen("{remote}", remote_label, 1))
         .build();
     let icon = gtk4::Image::builder()
