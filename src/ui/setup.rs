@@ -1157,11 +1157,16 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
         folder.remote_path.as_str()
     };
     let row = libadwaita::ActionRow::builder()
-        .title(fold_home(&folder.local_root))
+        .title(crate::util::paths::fold_home(&folder.local_root))
         // The folded path is for display; the absolute one stays a tooltip
-        // away (issue #75).
+        // away (issue #75). The remote name drops its leading slash too
+        // (issue #91).
         .tooltip_text(folder.local_root.as_str())
-        .subtitle(t("Remote: {remote}").replacen("{remote}", remote_label, 1))
+        .subtitle(t("Remote: {remote}").replacen(
+            "{remote}",
+            remote_label.trim_start_matches('/'),
+            1,
+        ))
         .build();
     let icon = gtk4::Image::builder()
         .icon_name("folder-symbolic")
@@ -1736,28 +1741,6 @@ fn provider_from_combo(row: &libadwaita::ComboRow) -> Provider {
     }
 }
 
-/// Display a local path with the home directory folded to `~` (issue #75):
-/// shorter to scan, with the absolute path kept in tooltips.
-fn fold_home(path: &str) -> String {
-    let home = std::env::var_os("HOME").map(|home| home.to_string_lossy().to_string());
-    fold_home_with(home.as_deref(), path)
-}
-
-/// [`fold_home`] with an explicit home directory, so the folding rules are
-/// testable without depending on the test runner's environment.
-fn fold_home_with(home: Option<&str>, path: &str) -> String {
-    let Some(home) = home.filter(|home| home.len() > 1) else {
-        return path.to_string();
-    };
-    if path == home {
-        return "~".to_string();
-    }
-    if let Some(rest) = path.strip_prefix(&format!("{home}/")) {
-        return format!("~/{rest}");
-    }
-    path.to_string()
-}
-
 /// Fill the wizard's remote-folder dropdown with the server's existing
 /// folders (issue #82). The credentials come from the wizard itself: the
 /// user signed in on the previous page but the account is not persisted
@@ -1790,7 +1773,9 @@ fn populate_wizard_remote_picker(
         match folders {
             Some(folders) => {
                 for folder in folders {
-                    list.append(&folder);
+                    // Display without the leading slash (issue #91); the
+                    // stored value normalizes back to a path.
+                    list.append(folder.trim_start_matches('/'));
                 }
             }
             // The dialog stays usable: the manual entry is the source of
@@ -2281,24 +2266,5 @@ mod tests {
             assert_eq!(label.text().as_str(), url);
             reset_locale();
         });
-    }
-
-    #[test]
-    fn fold_home_folds_only_inside_the_home_tree() {
-        let home = "/home/user";
-        assert_eq!(fold_home_with(Some(home), "/home/user"), "~");
-        assert_eq!(
-            fold_home_with(Some(home), "/home/user/Documents/Cloud/Foo"),
-            "~/Documents/Cloud/Foo"
-        );
-        // Outside the home tree nothing folds, and a home-like prefix that
-        // is not the home ("/home/username2") must not fold either.
-        assert_eq!(fold_home_with(Some(home), "/tmp/foo"), "/tmp/foo");
-        assert_eq!(
-            fold_home_with(Some(home), "/home/username2/docs"),
-            "/home/username2/docs"
-        );
-        // No home directory available: the path is returned as is.
-        assert_eq!(fold_home_with(None, "/home/user/docs"), "/home/user/docs");
     }
 }

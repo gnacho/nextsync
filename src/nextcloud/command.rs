@@ -158,7 +158,20 @@ const AUTH_ERROR_MARKERS: [&str; 6] = [
 ];
 
 /// Text markers that indicate a conflicted copy was created, in lower case.
-const CONFLICT_MARKERS: [&str; 3] = ["conflict", "conflicted copy", "csync_exclude_conflict"];
+/// Deliberately no bare "conflict": with progress logging enabled, ordinary
+/// file names can contain the word (a test fixture called
+/// file_case_conflict.txt does). The discovery instruction token lives in
+/// parsed progress lines and reaches the classifier through the explicit
+/// conflict signal instead.
+const CONFLICT_MARKERS: [&str; 2] = ["conflicted copy", "csync_exclude_conflict"];
+
+/// Lines that mention the auth words but describe something else entirely.
+/// The binary disables its push websocket a few seconds into a run when the
+/// server's notify_push is unreachable, logging "Disable push notifications
+/// object because authentication failed or connection lost"; a long sync
+/// still running at that moment would otherwise classify as rejected
+/// credentials. Real auth failures never match these shapes.
+const AUTH_NOISE_PATTERNS: [&str; 1] = ["disable push notifications object"];
 
 /// Outcome categories of a finished `nextcloudcmd` run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +187,19 @@ pub enum Classification {
 }
 
 impl Classification {
+    /// Fold the engine's explicit conflict signal (parsed progress lines
+    /// with the discovery instruction token or a created conflicted copy)
+    /// into this classification: a signal upgrades a plain success to
+    /// Conflict and never downgrades anything.
+    #[must_use]
+    pub const fn with_conflict_signal(self, signal: bool) -> Self {
+        if signal && matches!(self, Self::Success) {
+            Self::Conflict
+        } else {
+            self
+        }
+    }
+
     /// Stable machine-readable name (Python `BoundedOutputCapture` labels).
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -211,14 +237,20 @@ impl BoundedOutputCapture {
 
     /// Feed one output line, updating the tail and the classification flags.
     pub fn feed(&mut self, text: &str) {
+        let lowered = text.to_lowercase();
+        // Auth-shaped noise (push websocket teardown) never counts as an
+        // authentication signal.
+        let auth_noise = AUTH_NOISE_PATTERNS
+            .iter()
+            .any(|pattern| lowered.contains(pattern));
         if self.lines.len() == self.max_lines {
             self.lines.pop_front();
         }
         self.lines.push_back(text.to_string());
-        let lowered = text.to_lowercase();
-        self.authentication_seen |= AUTH_ERROR_MARKERS
-            .iter()
-            .any(|marker| lowered.contains(marker));
+        self.authentication_seen |= !auth_noise
+            && AUTH_ERROR_MARKERS
+                .iter()
+                .any(|marker| lowered.contains(marker));
         self.conflict_seen |= CONFLICT_MARKERS
             .iter()
             .any(|marker| lowered.contains(marker));
@@ -465,6 +497,23 @@ mod tests {
         );
         assert_eq!(Classification::Success.as_str(), "success");
         assert_eq!(Classification::SyncError.as_str(), "sync_error");
+    }
+
+    #[test]
+    fn push_teardown_noise_is_not_authentication() {
+        // Real line from a long run against a server with unreachable
+        // notify_push: it lands seconds in, mid-sync, and mentions the auth
+        // words. Long folders (huge trees) are still running then and were
+        // classified as rejected credentials; short ones finished first and
+        // passed, which made it look random.
+        let line =
+            "Disable push notifications object because authentication failed or connection lost";
+        assert_eq!(classify_output(line, 0), Classification::Success);
+        // The genuine marker still trips.
+        assert_eq!(
+            classify_output("authentication failed", 0),
+            Classification::Authentication
+        );
     }
 
     #[test]

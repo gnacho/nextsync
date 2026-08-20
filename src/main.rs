@@ -47,6 +47,10 @@ fn main() {
                 "row.folder-source .title label { font-weight: 700; }",
                 "@keyframes nextsync-spin { to { transform: rotate(360deg); } }",
                 "image.nextsync-spin { animation: nextsync-spin 1.2s linear infinite; }",
+                // The slim run bar under a syncing folder row (issue #90):
+                // green trough and fill, minimal height.
+                "progressbar.nextsync-run-bar trough { background: alpha(@success_color, 0.25); min-height: 3px; }",
+                "progressbar.nextsync-run-bar progress { background: @success_color; min-height: 3px; border-radius: 2px; }",
             )
             .as_bytes(),
         ));

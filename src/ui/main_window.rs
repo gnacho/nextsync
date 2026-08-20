@@ -163,9 +163,11 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary in two stacked lines (issue #81): state light and
-        // server host, then login user and used space only (no capacity),
-        // with the Add Folder button on the right in the theme accent.
+        // Account summary (issues #81 and #93): one line with the
+        // connection status - a green Lucide globe when reachable, a red
+        // globe-off when not - plus the used space below (no capacity, no
+        // server or user: those live in the sidebar). Add Folder on the
+        // right in the theme accent.
         let summary_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(10)
@@ -180,24 +182,40 @@ impl AccountView {
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(8)
             .build();
+        let connected = !matches!(
+            runtime.state().snapshot().state,
+            crate::state::AppState::Offline | crate::state::AppState::Error
+        );
         let light = gtk4::Image::builder().pixel_size(14).build();
-        light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
+        light.set_icon_name(Some(if connected {
+            "nextsync-state-globe-symbolic"
+        } else {
+            "nextsync-state-globe-off-symbolic"
+        }));
+        if connected {
+            light.add_css_class("success");
+        } else {
+            light.add_css_class("error");
+        }
         line_one.append(&light);
-        // The server label doubles as the anti-race guard for the
+        // The status label doubles as the anti-race guard for the
         // background quota fetch (detached rows keep their text).
         let name_label = gtk4::Label::builder()
-            .label(server_host(&account.server_url))
+            .label(if connected {
+                t("Connected")
+            } else {
+                t("Not connected")
+            })
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
         line_one.append(&name_label);
-        // Line two: who is logged in and how much space that consumes.
+        // Line two: how much space the account uses.
         let usage_label = gtk4::Label::builder()
             .css_classes(["dim-label"])
             .halign(gtk4::Align::Start)
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .label(account.login_name.as_str())
             .build();
         summary_lines.append(&line_one);
         summary_lines.append(&usage_label);
@@ -241,7 +259,6 @@ impl AccountView {
             });
             let usage_label = usage_label.clone();
             let name_label = name_label.clone();
-            let login_for_quota = account.login_name.clone();
             let title_for_check = name_label.text().to_string();
             glib::spawn_future_local(async move {
                 let Ok(Some(summary)) = handle.await else {
@@ -253,25 +270,14 @@ impl AccountView {
                 if name_label.text() != title_for_check {
                     return;
                 }
-                // Line two of the summary (issue #81): the display name
-                // when the server reports one, else the login, plus the
-                // used space only. Capacity stays out.
-                let who = summary
-                    .display_name
-                    .clone()
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| login_for_quota.clone());
+                // Line two of the summary (issue #93): just the used space;
+                // the identity lives in the sidebar.
                 let used = summary
                     .used
                     .map(crate::nextcloud::api::format_bytes)
                     .map(|used| t("{used} used").replace("{used}", &used))
                     .unwrap_or_default();
-                let text = if used.is_empty() {
-                    who
-                } else {
-                    format!("{who} · {used}")
-                };
-                usage_label.set_text(&text);
+                usage_label.set_text(&used);
             });
         }
 
@@ -344,11 +350,35 @@ impl AccountView {
                 }))
             };
             let state = folder_runtime.as_ref().map(|fr| fr.state());
-            let row =
-                FolderStatusRow::new(folder, state, row_callbacks, format_last_sync, is_paused);
+            let row = FolderStatusRow::new(
+                folder.clone(),
+                state,
+                row_callbacks,
+                format_last_sync,
+                is_paused,
+            );
             // Issue #43: show the folder's local used space, refreshed
             // whenever a synchronization completes.
             spawn_local_size_refresh(&row.row, &row.local_size, std::path::Path::new(&local_root));
+            // Issue #92: the pending-changes entry only appears when a
+            // background scan finds something pending for this folder.
+            {
+                let pending_handle = row.pending_handle();
+                let account_for_pending = account.clone();
+                let folder_for_pending = folder.clone();
+                let handle = gio::spawn_blocking(move || {
+                    let (changes, _available) = crate::core::pending_changes::pending_for_folder(
+                        &account_for_pending,
+                        &folder_for_pending,
+                    );
+                    !changes.is_empty()
+                });
+                glib::spawn_future_local(async move {
+                    if let Ok(pending) = handle.await {
+                        pending_handle.set_pending_changes(pending);
+                    }
+                });
+            }
             if let Some(fr) = &folder_runtime {
                 let controller = fr.state();
                 let row_for_updates = row.row.clone();
@@ -389,7 +419,7 @@ impl AccountView {
                 });
                 folder_subscriptions.push(subscription);
             }
-            account_list.append(&row.row);
+            account_list.append(&row.slot);
         }
         if account.folders.is_empty() {
             let row = libadwaita::ActionRow::builder()

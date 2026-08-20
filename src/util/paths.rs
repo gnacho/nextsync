@@ -92,6 +92,28 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// Display a local path with the home directory folded to `~` (issue #75):
+/// shorter to scan, with the absolute path kept in tooltips. Reading the
+/// value back goes through [`super::super::storage::config::expanduser`].
+pub fn fold_home(path: &str) -> String {
+    fold_home_with(home_dir().to_str(), path)
+}
+
+/// [`fold_home`] with an explicit home directory, so the folding rules are
+/// testable without depending on the test runner's environment.
+pub fn fold_home_with(home: Option<&str>, path: &str) -> String {
+    let Some(home) = home.filter(|home| home.len() > 1) else {
+        return path.to_string();
+    };
+    if path == home {
+        return "~".to_string();
+    }
+    if let Some(rest) = path.strip_prefix(&format!("{home}/")) {
+        return format!("~/{rest}");
+    }
+    path.to_string()
+}
+
 /// Resolve one XDG base directory from its environment variable, falling back
 /// to a `$HOME`-relative default when unset or empty.
 fn xdg(variable: &str, fallback_segments: &[&str]) -> PathBuf {
@@ -212,6 +234,25 @@ mod tests {
         .unwrap();
         let result = desktop_dir_from(config.path());
         assert_eq!(result, home_dir().join("Escritorio"));
+    }
+
+    #[test]
+    fn fold_home_folds_only_inside_the_home_tree() {
+        let home = "/home/user";
+        assert_eq!(fold_home_with(Some(home), "/home/user"), "~");
+        assert_eq!(
+            fold_home_with(Some(home), "/home/user/Documents/Cloud/Foo"),
+            "~/Documents/Cloud/Foo"
+        );
+        // Outside the home tree nothing folds, and a home-like prefix that
+        // is not the home ("/home/username2") must not fold either.
+        assert_eq!(fold_home_with(Some(home), "/tmp/foo"), "/tmp/foo");
+        assert_eq!(
+            fold_home_with(Some(home), "/home/username2/docs"),
+            "/home/username2/docs"
+        );
+        // No home directory available: the path is returned as is.
+        assert_eq!(fold_home_with(None, "/home/user/docs"), "/home/user/docs");
     }
 
     #[test]
