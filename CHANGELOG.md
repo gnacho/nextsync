@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.86.0] - 2026-08-20
+
+### Corregido
+- **Iconos Lucide por estado en las filas de carpeta (#94)**: cada estado lleva su propio glifo Lucide a 16 px con trazo 2 (no geometría improvisada ni trazo 3 de bandeja). Sincronizado = `circle-check` verde, sincronizando = `circle-ellipsis` verde y girando, pausado/cola = `circle-pause`, sin conexión = `globe-off`, y estados de atención (error, credenciales, llavero, revisión de borrados) = `info` en rojo. El spinner nativo de GTK retira de la fila.
+
 ## [0.84.0] - 2026-08-20
 
 ### Añadido

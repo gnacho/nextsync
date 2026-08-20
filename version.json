@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.84.0",
+  "version": "0.86.0",
   "mandatory": false,
   "summary": "Tray glyphs by state, live per-file progress, bulk conflict resolution, wizard lists remote folders, avatar fetch wired, and transient keyring failures now retry instead of latching auth-required.",
   "changelog": [

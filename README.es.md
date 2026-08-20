@@ -12,7 +12,7 @@
     <a href="README.md">English</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.84.0-6557e8?style=flat-square" alt="Versión 0.84.0">
+    <img src="https://img.shields.io/badge/version-0.86.0-6557e8?style=flat-square" alt="Versión 0.84.0">
     <img src="https://img.shields.io/badge/platform-Linux-f0c674?style=flat-square&logo=linux&logoColor=111" alt="Linux">
     <img src="https://img.shields.io/badge/desktop-GNOME-4a86cf?style=flat-square&logo=gnome&logoColor=white" alt="GNOME">
     <img src="https://img.shields.io/badge/GTK-4-4a86cf?style=flat-square&logo=gtk&logoColor=white" alt="GTK 4">
