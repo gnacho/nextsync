@@ -172,6 +172,7 @@ pub struct FolderRowCallbacks {
     pub on_toggle_pause: Option<Rc<dyn Fn()>>,
     pub on_remove: Option<Rc<dyn Fn()>>,
     pub on_pending_changes: Option<Rc<dyn Fn()>>,
+    pub on_review_deletions: Option<Rc<dyn Fn()>>,
 }
 
 /// A GTK action row rendering one synchronized folder with live status.
@@ -292,6 +293,7 @@ impl FolderStatusRow {
             ("toggle-pause", callbacks.on_toggle_pause.clone()),
             ("remove", callbacks.on_remove.clone()),
             ("pending-changes", callbacks.on_pending_changes.clone()),
+            ("review-deletions", callbacks.on_review_deletions.clone()),
         ] {
             let Some(callback) = callback else { continue };
             let action = gio::SimpleAction::new(name, None);
@@ -348,10 +350,22 @@ impl FolderStatusRow {
             item.set_icon(&gio::ThemedIcon::new("nextsync-list-checks-symbolic"));
             item
         });
+        // Deletion-review menu item (issue #105): only offered while the
+        // folder is blocked on a deletion alert; gated from the render
+        // subscription like the pending-changes entry.
+        let review_item = actions.contains_key("review-deletions").then(|| {
+            let item =
+                gio::MenuItem::new(Some(t("Review deletions")), Some("folder.review-deletions"));
+            item.set_icon(&gio::ThemedIcon::new("nextsync-row-error"));
+            item
+        });
         let popover = gtk4::PopoverMenu::from_model(Some(&menu));
         menu_button.set_popover(Some(&popover));
 
         let remote_path = folder.remote_path.clone();
+        let review_menu = menu.clone();
+        let review_item_clone = review_item.clone();
+        let review_in_menu = std::rc::Rc::new(std::cell::Cell::new(false));
         let mut this = Self {
             row,
             slot,
@@ -378,6 +392,9 @@ impl FolderStatusRow {
                 let row = this.row.clone();
                 let remote_path = this.remote_path.clone();
                 let format_last_sync = this.format_last_sync.clone();
+                let review_menu = review_menu.clone();
+                let review_item_clone = review_item_clone.clone();
+                let review_in_menu = review_in_menu.clone();
                 let subscription = controller.subscribe(move |snapshot: &StateSnapshot| {
                     render(
                         &row,
@@ -388,6 +405,19 @@ impl FolderStatusRow {
                         format_last_sync.as_ref().map(|f| f()),
                         snapshot,
                     );
+                    // Gate the deletion-review menu entry (issue #105): offer
+                    // it only while the folder is blocked on a deletion alert.
+                    let show = snapshot.state == AppState::DeleteReview;
+                    if show && !review_in_menu.get() {
+                        if let Some(item) = &review_item_clone {
+                            review_menu.append_item(item);
+                            review_in_menu.set(true);
+                        }
+                    } else if !show && review_in_menu.get() {
+                        let position = review_menu.n_items().saturating_sub(1);
+                        review_menu.remove(position);
+                        review_in_menu.set(false);
+                    }
                 });
                 this._subscription = Some(subscription);
                 // Live per-file progress (issue #86). Only the widgets are

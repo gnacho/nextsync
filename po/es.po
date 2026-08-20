@@ -89,15 +89,15 @@ msgstr "Sincronización bloqueada"
 
 #: src/nextsync/application.py:630
 msgid "Keep Paused"
-msgstr ""
+msgstr "Mantener en pausa"
 
 #: src/nextsync/application.py:632
 msgid "Restore from Nextcloud"
-msgstr ""
+msgstr "Restaurar desde Nextcloud"
 
 #: src/nextsync/application.py:634
 msgid "Approve These Deletions Once"
-msgstr ""
+msgstr "Aprobar estas eliminaciones una vez"
 
 #: src/nextsync/application.py:656
 msgid "Finishing synchronization"
@@ -954,6 +954,10 @@ msgstr "Llavero de contraseñas bloqueado"
 
 #: src/nextsync/ui/folder_status.py:29 src/nextsync/ui/main_window.py:148
 msgid "Review Deletions"
+msgstr "Revisar eliminaciones"
+
+#: src/ui/folder_status.rs
+msgid "Review deletions"
 msgstr "Revisar eliminaciones"
 
 #: src/nextsync/ui/folder_status.py:97

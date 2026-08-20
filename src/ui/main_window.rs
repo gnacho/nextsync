@@ -16,6 +16,7 @@ use std::rc::{Rc, Weak};
 use libadwaita::prelude::*;
 
 use crate::core::account_runtime::{AccountManager, AccountRuntime};
+use crate::nextcloud::driver::Provider;
 use crate::state::{AppState, StateSnapshot};
 use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
@@ -115,6 +116,9 @@ pub struct AccountCallbacks {
     pub on_add_folder: Option<Rc<dyn Fn()>>,
     /// Invoked when the user opens the per-folder pending-changes view.
     pub on_pending_changes: Option<PendingChangesCallback>,
+    /// Invoked when the user opens the deletion review for a folder (issue
+    /// #105). Carries the account and folder ids.
+    pub on_review_deletions: Option<PendingChangesCallback>,
     /// Invoked when a fresh avatar was fetched and cached (issue #50).
     pub on_avatar_cached: Option<AvatarCachedCallback>,
 }
@@ -320,6 +324,16 @@ impl AccountView {
                 },
                 on_pending_changes: {
                     let cb = callbacks.on_pending_changes.clone();
+                    let folder_id = folder.id.clone();
+                    let account_id = account_id.clone();
+                    Some(Rc::new(move || {
+                        if let Some(cb) = &cb {
+                            cb(&account_id, &folder_id);
+                        }
+                    }))
+                },
+                on_review_deletions: {
+                    let cb = callbacks.on_review_deletions.clone();
                     let folder_id = folder.id.clone();
                     let account_id = account_id.clone();
                     Some(Rc::new(move || {
@@ -1136,6 +1150,9 @@ impl MainWindow {
                 .cloned()
             {
                 self.account_manager.sync_folders(&account);
+                // Deletion-guard toggles (issue #104): disabling clears a
+                // pending alert so the folder unblocks in place.
+                self.account_manager.apply_guard_config(&self.config);
             }
         }
     }
@@ -1148,6 +1165,65 @@ impl MainWindow {
         if let Some(account_id) = self.active_account_id.clone() {
             self.account_manager.credentials_renewed(&account_id);
         }
+    }
+
+    /// Present the deletion-review dialog for a folder blocked on a deletion
+    /// alert (issue #105). Keep Paused leaves it blocked; Restore from
+    /// Nextcloud re-downloads the folder; Approve These Deletions Once lets a
+    /// single run proceed. Nextcloud accounts additionally get the server
+    /// trash browser.
+    fn present_delete_review(&self, account_id: &str, folder_id: &str) {
+        let Some(account) = self
+            .config
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(runtime) = self.account_manager.get(account_id) else {
+            return;
+        };
+        let Some(folder) = runtime.folders().get(folder_id).cloned() else {
+            return;
+        };
+        let scheduler = folder.scheduler();
+        let alert = scheduler.delete_alert();
+        let message = alert
+            .as_ref()
+            .map(|alert| alert.message.clone())
+            .unwrap_or_default();
+
+        let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&message));
+        dialog.add_response("keep", t("Keep Paused"));
+        if account.provider == Provider::Nextcloud {
+            dialog.add_response("restore", t("Restore from Nextcloud"));
+        }
+        if alert.as_ref().is_some_and(|alert| alert.can_approve_once) {
+            dialog.add_response("approve", t("Approve These Deletions Once"));
+            dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Suggested);
+        }
+        if account.provider == Provider::Nextcloud {
+            dialog.add_response("trash", t("Restore from server trash…"));
+        }
+        dialog.add_response("close", t("Close"));
+        dialog.set_default_response(Some("keep"));
+
+        let approve = scheduler.clone();
+        let restore = scheduler;
+        let account_for_trash = account.clone();
+        let window = self.window.clone();
+        dialog.connect_response(None, move |_dialog, response| match response {
+            "approve" => approve.approve_delete_once(),
+            "restore" => restore.restore_from_server(),
+            "trash" => crate::ui::server_trash::present_server_trash(
+                &account_for_trash,
+                window.upcast_ref::<gtk4::Widget>(),
+            ),
+            _ => {}
+        });
+        dialog.present(Some(self.window.upcast_ref::<gtk4::Widget>()));
     }
 
     /// Build the Settings callbacks against this window's shared cell.
@@ -1562,6 +1638,14 @@ impl MainWindow {
                         &folder,
                         window.upcast_ref::<gtk4::Widget>(),
                     );
+                }))
+            },
+            on_review_deletions: {
+                let weak = self.self_weak.clone();
+                Some(Rc::new(move |account_id: &str, folder_id: &str| {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow().present_delete_review(account_id, folder_id);
+                    }
                 }))
             },
             on_avatar_cached: {
