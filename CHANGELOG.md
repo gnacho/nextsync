@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.98.0] - 2026-08-20
+
+### Corregido
+- **Iconos a color fijo en filas, conexión y menú (#103)**: los iconos de fila de carpeta, la fila de conexión de cuenta y el menú de bandeja pasan a SVGs a color fijo instalados en `scalable/apps`, igual que la bandeja. Las filas llevan su propio color por estado (verde ok, azul sincronizando, rojo error, gris pausa/sin conexión) y se elimina la recoloración por CSS que no se aplicaba en este sistema.
+
 ## [0.96.0] - 2026-08-20
 
 ### Corregido

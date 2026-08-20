@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.96.0",
+  "version": "0.98.0",
   "mandatory": false,
-  "summary": "Fix the intermittent GTK layout crash by unsubscribing per-folder subscriptions when the account view is rebuilt.",
+  "summary": "Render folder-row, account-connection and tray-menu icons with fixed colors so they show on light and dark panels.",
   "changelog": [
-    "The account view now unsubscribes every per-folder subscription before dropping the previous view (issue #102).",
-    "This stops detached folder rows from being touched by leftover callbacks, which caused the intermittent GTK layout crash."
+    "Folder rows, account connection and tray menu now use fixed-color icons installed under scalable/apps (issue #103).",
+    "Folder-row state icons carry their own color (green ok, blue syncing, red error, gray paused/offline).",
+    "The CSS success/error tint on the row and connection icons is no longer needed and was removed."
   ],
-  "released_at": "2026-08-20T22:00:00Z"
+  "released_at": "2026-08-20T22:20:00Z"
 }
