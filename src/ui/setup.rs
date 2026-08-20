@@ -339,7 +339,9 @@ impl SetupWindow {
         let window = libadwaita::ApplicationWindow::builder()
             .application(application)
             .title(t(WINDOW_TITLE))
-            .default_width(620)
+            // Wider than the old 620 so full paths and folder rows fit
+            // without ellipsizing as soon (issue #75).
+            .default_width(720)
             .default_height(680)
             .build();
 
@@ -1127,7 +1129,10 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
         folder.remote_path.as_str()
     };
     let row = libadwaita::ActionRow::builder()
-        .title(folder.local_root.as_str())
+        .title(fold_home(&folder.local_root))
+        // The folded path is for display; the absolute one stays a tooltip
+        // away (issue #75).
+        .tooltip_text(Some(folder.local_root.as_str()))
         .subtitle(t("Remote: {remote}").replacen("{remote}", remote_label, 1))
         .build();
     let icon = gtk4::Image::builder()
@@ -1155,7 +1160,6 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
     row.add_suffix(&remove);
     ctx.widgets.folder_list.append(&row);
 }
-
 
 /// Start synchronization: without folders it finishes immediately; otherwise
 /// it probes the first remote folder and asks for the first-sync confirmation.
@@ -1704,6 +1708,28 @@ fn provider_from_combo(row: &libadwaita::ComboRow) -> Provider {
     }
 }
 
+/// Display a local path with the home directory folded to `~` (issue #75):
+/// shorter to scan, with the absolute path kept in tooltips.
+fn fold_home(path: &str) -> String {
+    let home = std::env::var_os("HOME").map(|home| home.to_string_lossy().to_string());
+    fold_home_with(home.as_deref(), path)
+}
+
+/// [`fold_home`] with an explicit home directory, so the folding rules are
+/// testable without depending on the test runner's environment.
+fn fold_home_with(home: Option<&str>, path: &str) -> String {
+    let Some(home) = home.filter(|home| home.len() > 1) else {
+        return path.to_string();
+    };
+    if path == home {
+        return "~".to_string();
+    }
+    if let Some(rest) = path.strip_prefix(&format!("{home}/")) {
+        return format!("~/{rest}");
+    }
+    path.to_string()
+}
+
 /// Present a folder chooser and write the selection into the entry row.
 fn choose_local_folder(entry: libadwaita::EntryRow) {
     let dialog = gtk4::FileDialog::builder()
@@ -2185,5 +2211,24 @@ mod tests {
             assert_eq!(label.text().as_str(), url);
             reset_locale();
         });
+    }
+
+    #[test]
+    fn fold_home_folds_only_inside_the_home_tree() {
+        let home = "/home/user";
+        assert_eq!(fold_home_with(Some(home), "/home/user"), "~");
+        assert_eq!(
+            fold_home_with(Some(home), "/home/user/Documents/Cloud/Foo"),
+            "~/Documents/Cloud/Foo"
+        );
+        // Outside the home tree nothing folds, and a home-like prefix that
+        // is not the home ("/home/username2") must not fold either.
+        assert_eq!(fold_home_with(Some(home), "/tmp/foo"), "/tmp/foo");
+        assert_eq!(
+            fold_home_with(Some(home), "/home/username2/docs"),
+            "/home/username2/docs"
+        );
+        // No home directory available: the path is returned as is.
+        assert_eq!(fold_home_with(None, "/home/user/docs"), "/home/user/docs");
     }
 }
