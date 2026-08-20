@@ -71,7 +71,14 @@ impl CredentialsStore {
         let service = SecretService::connect(EncryptionType::Dh)?;
         let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
         let Some(item) = result.unlocked.first() else {
-            return Ok(None);
+            // Distinguish "no secret at all" from "the keyring is locked":
+            // the latter must surface as an error so callers do not treat it
+            // as missing credentials and demand re-authentication (issue #98).
+            return if result.locked.is_empty() {
+                Ok(None)
+            } else {
+                Err(CredentialError::Locked)
+            };
         };
         let secret = item.get_secret()?;
         Ok(Some(String::from_utf8_lossy(&secret).into_owned()))
@@ -99,7 +106,12 @@ impl CredentialsStore {
             (ATTR_USERNAME, login),
         ]))?;
         let Some(item) = result.unlocked.first() else {
-            return Ok(None);
+            // Same locked-vs-missing distinction as in `get` (issue #98).
+            return if result.locked.is_empty() {
+                Ok(None)
+            } else {
+                Err(CredentialError::Locked)
+            };
         };
         let secret = item.get_secret()?;
         let password = String::from_utf8_lossy(&secret).into_owned();
