@@ -186,7 +186,7 @@ impl AccountView {
             runtime.state().snapshot().state,
             crate::state::AppState::Offline | crate::state::AppState::Error
         );
-        let light = gtk4::Image::builder().pixel_size(14).build();
+        let light = gtk4::Image::builder().pixel_size(18).build();
         light.set_icon_name(Some(if connected {
             "nextsync-state-globe"
         } else {
