@@ -22,48 +22,30 @@ use crate::util::i18n::t;
 /// The `(icon_name, status_label)` pair for a folder state, mirroring the
 /// Python `STATE_PRESENTATION` table. The label is translated through
 /// [`t`]; because every msgid is a `'static` literal the signature keeps
-/// `'static` lifetimes. The icons are the app's Lucide family
-/// (`nextsync-state-*`): waiting pauses, sync-ok checks, a running sync
-/// spins dots, trouble states show the info glyph (issue #94).
+/// `'static` lifetimes.
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("nextsync-state-attention-symbolic", t("Not Configured")),
-        AppState::IdleOk => ("nextsync-state-check-symbolic", t("Synchronized")),
-        AppState::IdleManualOnly => ("nextsync-state-paused-symbolic", t("Automatic Sync Is Off")),
-        AppState::IdleNotSynced => (
-            "nextsync-state-attention-symbolic",
-            t("Not Synchronized Yet"),
-        ),
-        AppState::SyncQueued => (
-            "nextsync-state-paused-symbolic",
-            t("Synchronization Scheduled"),
-        ),
-        AppState::Syncing => ("nextsync-state-syncing-symbolic", t("Synchronizing…")),
-        AppState::PausedUser => ("nextsync-state-paused-symbolic", t("Paused")),
-        AppState::PausedBattery => ("nextsync-state-paused-symbolic", t("Paused on Battery")),
-        AppState::Offline => ("nextsync-state-globe-off-symbolic", t("Offline")),
-        AppState::Error => (
-            "nextsync-state-attention-symbolic",
-            t("Synchronization Error"),
-        ),
-        AppState::AuthRequired => (
-            "nextsync-state-attention-symbolic",
-            t("Account Needs Attention"),
-        ),
-        AppState::KeyringLocked => (
-            "nextsync-state-attention-symbolic",
-            t("Password Keyring Locked"),
-        ),
-        AppState::DeleteReview => ("nextsync-state-attention-symbolic", t("Review Deletions")),
+        AppState::Unconfigured => ("dialog-question-symbolic", t("Not Configured")),
+        AppState::IdleOk => ("emblem-ok-symbolic", t("Synchronized")),
+        AppState::IdleManualOnly => ("media-playback-pause-symbolic", t("Automatic Sync Is Off")),
+        AppState::IdleNotSynced => ("appointment-soon-symbolic", t("Not Synchronized Yet")),
+        AppState::SyncQueued => ("appointment-soon-symbolic", t("Synchronization Scheduled")),
+        AppState::Syncing => ("emblem-synchronizing-symbolic", t("Synchronizing…")),
+        AppState::PausedUser => ("media-playback-pause-symbolic", t("Paused")),
+        AppState::PausedBattery => ("battery-symbolic", t("Paused on Battery")),
+        AppState::Offline => ("network-offline-symbolic", t("Offline")),
+        AppState::Error => ("dialog-error-symbolic", t("Synchronization Error")),
+        AppState::AuthRequired => ("dialog-password-symbolic", t("Account Needs Attention")),
+        AppState::KeyringLocked => ("changes-prevent-symbolic", t("Password Keyring Locked")),
+        AppState::DeleteReview => ("security-high-symbolic", t("Review Deletions")),
     }
 }
 
-/// The color class a folder state's icon carries (issue #94): green while
-/// syncing and when synchronized, red when the folder needs attention,
-/// none for the neutral waiting/paused states.
+/// The color class a folder state's icon carries: green while synchronized
+/// and red when the folder needs attention.
 pub fn folder_status_color(state: AppState) -> Option<&'static str> {
     match state {
-        AppState::IdleOk | AppState::Syncing => Some("success"),
+        AppState::IdleOk => Some("success"),
         AppState::Error
         | AppState::AuthRequired
         | AppState::KeyringLocked
@@ -496,16 +478,9 @@ fn render(
     let (icon_name, status) = folder_status_presentation(snapshot.state);
     let syncing = snapshot.state == AppState::Syncing;
     let queued = snapshot.state == AppState::SyncQueued;
-    // Issue #94: one Lucide glyph per state, tinted green while syncing and
-    // synchronized, red when the folder needs attention. While syncing the
-    // glyph (circle-ellipsis) spins instead of the old bare spinner.
-    icon.set_visible(true);
+    // Use the theme's native icons; while syncing the spinner is the status.
+    icon.set_visible(!syncing);
     icon.set_icon_name(Some(icon_name));
-    if icon_name == "nextsync-state-syncing-symbolic" {
-        icon.add_css_class("nextsync-spin");
-    } else {
-        icon.remove_css_class("nextsync-spin");
-    }
     // Issue #99: avoid an invalid state where the icon carries both the
     // success and error tint classes at the same time.
     icon.remove_css_class("success");
@@ -513,9 +488,12 @@ fn render(
     if let Some(color) = folder_status_color(snapshot.state) {
         icon.add_css_class(color);
     }
-    // The legacy spinner stays hidden; kept for API stability.
-    spinner.set_visible(false);
-    spinner.stop();
+    spinner.set_visible(syncing);
+    if syncing {
+        spinner.start();
+    } else {
+        spinner.stop();
+    }
     // Issue #90: the slim green run bar pulses while the run is in flight
     // and disappears when it ends (queued shows it idle at zero).
     progress_bar.set_visible(syncing || queued);
@@ -571,29 +549,28 @@ mod tests {
     fn idle_ok_presents_as_synchronized() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::IdleOk);
-        assert_eq!(icon, "nextsync-state-check-symbolic");
+        assert_eq!(icon, "emblem-ok-symbolic");
         assert_eq!(label, "Synchronized");
         assert_eq!(folder_status_color(AppState::IdleOk), Some("success"));
         reset_locale();
     }
 
     #[test]
-    fn syncing_presents_with_ellipsis_icon() {
+    fn syncing_presents_with_spinner_icon() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::Syncing);
-        assert_eq!(icon, "nextsync-state-syncing-symbolic");
+        assert_eq!(icon, "emblem-synchronizing-symbolic");
         assert_eq!(label, "Synchronizing…");
-        assert_eq!(folder_status_color(AppState::Syncing), Some("success"));
+        assert_eq!(folder_status_color(AppState::Syncing), None);
         reset_locale();
     }
 
     #[test]
     fn per_state_icons_and_colors() {
-        // Issue #94: waiting pauses, attention turns red, offline shows the
-        // struck globe.
+        // Native theme icons; attention states turn red.
         assert_eq!(
             folder_status_presentation(AppState::SyncQueued).0,
-            "nextsync-state-paused-symbolic"
+            "appointment-soon-symbolic"
         );
         assert_eq!(folder_status_color(AppState::SyncQueued), None);
         for state in [
@@ -602,16 +579,15 @@ mod tests {
             AppState::KeyringLocked,
             AppState::DeleteReview,
         ] {
-            assert_eq!(
-                folder_status_presentation(state).0,
-                "nextsync-state-attention-symbolic",
+            assert!(
+                folder_status_presentation(state).0.ends_with("-symbolic"),
                 "state {state:?}"
             );
             assert_eq!(folder_status_color(state), Some("error"));
         }
         assert_eq!(
             folder_status_presentation(AppState::Offline).0,
-            "nextsync-state-globe-off-symbolic"
+            "network-offline-symbolic"
         );
     }
 
