@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NextSync - Tus archivos en local, en sincronía</title>
+  <meta name="description" content="App GNOME que mantiene espejos locales de tus cuentas Nextcloud y OpenCloud. Rust y GTK 4. Sin nube propia ni telemetría. GPL-3.0+." />
+  <meta name="theme-color" content="#f6f5f4" />
+  <link rel="canonical" href="https://nextsync.cloudless.club/" />
+  <link rel="alternate" hreflang="es" href="https://nextsync.cloudless.club/" />
+  <link rel="alternate" hreflang="en" href="https://nextsync.cloudless.club/?hl=en" />
+  <link rel="alternate" hreflang="x-default" href="https://nextsync.cloudless.club/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="NextSync" />
+  <meta property="og:title" content="NextSync - Tus archivos, en local. Cualquier servidor, en sincronía." />
+  <meta property="og:description" content="App de escritorio GNOME que mantiene espejos locales de tus cuentas Nextcloud y OpenCloud. Rust, GTK 4 y Libadwaita. Sin nube propia ni telemetría." />
+  <meta property="og:url" content="https://nextsync.cloudless.club/" />
+  <meta property="og:image" content="https://nextsync.cloudless.club/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:locale" content="es_ES" />
+  <meta property="og:locale:alternate" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="NextSync - Your files, local. Any server, in sync." />
+  <meta name="twitter:description" content="A GNOME desktop companion that keeps local mirrors of your Nextcloud and OpenCloud accounts. Rust, GTK 4, Libadwaita. No telemetry, GPL-3.0+." />
+  <meta name="twitter:image" content="https://nextsync.cloudless.club/og.png" />
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=2" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": "WebSite", "name": "NextSync", "url": "https://nextsync.cloudless.club/",
+        "description": "GNOME desktop companion that keeps local mirrors of your Nextcloud and OpenCloud accounts.",
+        "inLanguage": ["es", "en"] },
+      { "@type": "SoftwareApplication", "name": "NextSync", "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Linux (GNOME)", "url": "https://github.com/gnacho/nextsync",
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "description": "GNOME desktop companion that keeps complete local mirrors of Nextcloud and OpenCloud accounts, delegating synchronization to the official server CLI.",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }, "isAccessibleForFree": true },
+      { "@type": "FAQPage", "mainEntity": [
+        { "@type": "Question", "name": "Is NextSync an official Nextcloud product?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. NextSync is an independent, unofficial project and is not affiliated with Nextcloud GmbH or the Heinlein Group." } },
+        { "@type": "Question", "name": "Does NextSync support virtual files?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. NextSync keeps complete local mirrors of the folders you choose. It does not do on-demand placeholder files." } },
+        { "@type": "Question", "name": "Which servers does NextSync support?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Nextcloud and OpenCloud today, through their official sync CLIs. Any platform that ships a sync CLI can be added later." } },
+        { "@type": "Question", "name": "Does NextSync send telemetry?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. No telemetry, no analytics and no remote crash reporting." } }
+      ] }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="misc.skip">Saltar al contenido</a>
+
+  <nav class="nav" id="top"><div class="container nav-inner">
+    <a class="nav-logo" href="#top"><img src="assets/icon-symbolic.svg" alt="" width="22" height="22" /><span>NextSync</span></a>
+    <div class="nav-links" id="navLinks">
+      <a href="#features" data-i18n="nav.features">Funciones</a>
+      <a href="#shots" data-i18n="nav.shots">Capturas</a>
+      <a href="#compare" data-i18n="nav.compare">Comparativa</a>
+      <a href="#install" data-i18n="nav.install">Instalar</a>
+      <a href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <div class="nav-actions">
+      <select id="langSelect" aria-label="Language / Idioma">
+        <option value="es">ES</option>
+        <option value="en">EN</option>
+      </select>
+      <button id="themeBtn" class="icon-btn" aria-label="Cambiar tema" data-i18n-aria="misc.theme">
+        <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 1a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V2a1 1 0 0 1 1-1zm0 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7-4a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM3 8a1 1 0 0 1-1 1H1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zm10.657-4.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM4.464 11.536a1 1 0 0 1 0 1.414l-.707.707a1 1 0 0 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zm9.193 1.414a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 0 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM4.464 3.343a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 0 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM8 13a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1z"/></svg>
+        <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M14.53 10.53a6.5 6.5 0 0 1-9.06-9.06.5.5 0 0 0-.72-.64 7.5 7.5 0 1 0 10.42 10.42.5.5 0 0 0-.64-.72z"/></svg>
+      </button>
+      <a class="btn suggested nav-cta" href="#install" data-i18n="hero.cta1">Instalar</a>
+    </div>
+  </div></nav>
+
+  <main id="main">
+    <header class="hero">
+      <div class="hero-bg" aria-hidden="true"></div>
+      <div class="container hero-inner">
+        <span class="eyebrow reveal" data-i18n="hero.eyebrow">Sincronización para GNOME</span>
+        <h1 class="reveal d1"><span data-i18n="hero.t1">Tus archivos, en local.</span><br /><span class="text-accent" data-i18n="hero.t2">Cualquier servidor, en sincronía.</span></h1>
+        <p class="hero-sub reveal d2" data-i18n="hero.sub">NextSync es una app de escritorio para GNOME que mantiene espejos locales completos de tus cuentas Nextcloud y OpenCloud. Sin nube propia, sin telemetría, sin suscripción.</p>
+        <div class="hero-actions reveal d3">
+          <a class="btn suggested big" href="#install" data-i18n="hero.cta1">Instalar</a>
+          <a class="btn big" href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener" data-i18n="hero.cta2">Ver en GitHub</a>
+        </div>
+        <ul class="hero-facts reveal d4">
+          <li data-i18n="hero.fact1">Binario único en Rust</li>
+          <li>GPL-3.0+</li>
+          <li data-i18n="hero.fact2">Nextcloud y OpenCloud</li>
+          <li data-i18n="hero.fact3">Sin telemetría</li>
+        </ul>
+
+        <div class="sync-widget reveal d5" role="img" aria-label="Animación: los archivos viajan entre tu equipo y tu servidor" data-i18n-aria="hero.widget">
+          <svg viewBox="0 0 720 260" width="100%" aria-hidden="true">
+            <defs>
+              <path id="flowUp" d="M 170 195 C 260 195, 260 100, 350 100" fill="none" />
+              <path id="flowDown" d="M 370 120 C 460 120, 460 195, 550 195" fill="none" />
+            </defs>
+            <g class="sw-node">
+              <rect x="40" y="150" width="130" height="90" rx="16" />
+              <g transform="translate(88 158) scale(1.42)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sw-glyph">
+                <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8" /><path d="M12 17v4" />
+              </g>
+              <text x="105" y="222" text-anchor="middle" class="sw-label" data-i18n-svg="sw.local">Tu equipo</text>
+            </g>
+            <g class="sw-node">
+              <rect x="550" y="150" width="130" height="90" rx="16" />
+              <g transform="translate(598 158) scale(1.42)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sw-glyph">
+                <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+              </g>
+              <text x="615" y="222" text-anchor="middle" class="sw-label" data-i18n-svg="sw.server">Tu servidor</text>
+            </g>
+            <g class="sw-cloud">
+              <circle cx="360" cy="110" r="46" />
+              <g transform="translate(342 92) scale(1.5)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3 4 7l4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" />
+              </g>
+            </g>
+            <use href="#flowUp" class="sw-path" />
+            <use href="#flowDown" class="sw-path" />
+            <circle r="7" class="sw-dot up"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#flowUp" /></animateMotion></circle>
+            <circle r="7" class="sw-dot up d2"><animateMotion dur="2.6s" begin="1.3s" repeatCount="indefinite"><mpath href="#flowUp" /></animateMotion></circle>
+            <circle r="7" class="sw-dot down"><animateMotion dur="2.6s" begin="0.6s" repeatCount="indefinite"><mpath href="#flowDown" /></animateMotion></circle>
+            <circle r="7" class="sw-dot down d2"><animateMotion dur="2.6s" begin="1.9s" repeatCount="indefinite"><mpath href="#flowDown" /></animateMotion></circle>
+          </svg>
+        </div>
+      </div>
+    </header>
+
+    <section class="block" id="principles"><div class="container">
+      <h2 class="reveal" data-i18n="pillars.title">Construido sobre tres principios</h2>
+      <p class="lead reveal" data-i18n="pillars.lead">No son eslóganes de marketing. Condicionan cada decisión del proyecto.</p>
+      <div class="cards three">
+        <article class="card reveal">
+          <h3 data-i18n="pillars.p1t">Agnóstico de servidor</h3>
+          <p data-i18n="pillars.p1d">NextSync no habla el protocolo de un fabricante: delega la sincronización en el CLI oficial del servidor (<code>nextcloudcmd</code>, <code>opencloudcmd</code>). La experiencia de escritorio es la misma para todos.</p>
+        </article>
+        <article class="card reveal d1">
+          <h3 data-i18n="pillars.p2t">El motor oficial hace el trabajo</h3>
+          <p data-i18n="pillars.p2d">La sincronización, los conflictos y la seguridad son del motor CLI. NextSync añade la capa GNOME y cubre lo que el CLI deja abierto, como la guardia de borrados masivos.</p>
+        </article>
+        <article class="card reveal d2">
+          <h3 data-i18n="pillars.p3t">Privado por diseño</h3>
+          <p data-i18n="pillars.p3d">Sin telemetría, sin analítica, sin informes de fallos remotos. Las credenciales viven en GNOME Keyring a través de Secret Service.</p>
+        </article>
+      </div>
+    </div></section>
+
+    <section class="block" id="features"><div class="container">
+      <h2 class="reveal" data-i18n="features.title">Lo que hace por ti</h2>
+      <div class="cards two">
+        <article class="card reveal"><h3 data-i18n="features.f1t">Multi-cuenta y multi-carpeta</h3><p data-i18n="features.f1d">Cada cuenta mantiene sus propias carpetas, y cada carpeta tiene su ruta remota (o su space de OpenCloud), su estado y sus disparadores.</p></article>
+        <article class="card reveal d1"><h3 data-i18n="features.f2t">Detección rápida de cambios</h3><p data-i18n="features.f2d">Vigilancia local recursiva con inotify y coalescencia de eventos. Los cambios remotos llegan por notify_push en Nextcloud o por intervalo.</p></article>
+        <article class="card reveal"><h3 data-i18n="features.f3t">Una sola cola por cuenta</h3><p data-i18n="features.f3d">Todos los disparadores confluyen en una cola que coalesce: un cambio local y uno remoto a la vez producen una sola pasada, nunca dos motores sobre la misma carpeta.</p></article>
+        <article class="card reveal d1"><h3 data-i18n="features.f4t">Guardia de borrados</h3><p data-i18n="features.f4d">Un borrado masivo local bloquea la sincronización antes de que el motor lo propague al servidor. Los CLI oficiales no piden confirmación en modo no interactivo; NextSync sí.</p></article>
+        <article class="card reveal"><h3 data-i18n="features.f5t">Vive en la bandeja</h3><p data-i18n="features.f5d">Abrir, registro y salir desde el icono de bandeja. Cerrar la ventana deja la app trabajando en segundo plano.</p></article>
+        <article class="card reveal d1"><h3 data-i18n="features.f6t">Login seguro</h3><p data-i18n="features.f6d">Login Flow v2 por navegador en Nextcloud, app password en OpenCloud. Las credenciales se guardan en el llavero del sistema.</p></article>
+      </div>
+    </div></section>
+
+    <section class="block alt" id="shots"><div class="container">
+      <h2 class="reveal" data-i18n="shots.title">Un vistazo a la interfaz</h2>
+      <p class="lead reveal" data-i18n="shots.lead">Capturas reales de la app, en los dos idiomas y los dos temas.</p>
+      <div class="slider reveal" id="slider">
+        <div class="slider-viewport">
+          <img id="slideImg" src="assets/shots/main-es-light.webp" alt="Ventana principal de NextSync" data-i18n-alt="shots.alt" width="1800" height="1200" />
+        </div>
+        <button class="slider-arrow prev" id="slidePrev" aria-label="Captura anterior" data-i18n-aria="shots.prev">&#10094;</button>
+        <button class="slider-arrow next" id="slideNext" aria-label="Captura siguiente" data-i18n-aria="shots.next">&#10095;</button>
+        <div class="slider-thumbs" id="slideThumbs" role="tablist"></div>
+        <p class="slider-caption" id="slideCaption"></p>
+      </div>
+    </div></section>
+
+    <section class="block" id="compare"><div class="container">
+      <h2 class="reveal" data-i18n="compare.title">El compañero GNOME que faltaba</h2>
+      <p class="lead reveal" data-i18n="compare.lead">Comparativa con los clientes de escritorio oficiales, contrastada el 20 de agosto de 2026 contra sus repos públicos.</p>
+      <div class="table-wrap reveal"><table class="matrix">
+        <thead><tr>
+          <th data-i18n="compare.h0"></th><th>NextSync</th><th>Nextcloud Desktop</th><th>OpenCloud Desktop</th>
+        </tr></thead>
+        <tbody>
+          <tr><td data-i18n="compare.r1">Interfaz nativa GNOME (GTK 4 / Libadwaita)</td><td class="yes">✓</td><td class="no" data-i18n="compare.qt1">✗ (Qt)</td><td class="no" data-i18n="compare.qt2">✗ (Qt)</td></tr>
+          <tr><td data-i18n="compare.r2">Multi-proveedor en una sola app</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td></tr>
+          <tr><td data-i18n="compare.r3">Motor de sync = CLI oficial del servidor</td><td class="yes">✓</td><td class="mid" data-i18n="compare.own1">◐ (motor propio)</td><td class="mid" data-i18n="compare.own2">◐ (motor propio)</td></tr>
+          <tr><td data-i18n="compare.r4">Archivos virtuales bajo demanda</td><td class="no" data-i18n="compare.mirror">✗ (espejo completo)</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><td data-i18n="compare.r5">Guardia de borrado masivo</td><td class="yes">✓</td><td class="mid" data-i18n="compare.opt1">◐ (opt-in, solo GUI)</td><td class="mid" data-i18n="compare.opt2">◐ (opt-in, solo GUI)</td></tr>
+          <tr><td data-i18n="compare.r6">Credenciales en el llavero del sistema</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        </tbody>
+      </table></div>
+      <aside class="honest reveal">
+        <h3 data-i18n="compare.ht">Lo que NextSync no hace (todavía)</h3>
+        <ul>
+          <li data-i18n="compare.h1">No hay archivos virtuales: descarga copias completas de las carpetas que elijas.</li>
+          <li data-i18n="compare.h2">Solo Linux con GNOME (o un escritorio con StatusNotifier). Nada de Windows ni macOS.</li>
+          <li data-i18n="compare.h3">Es una versión temprana: pruébalo con datos no críticos y mantén copias independientes.</li>
+        </ul>
+      </aside>
+    </div></section>
+
+    <section class="block alt" id="install"><div class="container">
+      <h2 class="reveal" data-i18n="install.title">Instalación fácil y rápida</h2>
+      <p class="lead reveal" data-i18n="install.lead">En Arch, CachyOS y derivadas hay paquete listo en cada release.</p>
+      <div class="card install-card reveal">
+        <pre class="code-block"><code id="installCmd">sudo pacman -U nextsync-0.88.0-1-x86_64.pkg.tar.zst</code></pre>
+        <button class="btn suggested" id="copyBtn" data-i18n="install.copy">Copiar comando</button>
+        <p class="small-print" data-i18n="install.note">Descarga el paquete <code>.pkg.tar.zst</code> más reciente desde <a href="https://github.com/gnacho/nextsync/releases" target="_blank" rel="noopener">GitHub Releases</a> y ajusta el nombre del fichero.</p>
+      </div>
+      <div class="cards two reqs">
+        <article class="card reveal"><h3 data-i18n="install.r1t">Requisitos</h3><p data-i18n="install.r1d">Linux con GNOME (o un escritorio con bandeja StatusNotifier). Para cuentas Nextcloud hace falta <code>nextcloudcmd</code> (paquete <code>nextcloud-client</code> en Arch); para OpenCloud, el CLI oficial <code>opencloudcmd</code>.</p></article>
+        <article class="card reveal d1"><h3 data-i18n="install.r2t">Desde el código fuente</h3><p data-i18n="install.r2d">El repo se compila con Cargo: <code>cargo build --release</code> y la batería se comprueba con <code>cargo test</code>. También hay PKGBUILD para generar el paquete localmente.</p></article>
+      </div>
+    </div></section>
+
+    <section class="block" id="about"><div class="container">
+      <h2 class="reveal" data-i18n="about.title">Por qué existe</h2>
+      <div class="about-text reveal">
+        <p data-i18n="about.p1">NextSync hereda su identidad y buen criterio de <a href="https://github.com/ehstbr/PyNextCloud-Sync" target="_blank" rel="noopener">PyNextCloud-Sync</a>, de ehstbr. Ese proyecto tomó las decisiones correctas sobre la experiencia de escritorio; aquí se mantiene todo eso y se reescribe en Rust: un binario único, arranque instantáneo y una arquitectura que no depende de un solo servidor.</p>
+        <p data-i18n="about.p2">Es un proyecto personal, GPL-3.0+, gratuito siempre. Corre 24/7 en producción propia y cada versión se prueba ahí primero. Con colaboraciones o apoyo quizás podría crecer más rápido, pero no puedo prometer nada.</p>
+      </div>
+      <div class="faq reveal" id="faq">
+        <details><summary data-i18n="faq.q1">¿Es un producto oficial de Nextcloud?</summary><p data-i18n="faq.a1">No. NextSync es un proyecto independiente y no oficial, sin afiliación con Nextcloud GmbH ni con el Heinlein Group. Nextcloud es una marca registrada de Nextcloud GmbH.</p></details>
+        <details><summary data-i18n="faq.q2">¿Soporta archivos virtuales?</summary><p data-i18n="faq.a2">No. NextSync mantiene espejos locales completos de las carpetas que elijas; no trabaja con ficheros bajo demanda.</p></details>
+        <details><summary data-i18n="faq.q3">¿Qué servidores soporta?</summary><p data-i18n="faq.a3">Nextcloud y OpenCloud hoy, a través de sus CLI oficiales de sincronización. Cualquier plataforma que publique un CLI así puede añadirse detrás de la misma abstracción.</p></details>
+        <details><summary data-i18n="faq.q4">¿Envía telemetría?</summary><p data-i18n="faq.a4">No. Sin telemetría, sin analítica y sin informes de fallos remotos.</p></details>
+      </div>
+    </div></section>
+  </main>
+
+  <footer>
+    <div class="container footer-inner">
+      <p class="tagline" data-i18n="footer.tag">Tus archivos, en local. Cualquier servidor, en sincronía.</p>
+      <ul class="bottomlinks">
+        <li><a href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/gnacho/nextsync/issues" target="_blank" rel="noopener" data-i18n="footer.issues">Reportar un problema</a></li>
+        <li><a href="https://github.com/gnacho/nextsync/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li><a href="https://github.com/ehstbr/PyNextCloud-Sync" target="_blank" rel="noopener" data-i18n="footer.upstream">Proyecto original</a></li>
+        <li><a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener" data-i18n="footer.license">Licencia GPL-3.0+</a></li>
+      </ul>
+      <p class="copy" data-i18n="footer.copy">NextSync es software libre (GPL-3.0+). Nextcloud es marca de Nextcloud GmbH; OpenCloud es un producto del Heinlein Group. Este sitio no está afiliado a ninguna de las dos empresas.</p>
+    </div>
+  </footer>
+
+  <dialog id="lightbox" aria-label="Captura ampliada" data-i18n-aria="shots.zoom">
+    <img id="lightboxImg" src="" alt="" />
+    <button class="lightbox-close" id="lightboxClose" aria-label="Cerrar" data-i18n-aria="misc.close">&#10005;</button>
+  </dialog>
+
+  <script async data-goatcounter="https://stats.nextsync.cloudless.club/count" src="https://stats.nextsync.cloudless.club/count.js"></script>
+  <script defer src="https://umami.domatix.com/script.js" data-website-id="0fd3377e-8bba-4651-96e4-82faee5896be"></script>
+  <script src="i18n.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+</body>
+</html>
