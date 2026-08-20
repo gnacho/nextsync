@@ -506,11 +506,12 @@ fn render(
     } else {
         icon.remove_css_class("nextsync-spin");
     }
+    // Issue #99: avoid an invalid state where the icon carries both the
+    // success and error tint classes at the same time.
+    icon.remove_css_class("success");
+    icon.remove_css_class("error");
     if let Some(color) = folder_status_color(snapshot.state) {
         icon.add_css_class(color);
-    } else {
-        icon.remove_css_class("success");
-        icon.remove_css_class("error");
     }
     // The legacy spinner stays hidden; kept for API stability.
     spinner.set_visible(false);
