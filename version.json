@@ -1,12 +1,15 @@
 {
   "schema_version": 1,
-  "version": "0.98.0",
+  "version": "0.102.0",
   "mandatory": false,
-  "summary": "Render folder-row, account-connection and tray-menu icons with fixed colors so they show on light and dark panels.",
+  "summary": "Deletion review dialog, per-folder conflict resolver, specific attention reasons, embedded Add Account wizard and icon/guard fixes.",
   "changelog": [
-    "Folder rows, account connection and tray menu now use fixed-color icons installed under scalable/apps (issue #103).",
-    "Folder-row state icons carry their own color (green ok, blue syncing, red error, gray paused/offline).",
-    "The CSS success/error tint on the row and connection icons is no longer needed and was removed."
+    "Folder rows in 'Review Deletions' open a dialog with Keep Paused, Restore from Nextcloud, Approve These Deletions Once and the server trash browser (issue #105).",
+    "Disabling the deletion guard now clears a pending alert in place, without a restart (issue #104).",
+    "The per-folder options menu opens the conflict resolver for that specific folder (issue #110).",
+    "'Account Needs Attention' now says whether credentials were rejected or none are saved (issue #95).",
+    "Add Account is embedded in the main window instead of a separate window (issue #97).",
+    "Folder rows no longer show 'Synchronized' twice, and the connection icon is larger and clearer (issues #108, #109)."
   ],
-  "released_at": "2026-08-20T22:20:00Z"
+  "released_at": "2026-08-20T23:00:00Z"
 }

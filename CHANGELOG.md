@@ -2,6 +2,20 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.102.0] - 2026-08-20
+
+### Añadido
+- **Diálogo de revisión de eliminaciones (#105)**: una carpeta bloqueada por el guard de borrado ofrece "Revisar eliminaciones" en su menú, con Mantener en pausa, Restaurar desde Nextcloud, Aprobar estas eliminaciones una vez y el navegador de la papelera del servidor (solo Nextcloud).
+- **"Resolver conflictos" en el menú de carpeta (#110)**: cada carpeta abre el resolvedor de conflictos acotado a esa carpeta, no solo la primera de la cuenta activa.
+- **Añadir cuenta integrado en la ventana principal (#97)**: el asistente de configuración ya no es una ventana separada; se desliza sobre la vista de sincronización como Preferencias, con un botón Cancelar para volver.
+
+### Corregido
+- **Desactivar el guard de borrado desbloquea en caliente (#104)**: al desactivar "Protección contra borrado masivo" se limpia la alerta pendiente sin reiniciar la app.
+- **"La cuenta necesita atención" dice el motivo (#95)**: se distingue entre credenciales rechazadas y sin credenciales guardadas, con el paso a seguir en el subtítulo de la fila.
+- **Subtítulo "Sincronizado" duplicado (#108)**: en estado sincronizado solo se muestra "Sincronizado en local {carpeta}".
+- **Icono de conexión más legible (#109)**: sube de tamaño para distinguirse como los iconos de fila.
+- **Landing page integrada (#96)**: la web de NextSync pasa a estar en el repo, publicada en `nextsync.cloudless.club`.
+
 ## [0.98.0] - 2026-08-20
 
 ### Corregido
