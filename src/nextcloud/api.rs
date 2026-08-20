@@ -937,12 +937,29 @@ impl NextcloudApi {
         let authorization = basic_authorization(username, password);
         let headers = [("Authorization", authorization.as_str())];
         let response = self.http.request("GET", &url, &headers, None)?;
+        // Nextcloud answers 404 with the generated placeholder avatar in the
+        // body when the user never uploaded one, so trust image bytes over
+        // the status code (verified against a real server).
+        if (response.status == 200 || response.status == 404)
+            && Self::has_image_magic(&response.body)
+        {
+            return Ok(Some(response.body));
+        }
         match response.status {
-            200 if !response.body.is_empty() => Ok(Some(response.body)),
             200 | 404 | 301..=308 => Ok(None),
             401 | 403 => Err(ApiError::AuthRejected),
             status => Err(ApiError::Http { status }),
         }
+    }
+
+    /// Whether the payload starts with a known image signature (PNG, JPEG,
+    /// GIF or WebP). Avatar endpoints answer errors with JSON/text bodies,
+    /// which must not be painted as images.
+    fn has_image_magic(body: &[u8]) -> bool {
+        body.starts_with(&[0x89, b'P', b'N', b'G'])
+            || body.starts_with(&[0xFF, 0xD8, 0xFF])
+            || body.starts_with(b"GIF8")
+            || (body.len() >= 12 && body.starts_with(b"RIFF") && &body[8..12] == b"WEBP")
     }
 
     /// Run a Depth-1 PROPFIND and parse the multistatus response.
@@ -2430,8 +2447,8 @@ mod tests {
     }
 
     #[test]
-    fn avatar_is_none_on_404_redirect_or_empty_body() {
-        for status in [404u16, 301, 302, 200] {
+    fn avatar_is_none_on_redirect_or_empty_body() {
+        for status in [301u16, 302, 200] {
             let body = if status == 200 { b"" } else { AVATAR_PNG };
             let api = NextcloudApi::with_http(Box::new(FakeHttp::new(status, body)));
             let avatar = api
@@ -2444,6 +2461,33 @@ mod tests {
                 .unwrap();
             assert_eq!(avatar, None, "status {status}");
         }
+    }
+
+    #[test]
+    fn avatar_uses_image_body_even_on_404() {
+        // Nextcloud ships the generated placeholder avatar with a 404 status
+        // when the user has no custom one; a JSON error body stays None.
+        let api = NextcloudApi::with_http(Box::new(FakeHttp::new(404, AVATAR_PNG)));
+        let avatar = api
+            .fetch_avatar(
+                crate::nextcloud::driver::Provider::Nextcloud,
+                "https://cloud.example.com",
+                "alice",
+                "secret",
+            )
+            .unwrap();
+        assert_eq!(avatar.as_deref(), Some(AVATAR_PNG));
+
+        let api = NextcloudApi::with_http(Box::new(FakeHttp::new(404, b"[]")));
+        let avatar = api
+            .fetch_avatar(
+                crate::nextcloud::driver::Provider::Nextcloud,
+                "https://cloud.example.com",
+                "alice",
+                "secret",
+            )
+            .unwrap();
+        assert_eq!(avatar, None);
     }
 
     #[test]

@@ -1222,8 +1222,50 @@ impl MainWindow {
             // Issue #50: the cached account avatar when we have one, the
             // initials fallback when we do not.
             let avatar = libadwaita::Avatar::new(28, Some(&account.login_name), true);
-            if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
-                paint_avatar(&avatar, &bytes);
+            let cached_avatar = crate::util::avatar_cache::read_cached_avatar(&account.id);
+            if let Some(bytes) = &cached_avatar {
+                paint_avatar(&avatar, bytes);
+            } else {
+                // The fetch was never wired in production, so the cache
+                // stayed empty and every account fell back to initials.
+                // Fetch in the background; the repaint goes through
+                // avatar_widgets, resolved at completion so a sidebar
+                // rebuilt meanwhile is not painted through a detached row.
+                let account_for_fetch = account.clone();
+                let weak = self.self_weak.clone();
+                glib::spawn_future_local(async move {
+                    let account_id = account_for_fetch.id.clone();
+                    let handle = gio::spawn_blocking(move || {
+                        let password =
+                            crate::nextcloud::credentials::CredentialsStore::get_for_account(
+                                &account_for_fetch.id,
+                                &account_for_fetch.server_url,
+                                &account_for_fetch.login_name,
+                            )
+                            .ok()
+                            .flatten()?;
+                        let bytes = crate::nextcloud::api::NextcloudApi::new()
+                            .fetch_avatar(
+                                account_for_fetch.provider,
+                                &account_for_fetch.server_url,
+                                &account_for_fetch.login_name,
+                                &password,
+                            )
+                            .ok()
+                            .flatten()?;
+                        crate::util::avatar_cache::store_avatar(&account_for_fetch.id, &bytes)
+                            .ok()?;
+                        Some(bytes)
+                    });
+                    if let Ok(Some(bytes)) = handle.await {
+                        if let Some(main) = weak.upgrade() {
+                            let main = main.borrow();
+                            if let Some(avatar) = main.avatar_widgets.get(&account_id) {
+                                paint_avatar(avatar, &bytes);
+                            }
+                        }
+                    }
+                });
             }
             box_container.append(&avatar);
             let text = gtk4::Box::builder()
