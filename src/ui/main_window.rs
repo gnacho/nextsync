@@ -1116,6 +1116,9 @@ impl MainWindow {
         // Network overrides (proxy/trust, per-account or global) also feed
         // future engine runs.
         self.account_manager.refresh_network(&self.config);
+        // Deletion-guard toggles (issue #104): re-install or remove the guard
+        // in place; disabling also clears a pending deletion alert.
+        self.account_manager.apply_guard_config(&self.config);
         self.refresh_sidebar();
         let account_id = self.active_account_id.clone();
         self.present_account(account_id.as_deref());

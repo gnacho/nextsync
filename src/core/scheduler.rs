@@ -295,6 +295,13 @@ impl Scheduler {
         self.inner.borrow_mut().restore_from_server();
     }
 
+    /// Clear the deletion alert and unblock the folder without touching the
+    /// local files (issue #104): used when the deletion guard is disabled from
+    /// Settings while a folder is already blocked.
+    pub fn clear_delete_alert(&self) {
+        self.inner.borrow_mut().clear_delete_alert();
+    }
+
     /// Stop the scheduler, cancelling pending work and timers.
     pub fn stop(&self) {
         self.inner.borrow_mut().stop();
@@ -893,6 +900,17 @@ impl SchedulerInner {
         self.request(Trigger::Manual);
     }
 
+    fn clear_delete_alert(&mut self) {
+        if self.delete_alert.is_none() {
+            return;
+        }
+        self.delete_alert = None;
+        self.delete_bypass_once = false;
+        self.state
+            .set(AppState::IdleNotSynced, t("Not synchronized yet"));
+        self.request(Trigger::Manual);
+    }
+
     fn stop(&mut self) {
         self.stopped = true;
         self.debounce().stop();
@@ -1344,6 +1362,24 @@ mod tests {
         scheduler.request(Trigger::RemotePush);
         assert_eq!(runner.0.borrow().start_calls, 0);
         scheduler.approve_delete_once();
+        assert!(source.borrow().pending() >= 1);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn clear_delete_alert_unblocks_the_folder_and_requests_a_run() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.set_delete_alert(DeleteAlert {
+            reason: "mass_local_deletion".to_string(),
+            message: "Many files were removed".to_string(),
+            can_approve_once: true,
+            ..DeleteAlert::default()
+        });
+        assert_eq!(scheduler.state().snapshot().state, AppState::DeleteReview);
+        scheduler.clear_delete_alert();
+        assert!(scheduler.delete_alert().is_none());
+        assert_ne!(scheduler.state().snapshot().state, AppState::DeleteReview);
         assert!(source.borrow().pending() >= 1);
         run_idle(&source);
         assert_eq!(runner.0.borrow().start_calls, 1);

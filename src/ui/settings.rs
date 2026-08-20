@@ -626,7 +626,7 @@ fn build_sync_page(
     let detailed_group = libadwaita::PreferencesGroup::new();
     detailed_group.add(&detailed_output_row(store, account_id, callbacks, account));
     page.add(&detailed_group);
-    page.add(&deletion_guard_group(store, account_id, account));
+    page.add(&deletion_guard_group(store, account_id, account, callbacks));
     page
 }
 
@@ -883,6 +883,7 @@ pub(crate) fn deletion_guard_group(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
 ) -> libadwaita::PreferencesGroup {
     let guard = libadwaita::PreferencesGroup::builder()
         .title(t("Deletion Guard"))
@@ -910,6 +911,7 @@ pub(crate) fn deletion_guard_group(
     {
         let store = store.clone();
         let account_id = account_id.to_string();
+        let callbacks = callbacks.clone();
         let enabled_guard = guard_enabled.clone();
         let count_guard = guard_count.clone();
         let percent_guard = guard_percent.clone();
@@ -920,12 +922,14 @@ pub(crate) fn deletion_guard_group(
                 &enabled_guard,
                 &count_guard,
                 &percent_guard,
+                &callbacks,
             );
         });
     }
     {
         let store = store.clone();
         let account_id = account_id.to_string();
+        let callbacks = callbacks.clone();
         let enabled_guard = guard_enabled.clone();
         let count_guard = guard_count.clone();
         let percent_guard = guard_percent.clone();
@@ -936,12 +940,14 @@ pub(crate) fn deletion_guard_group(
                 &enabled_guard,
                 &count_guard,
                 &percent_guard,
+                &callbacks,
             );
         });
     }
     {
         let store = store.clone();
         let account_id = account_id.to_string();
+        let callbacks = callbacks.clone();
         let enabled_guard = guard_enabled.clone();
         let count_guard = guard_count.clone();
         let percent_guard = guard_percent.clone();
@@ -952,6 +958,7 @@ pub(crate) fn deletion_guard_group(
                 &enabled_guard,
                 &count_guard,
                 &percent_guard,
+                &callbacks,
             );
         });
     }
@@ -1198,6 +1205,7 @@ fn save_delete_guard(
     enabled: &libadwaita::SwitchRow,
     count: &libadwaita::SpinRow,
     percent: &libadwaita::SpinRow,
+    callbacks: &SettingsCallbacks,
 ) {
     if let Err(error) = persist_account(store, account_id, |account| {
         account.delete_guard.enabled = enabled.is_active();
@@ -1206,6 +1214,7 @@ fn save_delete_guard(
     }) {
         eprintln!("Settings: could not save deletion guard: {error}");
     }
+    invoke(&callbacks.on_reconfigure);
 }
 
 fn save_network(store: &ConfigStore, impact: &libadwaita::SwitchRow, ssids: &libadwaita::EntryRow) {

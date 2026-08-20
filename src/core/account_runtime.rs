@@ -380,6 +380,22 @@ impl FolderRuntime {
             .configure(&crate::core::triggers::TriggerSettings::from(&account.sync));
     }
 
+    /// Install or remove the deletion guard from the running scheduler
+    /// (issue #104). Disabling also clears a pending deletion alert so the
+    /// folder unblocks immediately, without a restart.
+    pub fn set_guard_enabled(&self, enabled: bool, account: &AccountConfig) {
+        if enabled {
+            self.scheduler
+                .set_guard(Some(Box::new(DeleteGuard::for_folder(
+                    account,
+                    &self.folder,
+                ))));
+        } else {
+            self.scheduler.set_guard(None);
+            self.scheduler.clear_delete_alert();
+        }
+    }
+
     /// Lift the credential-rejection gate on this folder (issue #72): the
     /// scheduler then reconciles manually with the renewed credentials.
     pub fn credentials_renewed(&self) {
@@ -857,6 +873,15 @@ impl AccountRuntime {
         }
     }
 
+    /// Apply the deletion-guard setting to every folder runtime in place
+    /// (issue #104). Disabling also clears a pending deletion alert so a
+    /// blocked folder unblocks without a restart.
+    pub fn apply_guard_config(&self, account: &AccountConfig) {
+        for runtime in self.folders.values() {
+            runtime.set_guard_enabled(account.delete_guard.enabled, account);
+        }
+    }
+
     fn ensure_folder(&mut self, folder: FolderConfig) {
         if self.folders.contains_key(&folder.id) {
             return;
@@ -1084,6 +1109,18 @@ impl AccountManager {
                 continue;
             };
             runtime.set_network(effective_network(account, &self.network));
+        }
+    }
+
+    /// Apply the deletion-guard setting of every account to its folder
+    /// runtimes in place (issue #104), after the setting changed in Settings.
+    pub fn apply_guard_config(&mut self, config: &Config) {
+        let accounts: Vec<AccountConfig> = config.accounts.clone();
+        for (account_id, runtime) in self.runtimes.iter() {
+            let Some(account) = accounts.iter().find(|account| &account.id == account_id) else {
+                continue;
+            };
+            runtime.apply_guard_config(account);
         }
     }
 

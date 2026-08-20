@@ -684,20 +684,14 @@ mod tests {
                 None,
             );
             assert_eq!(row.row.title(), "a");
-            assert_eq!(
-                row.row.subtitle().as_deref(),
-                Some("Synced in local docs")
-            );
+            assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
             // The local-size suffix stays hidden until a size arrives and
             // leaves the subtitle alone (issue #43).
             assert!(!row.local_size.is_visible());
             row.set_local_size("12.4 KiB local");
             assert_eq!(row.local_size.label(), "12.4 KiB local");
             assert!(row.local_size.is_visible());
-            assert_eq!(
-                row.row.subtitle().as_deref(),
-                Some("Synced in local docs")
-            );
+            assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
             row.set_local_size("");
             assert!(!row.local_size.is_visible());
             // Outside the synchronized state the synced-in-local segment
@@ -708,10 +702,7 @@ mod tests {
                 Some("Synchronization Scheduled")
             );
             state.set(AppState::IdleOk, "ok");
-            assert_eq!(
-                row.row.subtitle().as_deref(),
-                Some("Synced in local docs")
-            );
+            assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
             // Live progress (issue #86): a progress event shows the line,
             // clearing it hides the label again.
             state.set_progress(Some(crate::nextcloud::sync_engine::SyncProgress {
