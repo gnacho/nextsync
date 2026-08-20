@@ -3,7 +3,7 @@
 //! Port of `ui/setup.py` (v0.4.0) plus the **provider selector** introduced by
 //! the Rust rewrite plan. A single [`libadwaita::ApplicationWindow`] with a
 //! `gtk4::Stack` walks the user through: welcome (provider selection) → server
-//! → authentication (browser flow v2 or manual sign-in) → folders → summary →
+//! → authentication (browser flow v2 or manual sign-in) → folders →
 //! first-sync confirmation → account creation.
 //!
 //! # Deviations from `setup.py` (motivated)
@@ -198,9 +198,6 @@ struct SetupWidgets {
     folder_list: gtk4::ListBox,
     space_label: gtk4::Label,
     folder_error: gtk4::Label,
-    summary_list: gtk4::ListBox,
-    summary_hint: gtk4::Label,
-    start_button: gtk4::Button,
 }
 
 impl SetupWidgets {
@@ -287,17 +284,6 @@ impl SetupWidgets {
         space_label.set_visible(false);
         let folder_error = error_label("");
 
-        let summary_list = gtk4::ListBox::builder()
-            .css_classes(["boxed-list"])
-            .selection_mode(gtk4::SelectionMode::None)
-            .build();
-        let summary_hint = dim_label(
-            t("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine."),
-        );
-        let start_button = gtk4::Button::with_label(t("Start Synchronizing"));
-        start_button.add_css_class("suggested-action");
-        start_button.set_tooltip_text(Some(t("Finish setup and start synchronizing")));
-
         Self {
             provider_row,
             provider_warning,
@@ -318,9 +304,6 @@ impl SetupWidgets {
             folder_list,
             space_label,
             folder_error,
-            summary_list,
-            summary_hint,
-            start_button,
         }
     }
 }
@@ -385,7 +368,6 @@ impl SetupWindow {
         build_server_page(&context_for_pages);
         build_authentication_page(&context_for_pages);
         build_folders_page(&context_for_pages);
-        build_summary_page(&context_for_pages);
         stack.set_visible_child_name("welcome");
 
         Self { window, context }
@@ -660,12 +642,16 @@ fn build_folders_page(ctx: &SetupContext) {
 
     let actions = action_box();
     actions.append(&back_button(&ctx.stack, "authentication"));
-    let review = gtk4::Button::with_label(t("Sign In"));
+    // Issue #73: this is the last step. Signing in already happened on the
+    // previous page, so the button finishes setup; with folders it opens the
+    // first-sync review, without them it connects right away. The old
+    // summary page in between only repeated what was just picked.
+    let review = gtk4::Button::with_label(t("Finish Setup"));
     review.add_css_class("suggested-action");
     {
         let ctx = ctx.clone();
         review.connect_clicked(move |_| {
-            folders_continue(&ctx);
+            start_syncing(&ctx);
         });
     }
     actions.append(&review);
@@ -680,25 +666,6 @@ fn build_folders_page(ctx: &SetupContext) {
     }
 
     ctx.stack.add_named(&page, Some("folders"));
-}
-
-fn build_summary_page(ctx: &SetupContext) {
-    let (page, content) = page();
-    content.append(&title_label(t("Ready to Synchronize")));
-    content.append(&ctx.widgets.summary_list);
-    content.append(&ctx.widgets.summary_hint);
-
-    let actions = action_box();
-    actions.append(&back_button(&ctx.stack, "folders"));
-    let ctx_for_start = ctx.clone();
-    let start_button = ctx.widgets.start_button.clone();
-    start_button.connect_clicked(move |_| {
-        start_syncing(&ctx_for_start);
-    });
-    actions.append(&start_button);
-    content.append(&actions);
-
-    ctx.stack.add_named(&page, Some("summary"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,84 +1156,6 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
     ctx.widgets.folder_list.append(&row);
 }
 
-/// Rebuild the summary page from the current state and navigate to it.
-fn folders_continue(ctx: &SetupContext) {
-    ctx.widgets.folder_error.set_text("");
-    {
-        let state = ctx.state.borrow();
-        ctx.widgets.summary_list.remove_all();
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Server"),
-            &state.server,
-            "network-server-symbolic",
-        );
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Account"),
-            &state.username,
-            "avatar-default-symbolic",
-        );
-        if state.folders.is_empty() {
-            append_summary_row(
-                &ctx.widgets.summary_list,
-                t("No Folders"),
-                t("Connected without synchronization folders. Add them later from Settings."),
-                "folder-symbolic",
-            );
-            ctx.widgets.start_button.set_label(t("Finish Setup"));
-            ctx.widgets.summary_hint.set_text(
-                t("The account will be connected without synchronizing any folder. You can add folders later from Settings."),
-            );
-        } else {
-            ctx.widgets.start_button.set_label(t("Start Synchronizing"));
-            ctx.widgets.summary_hint.set_text(
-                t("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine."),
-            );
-            for folder in &state.folders {
-                append_summary_row(
-                    &ctx.widgets.summary_list,
-                    t("Local Folder"),
-                    &folder.local_root,
-                    "folder-symbolic",
-                );
-                let remote = if folder.remote_path.is_empty() {
-                    "/"
-                } else {
-                    folder.remote_path.as_str()
-                };
-                append_summary_row(
-                    &ctx.widgets.summary_list,
-                    t("Remote Folder"),
-                    remote,
-                    "folder-remote-symbolic",
-                );
-            }
-        }
-        if state.provider == Provider::OpenCloud {
-            let space = state.space_id.as_deref().unwrap_or("Not set");
-            append_summary_row(
-                &ctx.widgets.summary_list,
-                t("Space"),
-                t(space),
-                "drive-multidisk-symbolic",
-            );
-        }
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Local Detection"),
-            t("Filesystem monitor"),
-            "folder-saved-search-symbolic",
-        );
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Remote Detection"),
-            t("Server push + every 10 minutes"),
-            "network-transmit-receive-symbolic",
-        );
-    }
-    ctx.stack.set_visible_child_name("summary");
-}
 
 /// Start synchronization: without folders it finishes immediately; otherwise
 /// it probes the first remote folder and asks for the first-sync confirmation.
@@ -1813,21 +1702,6 @@ fn provider_from_combo(row: &libadwaita::ComboRow) -> Provider {
     } else {
         Provider::Nextcloud
     }
-}
-
-fn append_summary_row(list: &gtk4::ListBox, title: &str, subtitle: &str, icon: &str) {
-    let row = libadwaita::ActionRow::builder()
-        .title(title)
-        .subtitle(subtitle)
-        .build();
-    if !icon.is_empty() {
-        let image = gtk4::Image::builder()
-            .icon_name(icon)
-            .pixel_size(16)
-            .build();
-        row.add_prefix(&image);
-    }
-    list.append(&row);
 }
 
 /// Present a folder chooser and write the selection into the entry row.
