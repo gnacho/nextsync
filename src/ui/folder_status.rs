@@ -41,15 +41,42 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
     }
 }
 
-/// The translated subtitle segment for a remote path ("Remote: {remote}").
+/// The translated subtitle segment for a synced folder ("Synced in local
+/// {folder}", issue #78). The folder is the remote path without its leading
+/// slash: the name is what matters, the slash is noise.
 pub fn remote_label(remote_path: &str) -> String {
-    t("Remote: {remote}").replace("{remote}", remote_path)
+    let folder = remote_path.trim_start_matches('/');
+    t("Synced in local {folder}").replace("{folder}", folder)
 }
 
-/// The translated suffix for a folder's local used space ("{size} local",
+/// The translated suffix for the folder's local used space ("{size} local",
 /// issue #43).
 pub fn local_size_label(bytes: u64) -> String {
     t("{size} local").replace("{size}", &crate::nextcloud::api::format_bytes(bytes))
+}
+
+/// One line of live progress for a folder row (issue #86): the translated
+/// action, the file being operated on and, when the engine reports one, the
+/// operation counter for the whole run.
+pub fn progress_line_text(
+    progress: &crate::nextcloud::nextcloudcmd_progress::SyncProgress,
+    file: &str,
+) -> String {
+    let action = match progress.action.as_str() {
+        "download" => t("downloading {file}"),
+        "upload" => t("uploading {file}"),
+        "delete" => t("deleting {file}"),
+        "conflict" => t("conflict on {file}"),
+        _ => t("processing {file}"),
+    }
+    .replace("{file}", file);
+    if progress.processed > 0 {
+        t("{action} · {count}")
+            .replace("{action}", &action)
+            .replace("{count}", &progress.processed.to_string())
+    } else {
+        action
+    }
 }
 
 /// Recursively sum the size of the regular files below `root`, skipping
@@ -141,11 +168,15 @@ pub struct FolderStatusRow {
     /// Suffix label with the folder's local used space (issue #43); hidden
     /// until a size is known.
     pub local_size: gtk4::Label,
+    /// Suffix label with the live per-file progress (issue #86); hidden
+    /// while no synchronization is running.
+    progress_label: gtk4::Label,
     _menu_button: gtk4::MenuButton,
     _actions: std::collections::HashMap<String, gio::SimpleAction>,
     format_last_sync: Option<Rc<dyn Fn() -> String>>,
     remote_path: String,
     _subscription: Option<crate::state::Subscription>,
+    _progress_subscription: Option<crate::state::Subscription>,
 }
 
 impl FolderStatusRow {
@@ -169,6 +200,9 @@ impl FolderStatusRow {
             .activatable(true)
             .selectable(false)
             .build();
+        // The bold folder name (issue #78) comes from the app-wide style
+        // provider; the internal title label has no public handle.
+        row.add_css_class("folder-source");
 
         let icon = gtk4::Image::builder()
             .icon_name("folder-symbolic")
@@ -184,6 +218,17 @@ impl FolderStatusRow {
             .visible(false)
             .build();
         row.add_suffix(&local_size);
+
+        // Live per-file progress (issue #86): small dim text next to the
+        // spinner while a run is in flight, gone when it ends.
+        let progress_label = gtk4::Label::builder()
+            .css_classes(["dim-label", "caption"])
+            .valign(gtk4::Align::Center)
+            .ellipsize(gtk4::pango::EllipsizeMode::Middle)
+            .max_width_chars(28)
+            .visible(false)
+            .build();
+        row.add_suffix(&progress_label);
 
         let spinner = gtk4::Spinner::builder().build();
         spinner.set_visible(false);
@@ -271,11 +316,13 @@ impl FolderStatusRow {
             icon,
             spinner,
             local_size,
+            progress_label,
             _menu_button: menu_button,
             _actions: actions,
             format_last_sync,
             remote_path: remote_path.clone(),
             _subscription: None,
+            _progress_subscription: None,
         };
 
         match state {
@@ -296,6 +343,22 @@ impl FolderStatusRow {
                     );
                 });
                 this._subscription = Some(subscription);
+                // Live per-file progress (issue #86). Only the widgets are
+                // captured, so the closure dies with the label and the row.
+                let progress_label = this.progress_label.clone();
+                let progress_subscription =
+                    controller.subscribe_progress(move |progress| match progress {
+                        Some(progress) if progress.is_operation() => {
+                            let file = std::path::Path::new(&progress.path)
+                                .file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| progress.path.clone());
+                            progress_label.set_text(&progress_line_text(progress, &file));
+                            progress_label.set_visible(true);
+                        }
+                        _ => progress_label.set_visible(false),
+                    });
+                this._progress_subscription = Some(progress_subscription);
             }
             None => {
                 let snapshot = StateSnapshot::new(AppState::Unconfigured);
@@ -414,7 +477,14 @@ mod tests {
         assert_eq!(label, "Sincronizado");
         let (_, label) = folder_status_presentation(AppState::Offline);
         assert_eq!(label, "Sin conexión");
-        assert_eq!(remote_label("/docs"), "Remoto: /docs");
+        assert_eq!(remote_label("/docs"), "Sincronizado en local docs");
+        assert_eq!(remote_label("docs"), "Sincronizado en local docs");
+        // Live progress line (issue #86): translated action plus counter.
+        let mut progress =
+            crate::nextcloud::nextcloudcmd_progress::SyncProgress::new("upload", "/tmp/a/b.txt");
+        assert_eq!(progress_line_text(&progress, "b.txt"), "subiendo b.txt");
+        progress.processed = 7;
+        assert_eq!(progress_line_text(&progress, "b.txt"), "subiendo b.txt · 7");
         reset_locale();
     }
 
@@ -496,7 +566,7 @@ mod tests {
             assert_eq!(row.row.title(), "a");
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Remote: /docs")
+                Some("Synchronized · Synced in local docs")
             );
             // The local-size suffix stays hidden until a size arrives and
             // leaves the subtitle alone (issue #43).
@@ -506,7 +576,7 @@ mod tests {
             assert!(row.local_size.is_visible());
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronized · Remote: /docs")
+                Some("Synchronized · Synced in local docs")
             );
             row.set_local_size("");
             assert!(!row.local_size.is_visible());

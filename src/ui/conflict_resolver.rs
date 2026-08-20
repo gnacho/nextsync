@@ -165,8 +165,17 @@ impl ConflictResolverWindow {
             .build();
         let conflict_scroller = gtk4::ScrolledWindow::builder().vexpand(true).build();
         conflict_scroller.set_child(Some(&conflict_list));
+        // Bulk actions over the whole list (issue #77); kept hidden until a
+        // scan finds conflicts.
+        let bulk_bar = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .halign(gtk4::Align::End)
+            .build();
+        bulk_bar.set_visible(false);
         conflicts_box.append(&summary);
         conflicts_box.append(&empty_state);
+        conflicts_box.append(&bulk_bar);
         conflicts_box.append(&conflict_scroller);
         let conflicts_page = stack.add_named(&conflicts_box, Some("conflicts"));
         conflicts_page.set_title(Some(t("Conflicts")));
@@ -195,10 +204,13 @@ impl ConflictResolverWindow {
             list: conflict_list.clone(),
             summary: summary.clone(),
             empty_state: empty_state.clone(),
+            bulk_bar: bulk_bar.clone(),
+            parent: window.upcast_ref::<gtk4::Widget>().clone(),
             local_root: local_root.as_ref().to_path_buf(),
             matcher: matcher.clone(),
             toast_overlay: toast_overlay.clone(),
         };
+        wire_bulk_buttons(&bulk_bar, &target);
         let target_for_refresh = target.clone();
         refresh.connect_clicked(move |_| target_for_refresh.reload());
         target.reload();
@@ -257,6 +269,10 @@ struct ReloadTarget {
     list: gtk4::ListBox,
     summary: gtk4::Label,
     empty_state: libadwaita::StatusPage,
+    /// The bulk action bar, shown only while conflicts exist (issue #77).
+    bulk_bar: gtk4::Box,
+    /// The resolver window, parent of the bulk confirmation dialog.
+    parent: gtk4::Widget,
     local_root: PathBuf,
     matcher: ExclusionMatcher,
     toast_overlay: libadwaita::ToastOverlay,
@@ -265,14 +281,7 @@ struct ReloadTarget {
 impl ReloadTarget {
     /// Rescan the folder and rebuild the Conflicts list.
     fn reload(&self) {
-        reload_conflicts(
-            &self.list,
-            &self.summary,
-            &self.empty_state,
-            &self.local_root,
-            &self.matcher,
-            &self.toast_overlay,
-        );
+        reload_conflicts(self);
     }
 
     /// Show a toast on the window's overlay.
@@ -282,21 +291,97 @@ impl ReloadTarget {
     }
 }
 
+/// Which side every conflict should be resolved to (issue #77).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BulkSide {
+    Local,
+    Remote,
+}
+
+/// Wire the two bulk buttons: confirm with the real count, then resolve
+/// every conflict in one pass and reload.
+fn wire_bulk_buttons(bulk_bar: &gtk4::Box, target: &ReloadTarget) {
+    let mut side_buttons = [
+        (BulkSide::Local, t("Keep Local for All")),
+        (BulkSide::Remote, t("Keep Remote for All")),
+    ];
+    for (side, label) in side_buttons.iter_mut() {
+        let button = gtk4::Button::builder().label(*label).build();
+        let target_for_bulk = target.clone();
+        let side = *side;
+        button.connect_clicked(move |_| confirm_bulk_resolve(&target_for_bulk, side));
+        bulk_bar.append(&button);
+    }
+}
+
+/// Ask for confirmation with the conflict count, then resolve them all.
+fn confirm_bulk_resolve(target: &ReloadTarget, side: BulkSide) {
+    let conflicts = find_conflicts(&target.local_root, &target.matcher);
+    if conflicts.is_empty() {
+        return;
+    }
+    let count = conflicts.len();
+    let (question, action, done) = match side {
+        BulkSide::Local => (
+            t("Keep the local version of all {count} conflicted copy(ies)? The conflicted copies are deleted."),
+            t("Keep Local for All"),
+            t("Kept the local version of {count} file(s)"),
+        ),
+        BulkSide::Remote => (
+            t("Keep the server version of all {count} conflicted copy(ies)? The working files are replaced."),
+            t("Keep Remote for All"),
+            t("Kept the server version of {count} file(s)"),
+        ),
+    };
+    let dialog = libadwaita::AlertDialog::new(
+        Some(t("Resolve All Conflicts")),
+        Some(question.replacen("{count}", &count.to_string(), 1).as_str()),
+    );
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("resolve", action);
+    dialog.set_response_appearance("resolve", libadwaita::ResponseAppearance::Destructive);
+    let target_for_apply = target.clone();
+    dialog.connect_response(None, move |dialog, response| {
+        if response != "resolve" {
+            return;
+        }
+        dialog.close();
+        let resolved = apply_bulk_resolve(&target_for_apply, side);
+        target_for_apply.toast(done.replacen("{count}", &resolved.to_string(), 1));
+        target_for_apply.reload();
+    });
+    dialog.present(Some(&target.parent));
+}
+
+/// Resolve every conflict to `side`; returns how many succeeded.
+fn apply_bulk_resolve(target: &ReloadTarget, side: BulkSide) -> usize {
+    let conflicts = find_conflicts(&target.local_root, &target.matcher);
+    conflicts
+        .iter()
+        .filter(|conflict| match side {
+            BulkSide::Local => keep_local(conflict),
+            BulkSide::Remote => keep_remote(conflict),
+        })
+        .count()
+}
+
 /// Rebuild the Conflicts list from a fresh scan.
-fn reload_conflicts(
-    list: &gtk4::ListBox,
-    summary: &gtk4::Label,
-    empty_state: &libadwaita::StatusPage,
-    local_root: &Path,
-    matcher: &ExclusionMatcher,
-    toast_overlay: &libadwaita::ToastOverlay,
-) {
+fn reload_conflicts(target: &ReloadTarget) {
+    let (list, summary, empty_state, bulk_bar, local_root, matcher) = (
+        &target.list,
+        &target.summary,
+        &target.empty_state,
+        &target.bulk_bar,
+        &target.local_root,
+        &target.matcher,
+    );
     while let Some(child) = list.first_child() {
         child.unparent();
     }
     let conflicts = find_conflicts(local_root, matcher);
     if conflicts.is_empty() {
         empty_state.set_visible(true);
+        bulk_bar.set_visible(false);
         summary.set_text(
             &t("No conflicted copies found in {folder}.")
                 .replace("{folder}", &local_root.display().to_string()),
@@ -304,21 +389,14 @@ fn reload_conflicts(
         return;
     }
     empty_state.set_visible(false);
+    bulk_bar.set_visible(true);
     summary.set_text(
         &t("{count} conflicted copy(ies) found in {folder}.")
             .replace("{count}", &conflicts.len().to_string())
             .replace("{folder}", &local_root.display().to_string()),
     );
     for conflict in conflicts {
-        let target = ReloadTarget {
-            list: list.clone(),
-            summary: summary.clone(),
-            empty_state: empty_state.clone(),
-            local_root: local_root.to_path_buf(),
-            matcher: matcher.clone(),
-            toast_overlay: toast_overlay.clone(),
-        };
-        list.append(&build_conflict_row(&conflict, &target));
+        list.append(&build_conflict_row(&conflict, target));
     }
 }
 

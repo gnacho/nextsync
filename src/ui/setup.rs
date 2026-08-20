@@ -3,7 +3,7 @@
 //! Port of `ui/setup.py` (v0.4.0) plus the **provider selector** introduced by
 //! the Rust rewrite plan. A single [`libadwaita::ApplicationWindow`] with a
 //! `gtk4::Stack` walks the user through: welcome (provider selection) → server
-//! → authentication (browser flow v2 or manual sign-in) → folders → summary →
+//! → authentication (browser flow v2 or manual sign-in) → folders →
 //! first-sync confirmation → account creation.
 //!
 //! # Deviations from `setup.py` (motivated)
@@ -75,7 +75,7 @@ use crate::storage::config::{
 };
 use crate::util::i18n::t;
 
-const WINDOW_TITLE: &str = "Set Up NextSync";
+const WINDOW_TITLE: &str = "Add Account";
 
 /// Callback invoked once an account has been created and persisted.
 pub type SetupCompleteCallback = Rc<dyn Fn(AccountConfig)>;
@@ -198,9 +198,6 @@ struct SetupWidgets {
     folder_list: gtk4::ListBox,
     space_label: gtk4::Label,
     folder_error: gtk4::Label,
-    summary_list: gtk4::ListBox,
-    summary_hint: gtk4::Label,
-    start_button: gtk4::Button,
 }
 
 impl SetupWidgets {
@@ -287,17 +284,6 @@ impl SetupWidgets {
         space_label.set_visible(false);
         let folder_error = error_label("");
 
-        let summary_list = gtk4::ListBox::builder()
-            .css_classes(["boxed-list"])
-            .selection_mode(gtk4::SelectionMode::None)
-            .build();
-        let summary_hint = dim_label(
-            t("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine."),
-        );
-        let start_button = gtk4::Button::with_label(t("Start Synchronizing"));
-        start_button.add_css_class("suggested-action");
-        start_button.set_tooltip_text(Some(t("Finish setup and start synchronizing")));
-
         Self {
             provider_row,
             provider_warning,
@@ -318,9 +304,6 @@ impl SetupWidgets {
             folder_list,
             space_label,
             folder_error,
-            summary_list,
-            summary_hint,
-            start_button,
         }
     }
 }
@@ -356,7 +339,9 @@ impl SetupWindow {
         let window = libadwaita::ApplicationWindow::builder()
             .application(application)
             .title(t(WINDOW_TITLE))
-            .default_width(620)
+            // Wider than the old 620 so full paths and folder rows fit
+            // without ellipsizing as soon (issue #75).
+            .default_width(720)
             .default_height(680)
             .build();
 
@@ -385,7 +370,6 @@ impl SetupWindow {
         build_server_page(&context_for_pages);
         build_authentication_page(&context_for_pages);
         build_folders_page(&context_for_pages);
-        build_summary_page(&context_for_pages);
         stack.set_visible_child_name("welcome");
 
         Self { window, context }
@@ -422,15 +406,42 @@ impl SetupWindow {
 
 fn build_welcome_page(ctx: &SetupContext) {
     let (page, content) = page();
-    let status = libadwaita::StatusPage::builder()
+    // AdwStatusPage embeds a GtkScrolledWindow, so a page short on vertical
+    // space grew an unwanted scrollbar around the icon/title/description
+    // (issue #80). This compact header never scrolls.
+    let header = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(12)
+        .vexpand(true)
+        .valign(gtk4::Align::Center)
+        .build();
+
+    let icon = gtk4::Image::builder()
         .icon_name("io.github.gnacho.nextsync")
-        .title("NextSync")
-        .description(t(
+        .pixel_size(64)
+        .halign(gtk4::Align::Center)
+        .build();
+    header.append(&icon);
+
+    let title = gtk4::Label::builder()
+        .label("NextSync")
+        .css_classes(["title-2"])
+        .halign(gtk4::Align::Center)
+        .build();
+    header.append(&title);
+
+    let description = gtk4::Label::builder()
+        .label(t(
             "A lightweight desktop synchronizer for Nextcloud and OpenCloud.",
         ))
-        .vexpand(true)
+        .wrap(true)
+        .justify(gtk4::Justification::Center)
+        .max_width_chars(40)
+        .halign(gtk4::Align::Center)
         .build();
-    content.append(&status);
+    header.append(&description);
+
+    content.append(&header);
 
     content.append(
         &dim_label(
@@ -633,12 +644,16 @@ fn build_folders_page(ctx: &SetupContext) {
 
     let actions = action_box();
     actions.append(&back_button(&ctx.stack, "authentication"));
-    let review = gtk4::Button::with_label(t("Sign In"));
+    // Issue #73: this is the last step. Signing in already happened on the
+    // previous page, so the button finishes setup; with folders it opens the
+    // first-sync review, without them it connects right away. The old
+    // summary page in between only repeated what was just picked.
+    let review = gtk4::Button::with_label(t("Finish Setup"));
     review.add_css_class("suggested-action");
     {
         let ctx = ctx.clone();
         review.connect_clicked(move |_| {
-            folders_continue(&ctx);
+            start_syncing(&ctx);
         });
     }
     actions.append(&review);
@@ -653,25 +668,6 @@ fn build_folders_page(ctx: &SetupContext) {
     }
 
     ctx.stack.add_named(&page, Some("folders"));
-}
-
-fn build_summary_page(ctx: &SetupContext) {
-    let (page, content) = page();
-    content.append(&title_label(t("Ready to Synchronize")));
-    content.append(&ctx.widgets.summary_list);
-    content.append(&ctx.widgets.summary_hint);
-
-    let actions = action_box();
-    actions.append(&back_button(&ctx.stack, "folders"));
-    let ctx_for_start = ctx.clone();
-    let start_button = ctx.widgets.start_button.clone();
-    start_button.connect_clicked(move |_| {
-        start_syncing(&ctx_for_start);
-    });
-    actions.append(&start_button);
-    content.append(&actions);
-
-    ctx.stack.add_named(&page, Some("summary"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,7 +1068,35 @@ fn present_add_folder_dialog(
     } else {
         &previous_remote
     });
+    // Existing remote folders as a dropdown (issue #82), with the manual
+    // entry as the source of truth for new paths.
+    let remote_list = gtk4::StringList::new(&[]);
+    let picker = gtk4::DropDown::from_strings(&[]);
+    picker.set_model(Some(&remote_list));
+    picker.set_selected(u32::MAX);
+    picker.set_tooltip_text(Some(t("Choose an existing remote folder")));
+    let entry_for_pick = remote_entry.clone();
+    picker.connect_selected_notify(move |picker| {
+        if let Some(item) = picker.selected_item() {
+            if let Ok(item) = item.downcast::<gtk4::StringObject>() {
+                entry_for_pick.set_text(&item.string());
+                picker.set_selected(u32::MAX);
+            }
+        }
+    });
+    remote_entry.add_suffix(&picker);
     entry_box.append(&remote_entry);
+
+    let picker_status = gtk4::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["caption"])
+        .build();
+    entry_box.append(&picker_status);
+
+    if !opencloud {
+        populate_wizard_remote_picker(ctx, &remote_list, &picker_status);
+    }
 
     if let Some(message) = error {
         entry_box.append(&error_label(&message));
@@ -1133,7 +1157,10 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
         folder.remote_path.as_str()
     };
     let row = libadwaita::ActionRow::builder()
-        .title(folder.local_root.as_str())
+        .title(fold_home(&folder.local_root))
+        // The folded path is for display; the absolute one stays a tooltip
+        // away (issue #75).
+        .tooltip_text(folder.local_root.as_str())
         .subtitle(t("Remote: {remote}").replacen("{remote}", remote_label, 1))
         .build();
     let icon = gtk4::Image::builder()
@@ -1160,85 +1187,6 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
     });
     row.add_suffix(&remove);
     ctx.widgets.folder_list.append(&row);
-}
-
-/// Rebuild the summary page from the current state and navigate to it.
-fn folders_continue(ctx: &SetupContext) {
-    ctx.widgets.folder_error.set_text("");
-    {
-        let state = ctx.state.borrow();
-        ctx.widgets.summary_list.remove_all();
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Server"),
-            &state.server,
-            "network-server-symbolic",
-        );
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Account"),
-            &state.username,
-            "avatar-default-symbolic",
-        );
-        if state.folders.is_empty() {
-            append_summary_row(
-                &ctx.widgets.summary_list,
-                t("No Folders"),
-                t("Connected without synchronization folders. Add them later from Settings."),
-                "folder-symbolic",
-            );
-            ctx.widgets.start_button.set_label(t("Finish Setup"));
-            ctx.widgets.summary_hint.set_text(
-                t("The account will be connected without synchronizing any folder. You can add folders later from Settings."),
-            );
-        } else {
-            ctx.widgets.start_button.set_label(t("Start Synchronizing"));
-            ctx.widgets.summary_hint.set_text(
-                t("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine."),
-            );
-            for folder in &state.folders {
-                append_summary_row(
-                    &ctx.widgets.summary_list,
-                    t("Local Folder"),
-                    &folder.local_root,
-                    "folder-symbolic",
-                );
-                let remote = if folder.remote_path.is_empty() {
-                    "/"
-                } else {
-                    folder.remote_path.as_str()
-                };
-                append_summary_row(
-                    &ctx.widgets.summary_list,
-                    t("Remote Folder"),
-                    remote,
-                    "folder-remote-symbolic",
-                );
-            }
-        }
-        if state.provider == Provider::OpenCloud {
-            let space = state.space_id.as_deref().unwrap_or("Not set");
-            append_summary_row(
-                &ctx.widgets.summary_list,
-                t("Space"),
-                t(space),
-                "drive-multidisk-symbolic",
-            );
-        }
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Local Detection"),
-            t("Filesystem monitor"),
-            "folder-saved-search-symbolic",
-        );
-        append_summary_row(
-            &ctx.widgets.summary_list,
-            t("Remote Detection"),
-            t("Server push + every 10 minutes"),
-            "network-transmit-receive-symbolic",
-        );
-    }
-    ctx.stack.set_visible_child_name("summary");
 }
 
 /// Start synchronization: without folders it finishes immediately; otherwise
@@ -1788,19 +1736,68 @@ fn provider_from_combo(row: &libadwaita::ComboRow) -> Provider {
     }
 }
 
-fn append_summary_row(list: &gtk4::ListBox, title: &str, subtitle: &str, icon: &str) {
-    let row = libadwaita::ActionRow::builder()
-        .title(title)
-        .subtitle(subtitle)
-        .build();
-    if !icon.is_empty() {
-        let image = gtk4::Image::builder()
-            .icon_name(icon)
-            .pixel_size(16)
-            .build();
-        row.add_prefix(&image);
+/// Display a local path with the home directory folded to `~` (issue #75):
+/// shorter to scan, with the absolute path kept in tooltips.
+fn fold_home(path: &str) -> String {
+    let home = std::env::var_os("HOME").map(|home| home.to_string_lossy().to_string());
+    fold_home_with(home.as_deref(), path)
+}
+
+/// [`fold_home`] with an explicit home directory, so the folding rules are
+/// testable without depending on the test runner's environment.
+fn fold_home_with(home: Option<&str>, path: &str) -> String {
+    let Some(home) = home.filter(|home| home.len() > 1) else {
+        return path.to_string();
+    };
+    if path == home {
+        return "~".to_string();
     }
-    list.append(&row);
+    if let Some(rest) = path.strip_prefix(&format!("{home}/")) {
+        return format!("~/{rest}");
+    }
+    path.to_string()
+}
+
+/// Fill the wizard's remote-folder dropdown with the server's existing
+/// folders (issue #82). The credentials come from the wizard itself: the
+/// user signed in on the previous page but the account is not persisted
+/// yet, so there is nothing in the keyring to look up. Nextcloud only; the
+/// OpenCloud wizard keeps the manual entry until its listing lands.
+fn populate_wizard_remote_picker(
+    ctx: &SetupContext,
+    list: &gtk4::StringList,
+    status: &gtk4::Label,
+) {
+    let (server, username) = {
+        let state = ctx.state.borrow();
+        (state.server.clone(), state.username.clone())
+    };
+    let password = ctx.widgets.password_entry.text().to_string();
+    let list = list.clone();
+    let status = status.clone();
+    let handle = gio::spawn_blocking(move || {
+        if server.is_empty() || username.is_empty() || password.is_empty() {
+            return None;
+        }
+        crate::nextcloud::api::NextcloudApi::new()
+            .list_remote_folders(&server, &username, &password)
+            .ok()
+    });
+    glib::spawn_future_local(async move {
+        let Ok(folders) = handle.await else {
+            return;
+        };
+        match folders {
+            Some(folders) => {
+                for folder in folders {
+                    list.append(&folder);
+                }
+            }
+            // The dialog stays usable: the manual entry is the source of
+            // truth, an empty dropdown just offers no shortcuts.
+            None => status.set_text(t("Could not list the remote folders.")),
+        }
+    });
 }
 
 /// Present a folder chooser and write the selection into the entry row.
@@ -2092,10 +2089,10 @@ mod tests {
     #[test]
     fn wizard_title_translates_to_spanish_and_back() {
         set_locale(Locale::Spanish);
-        assert_eq!(t(WINDOW_TITLE), "Configurar NextSync");
+        assert_eq!(t(WINDOW_TITLE), "Añadir cuenta");
         assert_eq!(t("Start Synchronizing?"), "¿Empezar a sincronizar?");
         set_locale(Locale::English);
-        assert_eq!(t(WINDOW_TITLE), "Set Up NextSync");
+        assert_eq!(t(WINDOW_TITLE), "Add Account");
         assert_eq!(t("Start Synchronizing?"), "Start Synchronizing?");
         reset_locale();
     }
@@ -2284,5 +2281,24 @@ mod tests {
             assert_eq!(label.text().as_str(), url);
             reset_locale();
         });
+    }
+
+    #[test]
+    fn fold_home_folds_only_inside_the_home_tree() {
+        let home = "/home/user";
+        assert_eq!(fold_home_with(Some(home), "/home/user"), "~");
+        assert_eq!(
+            fold_home_with(Some(home), "/home/user/Documents/Cloud/Foo"),
+            "~/Documents/Cloud/Foo"
+        );
+        // Outside the home tree nothing folds, and a home-like prefix that
+        // is not the home ("/home/username2") must not fold either.
+        assert_eq!(fold_home_with(Some(home), "/tmp/foo"), "/tmp/foo");
+        assert_eq!(
+            fold_home_with(Some(home), "/home/username2/docs"),
+            "/home/username2/docs"
+        );
+        // No home directory available: the path is returned as is.
+        assert_eq!(fold_home_with(None, "/home/user/docs"), "/home/user/docs");
     }
 }

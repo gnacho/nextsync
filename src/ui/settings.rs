@@ -2073,7 +2073,7 @@ fn present_sign_in_again_dialog(
 fn present_remove_account(login_name: &str, host: &SettingsHost, callbacks: &SettingsCallbacks) {
     let dialog = libadwaita::AlertDialog::new(
         Some(t("Remove Nextcloud Account?")),
-        Some(t("The account credential will be removed from the password keyring. Your local NextCloud folder and all files inside it will remain untouched.")),
+        Some(t("No files are deleted: neither the local synchronized folders nor anything on the server. Only this app forgets the account, its credentials and its sync configuration.")),
     );
     dialog.add_response("cancel", t("Cancel"));
     dialog.add_response("remove", t("Continue"));
@@ -2102,7 +2102,7 @@ fn present_remove_account_step_two(
 ) {
     let dialog = libadwaita::AlertDialog::new(
         Some(t(&format!("Remove {login_name}?"))),
-        Some(t("Type “remove” to confirm. This cannot be undone and stops synchronization immediately.")),
+        Some(t("Type “remove” to confirm. This cannot be undone and stops synchronization immediately. No files are deleted, locally or on the server; the account is simply forgotten in this app.")),
     );
     let entry = gtk4::Entry::new();
     entry.set_placeholder_text(Some(t("Type “remove”")));

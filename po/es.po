@@ -1457,9 +1457,10 @@ msgstr "¿Eliminar la cuenta de Nextcloud?"
 
 #: src/nextsync/ui/settings.py:709
 msgid ""
-"The account credential will be removed from the password keyring. Your local "
-"NextCloud folder and all files inside it will remain untouched."
-msgstr "La credencial de la cuenta se eliminará del almacén de contraseñas. Tu carpeta local de NextCloud y todos los archivos que contiene quedarán intactos."
+"No files are deleted: neither the local synchronized folders nor anything "
+"on the server. Only this app forgets the account, its credentials and its "
+"sync configuration."
+msgstr "No se elimina ningún archivo: ni las carpetas locales sincronizadas ni nada del servidor. Solo esta aplicación olvida la cuenta, sus credenciales y su configuración de sincronización."
 
 #: src/nextsync/ui/settings.py:712 src/nextsync/ui/setup.py:133
 msgid "Continue"
@@ -1473,10 +1474,12 @@ msgstr ""
 #: src/nextsync/ui/settings.py:725
 msgid ""
 "Type “remove” to confirm. This cannot be undone and stops synchronization "
-"immediately."
+"immediately. No files are deleted, locally or on the server; the account "
+"is simply forgotten in this app."
 msgstr ""
 "Escribe «remove» para confirmar. Esta acción no se puede deshacer y detiene "
-"la sincronización de inmediato."
+"la sincronización de inmediato. No se elimina ningún archivo, ni en local "
+"ni en el servidor; la aplicación simplemente olvida la cuenta."
 
 #: src/nextsync/ui/settings.py:727
 msgid "Type “remove”"
@@ -1485,10 +1488,6 @@ msgstr "Escribe «remove»"
 #: src/nextsync/ui/settings.py:746
 msgid "Type “remove” to confirm account removal."
 msgstr "Escribe «remove» para confirmar la eliminación de la cuenta."
-
-#: src/nextsync/ui/setup.py:34
-msgid "Set Up NextSync"
-msgstr "Configurar NextSync"
 
 #: src/nextsync/ui/setup.py:84
 msgid "A lightweight desktop synchronizer for Nextcloud."
@@ -2222,8 +2221,8 @@ msgid "Both the local folder and the remote folder contain files. Confirm that y
 msgstr "Tanto la carpeta local como la remota contienen archivos. Confirma que quieres fusionar su contenido."
 
 #: src/core/sync_safety.rs
-msgid "This folder was synchronized before. Hidden sync journal files were found: {names}. They record what the engine already transferred. Starting fresh moves them to the trash and re-downloads from the server; keeping them resumes the previous sync history."
-msgstr "Esta carpeta se sincronizó anteriormente. Se encontraron archivos ocultos de registro de sincronización: {names}. Registran lo que el motor ya transfirió. Empezar de cero los mueve a la papelera y vuelve a descargar todo del servidor; mantenerlos reanuda el historial de sincronización anterior."
+msgid "This folder was synchronized before."
+msgstr "Esta carpeta se sincronizó anteriormente."
 
 #: src/ui/safety_review.rs
 msgid "Keep Synchronization History"

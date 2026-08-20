@@ -60,6 +60,19 @@ pub enum CredentialLookup {
     Unavailable,
 }
 
+impl CredentialLookup {
+    /// Whether the failure is transient infrastructure trouble (issue #85):
+    /// the session bus or the secret service is not ready yet, the
+    /// collection is locked, or the agent answered something unexpected.
+    /// Retrying later is meaningful; nothing here says the password is bad.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            CredentialLookup::Locked | CredentialLookup::Unavailable
+        )
+    }
+}
+
 /// Supplies the account password to the engine.
 ///
 /// Kept behind a trait so tests can inject deterministic lookups instead of
@@ -308,10 +321,15 @@ fn engine_thread(
     let started = Instant::now();
     let password = match credentials.lookup(&inputs.account) {
         CredentialLookup::Found(password) => password,
-        CredentialLookup::Locked => return EngineRun::Direct(SyncOutcome::KeyringLocked),
-        CredentialLookup::Missing | CredentialLookup::Unavailable => {
-            return EngineRun::Direct(SyncOutcome::AuthFailed);
+        // Transient secret-service trouble (bus not ready at startup, locked
+        // collection, agent hiccup) must not arm the credential gate
+        // (issue #85): report the keyring as locked so the periodic triggers
+        // retry instead of parking the account in needs-attention. Only a
+        // truly missing item keeps the auth-rejected meaning.
+        CredentialLookup::Locked | CredentialLookup::Unavailable => {
+            return EngineRun::Direct(SyncOutcome::KeyringLocked)
         }
+        CredentialLookup::Missing => return EngineRun::Direct(SyncOutcome::AuthFailed),
     };
     // `nextcloudcmd` exits 1 with no output when the remote folder does not
     // exist; create it (and its parents) first. Auth rejection surfaces as
@@ -637,6 +655,26 @@ mod tests {
             progress_tx,
         )
         .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Locked)));
+        let (outcome, events) = run_engine(engine, &progress_rx);
+        assert_eq!(outcome, SyncOutcome::KeyringLocked);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn unreachable_secret_service_maps_to_keyring_locked() {
+        // Issue #85: at startup the session bus may not be ready yet; that
+        // is transient infrastructure trouble, not rejected credentials,
+        // so it must not arm the auth gate.
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            None,
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Unavailable)));
         let (outcome, events) = run_engine(engine, &progress_rx);
         assert_eq!(outcome, SyncOutcome::KeyringLocked);
         assert!(events.is_empty());

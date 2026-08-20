@@ -437,9 +437,13 @@ impl SchedulerInner {
             return;
         }
         if self.keyring_locked && trigger != Trigger::Manual {
+            // Issue #85: the keyring was locked or unreachable when the last
+            // run started (common right after login while the secret service
+            // comes up). Re-attempt on the next automatic trigger instead of
+            // parking the folder in needs-attention: the lookup is cheap and
+            // this state carries no brute-force risk (that is the auth gate).
             self.queue.add(trigger);
-            self.state
-                .set(AppState::KeyringLocked, t("Password keyring is locked"));
+            self.schedule_start();
             return;
         }
         if let Some((_reason, message)) = self.environment_gate(trigger == Trigger::Manual) {
@@ -1140,7 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_keyring_defers_automatic_triggers_until_manual_unlock() {
+    fn locked_keyring_retries_on_the_next_automatic_trigger() {
         let (scheduler, source, runner) = make_scheduler(None);
         scheduler.request(Trigger::Startup);
         run_idle(&source);
@@ -1149,16 +1153,15 @@ mod tests {
         assert!(scheduler.keyring_locked());
         assert_eq!(scheduler.state().snapshot().state, AppState::KeyringLocked);
 
+        // Issue #85: an automatic trigger retries the run instead of parking
+        // the folder in needs-attention; the keyring may have come up in the
+        // meantime and the lookup is cheap.
         scheduler.request(Trigger::LocalInotify);
-        scheduler.request(Trigger::RemoteInterval);
-        assert_eq!(runner.0.borrow().start_calls, 1);
-        assert_eq!(scheduler.queue_len(), 2);
-
-        scheduler.request(Trigger::Manual);
+        assert_eq!(scheduler.queue_len(), 1);
+        run_idle(&source);
         assert_eq!(runner.0.borrow().start_calls, 2);
         finish(&runner, SyncOutcome::Success);
         assert!(!scheduler.keyring_locked());
-        assert_eq!(runner.0.borrow().start_calls, 2);
         assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
     }
 

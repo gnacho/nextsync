@@ -42,11 +42,9 @@ pub fn review_sections(
                     .to_string(),
             ),
             FirstSyncWarning::PreviouslySynced => {
-                let names = facts.journal_names.join(", ");
-                sections.push(
-                    t("This folder was synchronized before. Hidden sync journal files were found: {names}. They record what the engine already transferred. Starting fresh moves them to the trash and re-downloads from the server; keeping them resumes the previous sync history.")
-                        .replacen("{names}", &names, 1),
-                );
+                // One line is enough (issue #74): the Keep/Start Fresh
+                // buttons below carry the decision and its consequences.
+                sections.push(t("This folder was synchronized before.").to_string());
             }
             FirstSyncWarning::Oversized => {
                 let Some(size) = facts.remote_size else {
@@ -160,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn journal_facts_list_the_file_names() {
+    fn journal_facts_say_it_in_one_line() {
         set_locale(Locale::English);
         let sections = review_sections(
             &facts(&[".sync_1.db", ".sync_2.db"], true, Some(true)),
@@ -168,8 +166,9 @@ mod tests {
             "/tmp/nc",
         );
         assert_eq!(sections.len(), 1);
-        assert!(sections[0].contains(".sync_1.db, .sync_2.db"));
-        assert!(sections[0].contains("trash"));
+        // One short line (issue #74); the buttons carry the decision, so the
+        // journal names and the trash explanation stay out of the body.
+        assert_eq!(sections[0], "This folder was synchronized before.");
         reset_locale();
     }
 
@@ -201,7 +200,7 @@ mod tests {
             review_sections(&facts(&[".sync_1.db"], false, Some(false)), None, "/tmp/nc");
         assert_eq!(sections.len(), 2);
         assert!(sections[0].contains("merge"));
-        assert!(sections[1].contains(".sync_1.db"));
+        assert_eq!(sections[1], "This folder was synchronized before.");
         reset_locale();
     }
 

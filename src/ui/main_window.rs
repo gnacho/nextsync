@@ -163,18 +163,26 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary as plain text (issues #64/#69): green state icon,
-        // server name, used GB — the same line for every provider — with an
-        // Add Folder button beside them. The user identity lives in the
-        // sidebar; no avatar, no login name here.
+        // Account summary in two stacked lines (issue #81): state light and
+        // server host, then login user and used space only (no capacity),
+        // with the Add Folder button on the right in the theme accent.
         let summary_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(10)
             .margin_bottom(4)
             .build();
+        let summary_lines = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(2)
+            .hexpand(true)
+            .build();
+        let line_one = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .build();
         let light = gtk4::Image::builder().pixel_size(14).build();
         light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
-        summary_box.append(&light);
+        line_one.append(&light);
         // The server label doubles as the anti-race guard for the
         // background quota fetch (detached rows keep their text).
         let name_label = gtk4::Label::builder()
@@ -182,18 +190,25 @@ impl AccountView {
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
-        summary_box.append(&name_label);
+        line_one.append(&name_label);
+        // Line two: who is logged in and how much space that consumes.
         let usage_label = gtk4::Label::builder()
             .css_classes(["dim-label"])
             .halign(gtk4::Align::Start)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .label(account.login_name.as_str())
             .build();
-        summary_box.append(&usage_label);
-        // Add Folder as a real button next to the summary (issue #66).
+        summary_lines.append(&line_one);
+        summary_lines.append(&usage_label);
+        summary_box.append(&summary_lines);
+        // Add Folder as a real button next to the summary (issue #66),
+        // accented so it reads as the obvious action (issue #81).
         if let Some(on_add_folder) = &callbacks.on_add_folder {
             let add_button = gtk4::Button::builder()
                 .label(t("Add Folder"))
                 .tooltip_text(t("Add a local folder to synchronize with this account"))
-                .css_classes(["pill"])
+                .css_classes(["pill", "suggested-action"])
                 .valign(gtk4::Align::Center)
                 .build();
             let on_add_folder = on_add_folder.clone();
@@ -226,6 +241,7 @@ impl AccountView {
             });
             let usage_label = usage_label.clone();
             let name_label = name_label.clone();
+            let login_for_quota = account.login_name.clone();
             let title_for_check = name_label.text().to_string();
             glib::spawn_future_local(async move {
                 let Ok(Some(summary)) = handle.await else {
@@ -237,17 +253,25 @@ impl AccountView {
                 if name_label.text() != title_for_check {
                     return;
                 }
-                let mut parts = Vec::new();
-                if let Some(name) = summary.display_name.clone() {
-                    if !name.is_empty() {
-                        parts.push(name);
-                    }
-                }
-                let usage = summary.usage_label();
-                if !usage.is_empty() {
-                    parts.push(usage);
-                }
-                usage_label.set_text(&parts.join(" · "));
+                // Line two of the summary (issue #81): the display name
+                // when the server reports one, else the login, plus the
+                // used space only. Capacity stays out.
+                let who = summary
+                    .display_name
+                    .clone()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| login_for_quota.clone());
+                let used = summary
+                    .used
+                    .map(crate::nextcloud::api::format_bytes)
+                    .map(|used| t("{used} used").replace("{used}", &used))
+                    .unwrap_or_default();
+                let text = if used.is_empty() {
+                    who
+                } else {
+                    format!("{who} · {used}")
+                };
+                usage_label.set_text(&text);
             });
         }
 
@@ -958,6 +982,18 @@ impl MainWindow {
             self.config_store.clone(),
             callbacks,
         );
+        // Forget the wizard when its window closes, so the next Add Account
+        // opens a fresh one with empty fields instead of re-presenting the
+        // cached window with whatever was typed before (issue #80).
+        {
+            let weak = self.self_weak.clone();
+            window.window().connect_close_request(move |_window| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().setup_window = None;
+                }
+                gtk4::glib::Propagation::Proceed
+            });
+        }
         window.present();
         self.setup_window = Some(window);
     }
@@ -1210,8 +1246,50 @@ impl MainWindow {
             // Issue #50: the cached account avatar when we have one, the
             // initials fallback when we do not.
             let avatar = libadwaita::Avatar::new(28, Some(&account.login_name), true);
-            if let Some(bytes) = crate::util::avatar_cache::read_cached_avatar(&account.id) {
-                paint_avatar(&avatar, &bytes);
+            let cached_avatar = crate::util::avatar_cache::read_cached_avatar(&account.id);
+            if let Some(bytes) = &cached_avatar {
+                paint_avatar(&avatar, bytes);
+            } else {
+                // The fetch was never wired in production, so the cache
+                // stayed empty and every account fell back to initials.
+                // Fetch in the background; the repaint goes through
+                // avatar_widgets, resolved at completion so a sidebar
+                // rebuilt meanwhile is not painted through a detached row.
+                let account_for_fetch = account.clone();
+                let weak = self.self_weak.clone();
+                glib::spawn_future_local(async move {
+                    let account_id = account_for_fetch.id.clone();
+                    let handle = gio::spawn_blocking(move || {
+                        let password =
+                            crate::nextcloud::credentials::CredentialsStore::get_for_account(
+                                &account_for_fetch.id,
+                                &account_for_fetch.server_url,
+                                &account_for_fetch.login_name,
+                            )
+                            .ok()
+                            .flatten()?;
+                        let bytes = crate::nextcloud::api::NextcloudApi::new()
+                            .fetch_avatar(
+                                account_for_fetch.provider,
+                                &account_for_fetch.server_url,
+                                &account_for_fetch.login_name,
+                                &password,
+                            )
+                            .ok()
+                            .flatten()?;
+                        crate::util::avatar_cache::store_avatar(&account_for_fetch.id, &bytes)
+                            .ok()?;
+                        Some(bytes)
+                    });
+                    if let Ok(Some(bytes)) = handle.await {
+                        if let Some(main) = weak.upgrade() {
+                            let main = main.borrow();
+                            if let Some(avatar) = main.avatar_widgets.get(&account_id) {
+                                paint_avatar(avatar, &bytes);
+                            }
+                        }
+                    }
+                });
             }
             box_container.append(&avatar);
             let text = gtk4::Box::builder()
