@@ -958,6 +958,18 @@ impl MainWindow {
             self.config_store.clone(),
             callbacks,
         );
+        // Forget the wizard when its window closes, so the next Add Account
+        // opens a fresh one with empty fields instead of re-presenting the
+        // cached window with whatever was typed before (issue #80).
+        {
+            let weak = self.self_weak.clone();
+            window.window().connect_close_request(move |_window| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().setup_window = None;
+                }
+                gtk4::glib::Propagation::Proceed
+            });
+        }
         window.present();
         self.setup_window = Some(window);
     }

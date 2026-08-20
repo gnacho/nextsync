@@ -1486,10 +1486,6 @@ msgstr "Escribe «remove»"
 msgid "Type “remove” to confirm account removal."
 msgstr "Escribe «remove» para confirmar la eliminación de la cuenta."
 
-#: src/nextsync/ui/setup.py:34
-msgid "Set Up NextSync"
-msgstr "Configurar NextSync"
-
 #: src/nextsync/ui/setup.py:84
 msgid "A lightweight desktop synchronizer for Nextcloud."
 msgstr "Un sincronizador de escritorio ligero para Nextcloud."

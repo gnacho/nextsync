@@ -75,7 +75,7 @@ use crate::storage::config::{
 };
 use crate::util::i18n::t;
 
-const WINDOW_TITLE: &str = "Set Up NextSync";
+const WINDOW_TITLE: &str = "Add Account";
 
 /// Callback invoked once an account has been created and persisted.
 pub type SetupCompleteCallback = Rc<dyn Fn(AccountConfig)>;
@@ -422,15 +422,42 @@ impl SetupWindow {
 
 fn build_welcome_page(ctx: &SetupContext) {
     let (page, content) = page();
-    let status = libadwaita::StatusPage::builder()
+    // AdwStatusPage embeds a GtkScrolledWindow, so a page short on vertical
+    // space grew an unwanted scrollbar around the icon/title/description
+    // (issue #80). This compact header never scrolls.
+    let header = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(12)
+        .vexpand(true)
+        .valign(gtk4::Align::Center)
+        .build();
+
+    let icon = gtk4::Image::builder()
         .icon_name("io.github.gnacho.nextsync")
-        .title("NextSync")
-        .description(t(
+        .pixel_size(64)
+        .halign(gtk4::Align::Center)
+        .build();
+    header.append(&icon);
+
+    let title = gtk4::Label::builder()
+        .label("NextSync")
+        .css_classes(["title-2"])
+        .halign(gtk4::Align::Center)
+        .build();
+    header.append(&title);
+
+    let description = gtk4::Label::builder()
+        .label(t(
             "A lightweight desktop synchronizer for Nextcloud and OpenCloud.",
         ))
-        .vexpand(true)
+        .wrap(true)
+        .justify(gtk4::Justification::Center)
+        .max_width_chars(40)
+        .halign(gtk4::Align::Center)
         .build();
-    content.append(&status);
+    header.append(&description);
+
+    content.append(&header);
 
     content.append(
         &dim_label(
@@ -2092,10 +2119,10 @@ mod tests {
     #[test]
     fn wizard_title_translates_to_spanish_and_back() {
         set_locale(Locale::Spanish);
-        assert_eq!(t(WINDOW_TITLE), "Configurar NextSync");
+        assert_eq!(t(WINDOW_TITLE), "Añadir cuenta");
         assert_eq!(t("Start Synchronizing?"), "¿Empezar a sincronizar?");
         set_locale(Locale::English);
-        assert_eq!(t(WINDOW_TITLE), "Set Up NextSync");
+        assert_eq!(t(WINDOW_TITLE), "Add Account");
         assert_eq!(t("Start Synchronizing?"), "Start Synchronizing?");
         reset_locale();
     }

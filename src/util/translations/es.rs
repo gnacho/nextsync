@@ -331,7 +331,6 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Server Trash", "Papelera del servidor"),
     ("Server push + every 10 minutes", "Push del servidor + cada 10 minutos"),
     ("Server, proxy and synchronization options for this account", "Opciones de servidor, proxy y sincronización para esta cuenta"),
-    ("Set Up NextSync", "Configurar NextSync"),
     ("Settings", "Configuración"),
     ("Settings now opens independently from the tray without opening the main window.", "La Configuración ahora se abre de forma independiente desde la bandeja, sin abrir la ventana principal."),
     ("Show desktop notifications", "Mostrar notificaciones de escritorio"),
