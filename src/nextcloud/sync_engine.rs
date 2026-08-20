@@ -358,6 +358,11 @@ fn engine_thread(
         spec.to_command()
     };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Qt writes its debug output straight to the systemd journal via
+    // sd_journal_send when it detects systemd, bypassing the pipes; the
+    // per-file progress would never reach the parser. Forcing text logging
+    // on stderr brings it into the drained pipe instead.
+    command.env("QT_FORCE_STDERR_LOGGING", "1");
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => return EngineRun::Direct(SyncOutcome::Failed),
@@ -366,8 +371,14 @@ fn engine_thread(
     let stderr = child.stderr.take().expect("stderr is piped");
     *process.lock().expect("process mutex poisoned") = Some(child);
     let capture = Arc::new(Mutex::new(BoundedOutputCapture::new(DEFAULT_MAX_LINES)));
-    let stdout_handle = drain_stdout(stdout, progress, Arc::clone(&capture));
-    let stderr_handle = drain_stderr(stderr, Arc::clone(&capture));
+    let processed = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let stdout_handle = drain_stream(
+        stdout,
+        progress.clone(),
+        Arc::clone(&capture),
+        Arc::clone(&processed),
+    );
+    let stderr_handle = drain_stream(stderr, progress, capture.clone(), processed);
     let exit_code = wait_for_exit(&process);
     let _ = stdout_handle.join();
     let _ = stderr_handle.join();
@@ -385,42 +396,40 @@ fn engine_thread(
     EngineRun::Result(result)
 }
 
-/// Drain the process stdout: redact, retain the tail and emit parsed progress.
-fn drain_stdout(
+/// Drain one process stream: redact, retain the tail and emit parsed
+/// progress. Both streams carry progress under `QT_FORCE_STDERR_LOGGING`
+/// (transfers on stderr, summaries on stdout), so both parse; the
+/// operation counter is shared across them.
+fn drain_stream(
     stream: impl Read + Send + 'static,
     progress: async_channel::Sender<SyncProgress>,
     capture: Arc<Mutex<BoundedOutputCapture>>,
+    processed: Arc<std::sync::atomic::AtomicU32>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stream);
-        let mut processed: u32 = 0;
         for line in reader.lines() {
             let Ok(line) = line else { break };
             let line = Redact::redact_line(&line);
-            capture.lock().expect("capture mutex poisoned").feed(&line);
-            if let Some(parsed) = parse_progress_line(&line) {
-                processed += 1;
-                let _ = progress.try_send(SyncProgress {
-                    action: parsed.action,
-                    path: parsed.path,
-                    processed,
-                });
+            match parse_progress_line(&line) {
+                Some(parsed) => {
+                    let processed =
+                        processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let _ = progress.try_send(SyncProgress {
+                        action: parsed.action,
+                        path: parsed.path,
+                        processed,
+                    });
+                    // Progress lines stay out of the diagnostic tail: the
+                    // discovery flood (14k+ lines on a first sync) would
+                    // drown the end-of-run markers and its literal
+                    // CSYNC_INSTRUCTION_CONFLICT token would trip the
+                    // conflict classifier on every run.
+                }
+                None => {
+                    capture.lock().expect("capture mutex poisoned").feed(&line);
+                }
             }
-        }
-    })
-}
-
-/// Drain the process stderr: redact and retain the tail, no progress.
-fn drain_stderr(
-    stream: impl Read + Send + 'static,
-    capture: Arc<Mutex<BoundedOutputCapture>>,
-) -> JoinHandle<()> {
-    std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(stream);
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            let line = Redact::redact_line(&line);
-            capture.lock().expect("capture mutex poisoned").feed(&line);
         }
     })
 }
