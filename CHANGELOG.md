@@ -2,7 +2,17 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.96.0] - 2026-08-20
+
+### Corregido
+- **Cierre de suscripciones al reconstruir la vista (#102)**: al cambiar de cuenta o refrescar, las suscripciones por carpeta de la vista anterior no se desuscribían y sus callbacks seguían tocando widgets ya descolgados del árbol, lo que producía un crash intermitente de layout en GTK. Ahora se desuscriben todas antes de descartar la vista.
+
 ## [0.94.0] - 2026-08-20
+
+### Corregido
+- **Color de los iconos Lucide (#101)**: la bandeja usa glifos Lucide con trazo blanco fijo; las filas de carpeta, la fila de conexión y el menú de bandeja usan el color de referencia simbólico de GTK para que el tema los recoloque. Se elimina el `currentColor` que provocaba trazados negros o iconos invisibles.
+
+## [0.92.0] - 2026-08-20
 
 ### Corregido
 - **Iconos Lucide oficiales en toda la app (#100)**: las filas de carpeta, la bandeja y el menú de bandeja usan iconos Lucide descargados tal cual, con el trazo correcto para cada tamaño. Las filas usan 2 px a 22 px; la bandeja usa 3 px. Se eliminan los SVGs custom de bandeja y las variantes de estado sin uso.

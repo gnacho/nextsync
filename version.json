@@ -1,13 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.94.0",
+  "version": "0.96.0",
   "mandatory": false,
-  "summary": "Official Lucide icons across the tray, folder rows and tray menu.",
+  "summary": "Fix the intermittent GTK layout crash by unsubscribing per-folder subscriptions when the account view is rebuilt.",
   "changelog": [
-    "Folder rows use official Lucide icons with a 2 px stroke at 22 px (issue #100).",
-    "Tray status icons use official Lucide cloud glyphs with a 3 px stroke (issue #100).",
-    "Tray menu items use Lucide external-link and log-out icons (issue #100).",
-    "Old custom tray SVGs and the unused per-state glyph variants have been removed."
+    "The account view now unsubscribes every per-folder subscription before dropping the previous view (issue #102).",
+    "This stops detached folder rows from being touched by leftover callbacks, which caused the intermittent GTK layout crash."
   ],
-  "released_at": "2026-08-20T21:00:00Z"
+  "released_at": "2026-08-20T22:00:00Z"
 }
