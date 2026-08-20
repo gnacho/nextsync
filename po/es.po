@@ -1457,9 +1457,10 @@ msgstr "¿Eliminar la cuenta de Nextcloud?"
 
 #: src/nextsync/ui/settings.py:709
 msgid ""
-"The account credential will be removed from the password keyring. Your local "
-"NextCloud folder and all files inside it will remain untouched."
-msgstr "La credencial de la cuenta se eliminará del almacén de contraseñas. Tu carpeta local de NextCloud y todos los archivos que contiene quedarán intactos."
+"No files are deleted: neither the local synchronized folders nor anything "
+"on the server. Only this app forgets the account, its credentials and its "
+"sync configuration."
+msgstr "No se elimina ningún archivo: ni las carpetas locales sincronizadas ni nada del servidor. Solo esta aplicación olvida la cuenta, sus credenciales y su configuración de sincronización."
 
 #: src/nextsync/ui/settings.py:712 src/nextsync/ui/setup.py:133
 msgid "Continue"
@@ -1473,10 +1474,12 @@ msgstr ""
 #: src/nextsync/ui/settings.py:725
 msgid ""
 "Type “remove” to confirm. This cannot be undone and stops synchronization "
-"immediately."
+"immediately. No files are deleted, locally or on the server; the account "
+"is simply forgotten in this app."
 msgstr ""
 "Escribe «remove» para confirmar. Esta acción no se puede deshacer y detiene "
-"la sincronización de inmediato."
+"la sincronización de inmediato. No se elimina ningún archivo, ni en local "
+"ni en el servidor; la aplicación simplemente olvida la cuenta."
 
 #: src/nextsync/ui/settings.py:727
 msgid "Type “remove”"
