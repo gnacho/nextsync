@@ -467,6 +467,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Your complete Nextcloud file tree will be stored physically on this computer and synchronized in both directions.", "Tu árbol de archivos completo de Nextcloud se almacenará en este equipo y se sincronizará en ambos sentidos."),
     ("Your complete file tree will be stored physically on this computer and synchronized in both directions.", "Tu árbol de archivos completo se almacenará físicamente en este equipo y se sincronizará en ambas direcciones."),
     ("and {count} more…", "y {count} más…"),
+    ("checking {file}", "comprobando {file}"),
     ("conflict on {file}", "conflicto en {file}"),
     ("deleting {file}", "eliminando {file}"),
     ("downloading {file}", "descargando {file}"),

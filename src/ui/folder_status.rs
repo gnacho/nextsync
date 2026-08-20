@@ -67,6 +67,7 @@ pub fn progress_line_text(
         "upload" => t("uploading {file}"),
         "delete" => t("deleting {file}"),
         "conflict" => t("conflict on {file}"),
+        "checking" => t("checking {file}"),
         _ => t("processing {file}"),
     }
     .replace("{file}", file);

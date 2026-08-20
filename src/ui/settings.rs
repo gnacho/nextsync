@@ -1261,10 +1261,15 @@ pub fn present_add_folder_dialog(
         )),
     );
     let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    // A floor on the dialog width (issue #75): with narrow defaults the
+    // entries clip the paths they display.
+    entry_box.set_width_request(560);
 
     let local_entry = libadwaita::EntryRow::new();
     local_entry.set_title(t("Local folder"));
-    local_entry.set_text(&local_default);
+    // Fold the home directory for display; the handler runs the value
+    // through expanduser before storing it.
+    local_entry.set_text(&crate::util::paths::fold_home(&local_default));
 
     let choose = gtk4::Button::builder()
         .icon_name("folder-open-symbolic")
