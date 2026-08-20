@@ -342,24 +342,15 @@ impl SetupWindow {
     ) -> Self {
         let toolbar = libadwaita::ToolbarView::new();
         let header = gtk4::HeaderBar::new();
+        // Embedded in the main window (issue #97): the main window's header
+        // already carries the window controls and the back arrow, so this bar
+        // only shows the title and never duplicates minimize/close buttons.
+        header.set_show_title_buttons(false);
         let title = gtk4::Label::builder()
             .label(t(WINDOW_TITLE))
             .css_classes(["title-4"])
             .build();
         header.set_title_widget(Some(&title));
-        let cancel = gtk4::Button::builder()
-            .label(t("Cancel"))
-            .css_classes(["flat"])
-            .build();
-        {
-            let on_close = on_close.clone();
-            cancel.connect_clicked(move |_| {
-                if let Some(on_close) = &on_close {
-                    on_close();
-                }
-            });
-        }
-        header.pack_end(&cancel);
         toolbar.add_top_bar(&header);
 
         let stack = gtk4::Stack::builder()

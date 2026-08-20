@@ -193,7 +193,7 @@ impl AccountView {
             runtime.state().snapshot().state,
             crate::state::AppState::Offline | crate::state::AppState::Error
         );
-        let light = gtk4::Image::builder().pixel_size(18).build();
+        let light = gtk4::Image::builder().pixel_size(22).build();
         light.set_icon_name(Some(if connected {
             "nextsync-state-globe"
         } else {
@@ -609,7 +609,7 @@ impl MainWindow {
         let back_weak = self_weak.clone();
         back_button.connect_clicked(move |_button| {
             if let Some(main) = back_weak.upgrade() {
-                main.borrow_mut().show_sync_view();
+                main.borrow_mut().back_from_overlay();
             }
         });
         // Hidden while the sync view is already in front (issue #54); the
@@ -721,10 +721,8 @@ impl MainWindow {
         {
             let button = back_button_for_binding.clone();
             root_stack.connect_visible_child_notify(move |stack| {
-                let in_settings = stack
-                    .visible_child_name()
-                    .is_some_and(|name| name == "settings");
-                button.set_visible(in_settings);
+                let in_sync = stack.visible_child_name().is_none_or(|name| name == "sync");
+                button.set_visible(!in_sync);
             });
             back_button_for_binding.set_visible(false);
         }
@@ -1118,6 +1116,20 @@ impl MainWindow {
     /// Slide back to the synchronization view from the settings view.
     fn show_sync_view(&mut self) {
         self.root_stack.set_visible_child_name("sync");
+    }
+
+    /// Back arrow from any overlaid page: closes the Add Account wizard, or
+    /// simply slides back from Preferences (issue #97 follow-up).
+    fn back_from_overlay(&mut self) {
+        if self
+            .root_stack
+            .visible_child_name()
+            .is_some_and(|name| name == "add-account")
+        {
+            self.close_add_account();
+        } else {
+            self.show_sync_view();
+        }
     }
 
     /// Open the Add Folder dialog for the active account from the main window.
