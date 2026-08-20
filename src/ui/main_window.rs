@@ -1028,8 +1028,8 @@ impl MainWindow {
     }
 
     pub fn show_add_account(&mut self) {
-        if let Some(window) = &self.setup_window {
-            window.present();
+        if self.setup_window.is_some() {
+            self.root_stack.set_visible_child_name("add-account");
             return;
         }
         let callbacks = crate::ui::setup::SetupCallbacks {
@@ -1044,25 +1044,35 @@ impl MainWindow {
                 }
             })),
         };
-        let window = crate::ui::setup::SetupWindow::new(
-            &self.application,
+        // Forget the wizard when it closes, so the next Add Account opens a
+        // fresh one with empty fields instead of re-presenting the cached view
+        // with whatever was typed before (issue #80).
+        let weak = self.self_weak.clone();
+        let on_close = Rc::new(move || {
+            if let Some(main) = weak.upgrade() {
+                main.borrow_mut().close_add_account();
+            }
+        });
+        let view = crate::ui::setup::SetupWindow::new(
+            self.window.upcast_ref::<gtk4::Widget>(),
             self.config_store.clone(),
             callbacks,
+            Some(on_close),
         );
-        // Forget the wizard when its window closes, so the next Add Account
-        // opens a fresh one with empty fields instead of re-presenting the
-        // cached window with whatever was typed before (issue #80).
-        {
-            let weak = self.self_weak.clone();
-            window.window().connect_close_request(move |_window| {
-                if let Some(main) = weak.upgrade() {
-                    main.borrow_mut().setup_window = None;
-                }
-                gtk4::glib::Propagation::Proceed
-            });
+        self.root_stack
+            .add_named(view.widget(), Some("add-account"));
+        self.root_stack.set_visible_child_name("add-account");
+        self.setup_window = Some(view);
+    }
+
+    /// Slide back to the synchronization view from the Add Account wizard.
+    fn close_add_account(&mut self) {
+        if self.setup_window.take().is_some() {
+            if let Some(child) = self.root_stack.child_by_name("add-account") {
+                self.root_stack.remove(&child);
+            }
         }
-        window.present();
-        self.setup_window = Some(window);
+        self.root_stack.set_visible_child_name("sync");
     }
 
     /// Open the in-app Preferences view (slides over the sync view), building

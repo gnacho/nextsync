@@ -317,36 +317,49 @@ struct SetupContext {
     browser: Rc<RefCell<BrowserFlowState>>,
     config_store: ConfigStore,
     callbacks: SetupCallbacks,
-    window: libadwaita::ApplicationWindow,
+    window: gtk4::Widget,
+    on_close: Option<Rc<dyn Fn()>>,
 }
 
-/// The account setup wizard: a stack-based multi-page window.
+/// The account setup wizard: a stack-based multi-page widget embedded in the
+/// main window (issue #97), instead of a separate window.
 pub struct SetupWindow {
-    window: libadwaita::ApplicationWindow,
+    toolbar: libadwaita::ToolbarView,
     /// Kept so tests can drive the wizard pages; production only reads
-    /// `window` (the pages hold their own clones of the context).
+    /// `toolbar` (the pages hold their own clones of the context).
     #[cfg_attr(not(test), allow(dead_code))]
     context: SetupContext,
 }
 
 impl SetupWindow {
-    /// Build the wizard window (already wired, not yet shown).
+    /// Build the wizard content (already wired, not yet shown). `parent` is
+    /// the main window, used as the transient parent for the wizard's dialogs.
     pub fn new(
-        application: &libadwaita::Application,
+        parent: &gtk4::Widget,
         config_store: ConfigStore,
         callbacks: SetupCallbacks,
+        on_close: Option<Rc<dyn Fn()>>,
     ) -> Self {
-        let window = libadwaita::ApplicationWindow::builder()
-            .application(application)
-            .title(t(WINDOW_TITLE))
-            // Wider than the old 620 so full paths and folder rows fit
-            // without ellipsizing as soon (issue #75).
-            .default_width(720)
-            .default_height(680)
-            .build();
-
         let toolbar = libadwaita::ToolbarView::new();
         let header = gtk4::HeaderBar::new();
+        let title = gtk4::Label::builder()
+            .label(t(WINDOW_TITLE))
+            .css_classes(["title-4"])
+            .build();
+        header.set_title_widget(Some(&title));
+        let cancel = gtk4::Button::builder()
+            .label(t("Cancel"))
+            .css_classes(["flat"])
+            .build();
+        {
+            let on_close = on_close.clone();
+            cancel.connect_clicked(move |_| {
+                if let Some(on_close) = &on_close {
+                    on_close();
+                }
+            });
+        }
+        header.pack_end(&cancel);
         toolbar.add_top_bar(&header);
 
         let stack = gtk4::Stack::builder()
@@ -354,7 +367,6 @@ impl SetupWindow {
             .transition_duration(200)
             .build();
         toolbar.set_content(Some(&stack));
-        window.set_content(Some(&toolbar));
 
         let context = SetupContext {
             stack: stack.clone(),
@@ -363,7 +375,8 @@ impl SetupWindow {
             browser: Rc::new(RefCell::new(BrowserFlowState::default())),
             config_store,
             callbacks,
-            window: window.clone(),
+            window: parent.clone(),
+            on_close,
         };
         let context_for_pages = context.clone();
         build_welcome_page(&context_for_pages);
@@ -372,17 +385,17 @@ impl SetupWindow {
         build_folders_page(&context_for_pages);
         stack.set_visible_child_name("welcome");
 
-        Self { window, context }
+        Self { toolbar, context }
     }
 
-    /// The underlying window, for presentation.
-    pub fn window(&self) -> &libadwaita::ApplicationWindow {
-        &self.window
+    /// The wizard content, to embed in the main window's stack.
+    pub fn widget(&self) -> &libadwaita::ToolbarView {
+        &self.toolbar
     }
 
-    /// Present the wizard window.
+    /// Present the wizard content (legacy helper kept for tests).
     pub fn present(&self) {
-        self.window.present();
+        self.toolbar.set_visible(true);
     }
 }
 
@@ -1439,7 +1452,9 @@ fn finish_setup(ctx: &SetupContext) {
                     callback(validated);
                 }
             }
-            ctx.window.close();
+            if let Some(on_close) = &ctx.on_close {
+                on_close();
+            }
         }
         Err(error) => {
             let dialog = libadwaita::AlertDialog::new(
@@ -2183,16 +2198,16 @@ mod tests {
             // locale on the GTK worker thread so the title assertion is
             // deterministic.
             set_locale(Locale::English);
-            let app = libadwaita::Application::builder()
-                .application_id("io.github.gnacho.nextsync")
-                .build();
+            let parent = gtk4::Window::new();
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
-            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
-            assert_eq!(
-                window.window().title().unwrap_or_default().to_string(),
-                WINDOW_TITLE
+            let window = SetupWindow::new(
+                parent.upcast_ref::<gtk4::Widget>(),
+                store,
+                SetupCallbacks::default(),
+                None,
             );
+            let _ = window.widget();
             reset_locale();
         });
     }
@@ -2201,12 +2216,15 @@ mod tests {
     fn browser_sign_in_row_is_present_for_nextcloud() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
-            let app = libadwaita::Application::builder()
-                .application_id("io.github.gnacho.nextsync")
-                .build();
+            let parent = gtk4::Window::new();
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
-            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
+            let window = SetupWindow::new(
+                parent.upcast_ref::<gtk4::Widget>(),
+                store,
+                SetupCallbacks::default(),
+                None,
+            );
             let widgets = window.widgets();
             assert_eq!(widgets.browser_row.title().as_str(), "Sign in with browser");
             assert_eq!(
@@ -2225,12 +2243,15 @@ mod tests {
     fn browser_sign_in_row_is_hidden_for_opencloud() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
-            let app = libadwaita::Application::builder()
-                .application_id("io.github.gnacho.nextsync")
-                .build();
+            let parent = gtk4::Window::new();
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
-            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
+            let window = SetupWindow::new(
+                parent.upcast_ref::<gtk4::Widget>(),
+                store,
+                SetupCallbacks::default(),
+                None,
+            );
             window.configure_authentication_for(Provider::OpenCloud);
             assert!(!window.widgets().browser_group.get_visible());
             assert!(!window.widgets().waiting_box.get_visible());
@@ -2245,12 +2266,15 @@ mod tests {
     fn login_url_label_is_ellipsized_and_keeps_the_full_url() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
-            let app = libadwaita::Application::builder()
-                .application_id("io.github.gnacho.nextsync")
-                .build();
+            let parent = gtk4::Window::new();
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
-            let window = SetupWindow::new(&app, store, SetupCallbacks::default());
+            let window = SetupWindow::new(
+                parent.upcast_ref::<gtk4::Widget>(),
+                store,
+                SetupCallbacks::default(),
+                None,
+            );
             let label = window.widgets().login_url_label.clone();
             assert_eq!(label.ellipsize(), gtk4::pango::EllipsizeMode::End);
             assert!(
