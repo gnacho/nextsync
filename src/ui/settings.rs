@@ -1646,7 +1646,9 @@ fn populate_remote_picker(
         match outcome {
             RemoteFolderLookup::Ok(folders) => {
                 for folder in folders {
-                    list.append(&folder);
+                    // Display without the leading slash (issue #91); the
+                    // stored value normalizes back to a path.
+                    list.append(folder.trim_start_matches('/'));
                 }
                 // An empty list is fine: the user can still type a remote path.
                 status.set_text("");

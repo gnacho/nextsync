@@ -22,22 +22,53 @@ use crate::util::i18n::t;
 /// The `(icon_name, status_label)` pair for a folder state, mirroring the
 /// Python `STATE_PRESENTATION` table. The label is translated through
 /// [`t`]; because every msgid is a `'static` literal the signature keeps
-/// `'static` lifetimes.
+/// `'static` lifetimes. The icons are the app's Lucide family
+/// (`nextsync-state-*`): waiting pauses, sync-ok checks, a running sync
+/// spins dots, trouble states show the info glyph (issue #94).
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("dialog-question-symbolic", t("Not Configured")),
-        AppState::IdleOk => ("emblem-ok-symbolic", t("Synchronized")),
-        AppState::IdleManualOnly => ("media-playback-pause-symbolic", t("Automatic Sync Is Off")),
-        AppState::IdleNotSynced => ("appointment-soon-symbolic", t("Not Synchronized Yet")),
-        AppState::SyncQueued => ("appointment-soon-symbolic", t("Waiting to synchronize")),
-        AppState::Syncing => ("emblem-synchronizing-symbolic", t("Synchronizing…")),
-        AppState::PausedUser => ("media-playback-pause-symbolic", t("Paused")),
-        AppState::PausedBattery => ("battery-symbolic", t("Paused on Battery")),
-        AppState::Offline => ("network-offline-symbolic", t("Offline")),
-        AppState::Error => ("dialog-error-symbolic", t("Synchronization Error")),
-        AppState::AuthRequired => ("dialog-password-symbolic", t("Account Needs Attention")),
-        AppState::KeyringLocked => ("changes-prevent-symbolic", t("Password Keyring Locked")),
-        AppState::DeleteReview => ("security-high-symbolic", t("Review Deletions")),
+        AppState::Unconfigured => ("nextsync-state-attention-symbolic", t("Not Configured")),
+        AppState::IdleOk => ("nextsync-state-check-symbolic", t("Synchronized")),
+        AppState::IdleManualOnly => ("nextsync-state-paused-symbolic", t("Automatic Sync Is Off")),
+        AppState::IdleNotSynced => (
+            "nextsync-state-attention-symbolic",
+            t("Not Synchronized Yet"),
+        ),
+        AppState::SyncQueued => (
+            "nextsync-state-paused-symbolic",
+            t("Waiting to synchronize"),
+        ),
+        AppState::Syncing => ("nextsync-state-syncing-symbolic", t("Synchronizing…")),
+        AppState::PausedUser => ("nextsync-state-paused-symbolic", t("Paused")),
+        AppState::PausedBattery => ("nextsync-state-paused-symbolic", t("Paused on Battery")),
+        AppState::Offline => ("nextsync-state-globe-off-symbolic", t("Offline")),
+        AppState::Error => (
+            "nextsync-state-attention-symbolic",
+            t("Synchronization Error"),
+        ),
+        AppState::AuthRequired => (
+            "nextsync-state-attention-symbolic",
+            t("Account Needs Attention"),
+        ),
+        AppState::KeyringLocked => (
+            "nextsync-state-attention-symbolic",
+            t("Password Keyring Locked"),
+        ),
+        AppState::DeleteReview => ("nextsync-state-attention-symbolic", t("Review Deletions")),
+    }
+}
+
+/// The color class a folder state's icon carries (issue #94): green while
+/// syncing and when synchronized, red when the folder needs attention,
+/// none for the neutral waiting/paused states.
+pub fn folder_status_color(state: AppState) -> Option<&'static str> {
+    match state {
+        AppState::IdleOk | AppState::Syncing => Some("success"),
+        AppState::Error
+        | AppState::AuthRequired
+        | AppState::KeyringLocked
+        | AppState::DeleteReview => Some("error"),
+        _ => None,
     }
 }
 
@@ -164,8 +195,12 @@ pub struct FolderRowCallbacks {
 /// A GTK action row rendering one synchronized folder with live status.
 pub struct FolderStatusRow {
     pub row: libadwaita::ActionRow,
+    /// The row plus its run-progress bar (issue #90); what the folder list
+    /// appends.
+    pub slot: gtk4::Box,
     icon: gtk4::Image,
     spinner: gtk4::Spinner,
+    progress_bar: gtk4::ProgressBar,
     /// Suffix label with the folder's local used space (issue #43); hidden
     /// until a size is known.
     pub local_size: gtk4::Label,
@@ -173,6 +208,8 @@ pub struct FolderStatusRow {
     /// while no synchronization is running.
     progress_label: gtk4::Label,
     _menu_button: gtk4::MenuButton,
+    menu_model: gio::Menu,
+    pending_item: Option<gio::MenuItem>,
     _actions: std::collections::HashMap<String, gio::SimpleAction>,
     format_last_sync: Option<Rc<dyn Fn() -> String>>,
     remote_path: String,
@@ -221,7 +258,7 @@ impl FolderStatusRow {
         row.add_suffix(&local_size);
 
         // Live per-file progress (issue #86): small dim text next to the
-        // spinner while a run is in flight, gone when it ends.
+        // status icon while a run is in flight, gone when it ends.
         let progress_label = gtk4::Label::builder()
             .css_classes(["dim-label", "caption"])
             .valign(gtk4::Align::Center)
@@ -234,6 +271,24 @@ impl FolderStatusRow {
         let spinner = gtk4::Spinner::builder().build();
         spinner.set_visible(false);
         row.add_suffix(&spinner);
+
+        // The green run progress under the row (issue #90): a slim
+        // indeterminate bar while the run is in flight (the engine reports
+        // operations done, never a total), gone when it ends. The row and
+        // the bar share a vertical slot that the folder list appends.
+        let progress_bar = gtk4::ProgressBar::builder()
+            .hexpand(true)
+            .valign(gtk4::Align::End)
+            .height_request(3)
+            .visible(false)
+            .build();
+        progress_bar.add_css_class("nextsync-run-bar");
+        let slot = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(0)
+            .build();
+        slot.append(&row);
+        slot.append(&progress_bar);
 
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("view-more-symbolic")
@@ -302,23 +357,30 @@ impl FolderStatusRow {
             item.set_icon(&gio::ThemedIcon::new("user-trash-symbolic"));
             menu.append_item(&item);
         }
-        if actions.contains_key("pending-changes") {
+        // Pending-changes menu item (issue #92): only offered once a scan
+        // finds something pending. The action exists from the start; the
+        // item joins the model on demand.
+        let pending_item = actions.contains_key("pending-changes").then(|| {
             let item =
                 gio::MenuItem::new(Some(t("Pending changes…")), Some("folder.pending-changes"));
             item.set_icon(&gio::ThemedIcon::new("nextsync-list-checks-symbolic"));
-            menu.append_item(&item);
-        }
+            item
+        });
         let popover = gtk4::PopoverMenu::from_model(Some(&menu));
         menu_button.set_popover(Some(&popover));
 
         let remote_path = folder.remote_path.clone();
         let mut this = Self {
             row,
+            slot,
             icon,
             spinner,
+            progress_bar,
             local_size,
             progress_label,
             _menu_button: menu_button,
+            menu_model: menu,
+            pending_item,
             _actions: actions,
             format_last_sync,
             remote_path: remote_path.clone(),
@@ -330,6 +392,7 @@ impl FolderStatusRow {
             Some(controller) => {
                 let icon = this.icon.clone();
                 let spinner = this.spinner.clone();
+                let progress_bar = this.progress_bar.clone();
                 let row = this.row.clone();
                 let remote_path = this.remote_path.clone();
                 let format_last_sync = this.format_last_sync.clone();
@@ -338,6 +401,7 @@ impl FolderStatusRow {
                         &row,
                         &icon,
                         &spinner,
+                        &progress_bar,
                         &remote_path,
                         format_last_sync.as_ref().map(|f| f()),
                         snapshot,
@@ -367,6 +431,7 @@ impl FolderStatusRow {
                     &this.row,
                     &this.icon,
                     &this.spinner,
+                    &this.progress_bar,
                     &this.remote_path,
                     this.format_last_sync.as_ref().map(|f| f()),
                     &snapshot,
@@ -381,6 +446,41 @@ impl FolderStatusRow {
         self.local_size.set_text(text);
         self.local_size.set_visible(!text.is_empty());
     }
+
+    /// Handle for the pending-changes menu gating (issue #92): enough state
+    /// to add or drop the item from another closure without owning the row.
+    pub fn pending_handle(&self) -> PendingMenuHandle {
+        PendingMenuHandle {
+            menu_model: self.menu_model.clone(),
+            pending_item: self.pending_item.clone(),
+            in_menu: std::cell::Cell::new(false),
+        }
+    }
+}
+
+/// Detached control of the pending-changes menu item (issue #92): the scan
+/// runs off the UI thread and reports through [`PendingMenuHandle`].
+#[derive(Clone)]
+pub struct PendingMenuHandle {
+    menu_model: gio::Menu,
+    pending_item: Option<gio::MenuItem>,
+    in_menu: std::cell::Cell<bool>,
+}
+
+impl PendingMenuHandle {
+    /// Offer (or drop) the entry based on a scan result.
+    pub fn set_pending_changes(&self, pending: bool) {
+        if pending && !self.in_menu.get() {
+            if let Some(item) = &self.pending_item {
+                self.menu_model.append_item(item);
+                self.in_menu.set(true);
+            }
+        } else if !pending && self.in_menu.get() {
+            let position = self.menu_model.n_items().saturating_sub(1);
+            self.menu_model.remove(position);
+            self.in_menu.set(false);
+        }
+    }
 }
 
 /// Render one snapshot into the row widgets.
@@ -388,26 +488,38 @@ fn render(
     row: &libadwaita::ActionRow,
     icon: &gtk4::Image,
     spinner: &gtk4::Spinner,
+    progress_bar: &gtk4::ProgressBar,
     remote_path: &str,
     last_sync: Option<String>,
     snapshot: &StateSnapshot,
 ) {
     let (icon_name, status) = folder_status_presentation(snapshot.state);
     let syncing = snapshot.state == AppState::Syncing;
-    // Issue #62: while syncing the spinner IS the status (no static icon);
-    // a synchronized folder shows a green check via the success color.
-    icon.set_visible(!syncing);
+    let queued = snapshot.state == AppState::SyncQueued;
+    // Issue #94: one Lucide glyph per state, tinted green while syncing and
+    // synchronized, red when the folder needs attention. While syncing the
+    // glyph (circle-ellipsis) spins instead of the old bare spinner.
+    icon.set_visible(true);
     icon.set_icon_name(Some(icon_name));
-    if snapshot.state == AppState::IdleOk {
-        icon.add_css_class("success");
+    if icon_name == "nextsync-state-syncing-symbolic" {
+        icon.add_css_class("nextsync-spin");
+    } else {
+        icon.remove_css_class("nextsync-spin");
+    }
+    if let Some(color) = folder_status_color(snapshot.state) {
+        icon.add_css_class(color);
     } else {
         icon.remove_css_class("success");
+        icon.remove_css_class("error");
     }
-    spinner.set_visible(syncing);
+    // The legacy spinner stays hidden; kept for API stability.
+    spinner.set_visible(false);
+    spinner.stop();
+    // Issue #90: the slim green run bar pulses while the run is in flight
+    // and disappears when it ends (queued shows it idle at zero).
+    progress_bar.set_visible(syncing || queued);
     if syncing {
-        spinner.start();
-    } else {
-        spinner.stop();
+        progress_bar.pulse();
     }
     let mut parts = vec![status.to_string()];
     // The synced-in-local segment belongs to the synchronized state only:
@@ -458,18 +570,48 @@ mod tests {
     fn idle_ok_presents_as_synchronized() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::IdleOk);
-        assert_eq!(icon, "emblem-ok-symbolic");
+        assert_eq!(icon, "nextsync-state-check-symbolic");
         assert_eq!(label, "Synchronized");
+        assert_eq!(folder_status_color(AppState::IdleOk), Some("success"));
         reset_locale();
     }
 
     #[test]
-    fn syncing_presents_with_spinner_icon() {
+    fn syncing_presents_with_ellipsis_icon() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::Syncing);
-        assert_eq!(icon, "emblem-synchronizing-symbolic");
+        assert_eq!(icon, "nextsync-state-syncing-symbolic");
         assert_eq!(label, "Synchronizing…");
+        assert_eq!(folder_status_color(AppState::Syncing), Some("success"));
         reset_locale();
+    }
+
+    #[test]
+    fn per_state_icons_and_colors() {
+        // Issue #94: waiting pauses, attention turns red, offline shows the
+        // struck globe.
+        assert_eq!(
+            folder_status_presentation(AppState::SyncQueued).0,
+            "nextsync-state-paused-symbolic"
+        );
+        assert_eq!(folder_status_color(AppState::SyncQueued), None);
+        for state in [
+            AppState::Error,
+            AppState::AuthRequired,
+            AppState::KeyringLocked,
+            AppState::DeleteReview,
+        ] {
+            assert_eq!(
+                folder_status_presentation(state).0,
+                "nextsync-state-attention-symbolic",
+                "state {state:?}"
+            );
+            assert_eq!(folder_status_color(state), Some("error"));
+        }
+        assert_eq!(
+            folder_status_presentation(AppState::Offline).0,
+            "nextsync-state-globe-off-symbolic"
+        );
     }
 
     #[test]

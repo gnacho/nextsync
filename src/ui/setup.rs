@@ -1159,9 +1159,14 @@ fn append_folder_row(ctx: &SetupContext, folder: &WizardFolder) {
     let row = libadwaita::ActionRow::builder()
         .title(crate::util::paths::fold_home(&folder.local_root))
         // The folded path is for display; the absolute one stays a tooltip
-        // away (issue #75).
+        // away (issue #75). The remote name drops its leading slash too
+        // (issue #91).
         .tooltip_text(folder.local_root.as_str())
-        .subtitle(t("Remote: {remote}").replacen("{remote}", remote_label, 1))
+        .subtitle(t("Remote: {remote}").replacen(
+            "{remote}",
+            remote_label.trim_start_matches('/'),
+            1,
+        ))
         .build();
     let icon = gtk4::Image::builder()
         .icon_name("folder-symbolic")
@@ -1768,7 +1773,9 @@ fn populate_wizard_remote_picker(
         match folders {
             Some(folders) => {
                 for folder in folders {
-                    list.append(&folder);
+                    // Display without the leading slash (issue #91); the
+                    // stored value normalizes back to a path.
+                    list.append(folder.trim_start_matches('/'));
                 }
             }
             // The dialog stays usable: the manual entry is the source of

@@ -42,7 +42,17 @@ fn main() {
     if let Some(display) = gtk4::gdk::Display::default() {
         let provider = gtk4::CssProvider::new();
         provider.load_from_bytes(&gtk4::glib::Bytes::from(
-            "row.folder-source .title label { font-weight: 700; }".as_bytes(),
+            concat!(
+                "row.folder-source .title label { font-weight: 700; }",
+                // The syncing glyph spins (issue #94).
+                "@keyframes nextsync-spin { to { transform: rotate(360deg); } }",
+                "image.nextsync-spin { animation: nextsync-spin 1.2s linear infinite; }",
+                // The slim run bar under a syncing folder row (issue #90):
+                // green trough and fill, minimal height.
+                "progressbar.nextsync-run-bar trough { background: alpha(@success_color, 0.25); min-height: 3px; }",
+                "progressbar.nextsync-run-bar progress { background: @success_color; min-height: 3px; border-radius: 2px; }",
+            )
+            .as_bytes(),
         ));
         gtk4::style_context_add_provider_for_display(
             &display,
