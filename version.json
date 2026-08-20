@@ -1,15 +1,16 @@
 {
   "schema_version": 1,
-  "version": "0.82.0",
+  "version": "0.84.0",
   "mandatory": false,
-  "summary": "Parity and reliability pass: live sync wired end to end (filesystem watcher, notify_push, per-file progress, activity log), deletion-review dialog, Show Log, and portable release binaries.",
+  "summary": "Tray glyphs by state, live per-file progress, bulk conflict resolution, wizard lists remote folders, avatar fetch wired, and transient keyring failures now retry instead of latching auth-required.",
   "changelog": [
-    "Filesystem changes now trigger automatic synchronization (per-folder watcher).",
-    "notify_push connects at startup, so remote changes sync instantly instead of polling.",
-    "Live per-file progress and an activity log fed from every finished synchronization.",
-    "Deletion-guard alerts open a review dialog (Keep Paused / Restore / Approve once).",
-    "Show Log button in the header and a complete per-folder menu (Edit ignored files, Remove).",
-    "Release binaries are portable: no host-specific instructions (fixes crashes on CPUs without AVX-512)."
+    "Tray glyphs distinguish syncing, problems, unconfigured and all-synced states.",
+    "Folder rows show live per-file progress while a synchronization is running.",
+    "Bulk conflict resolution: keep local or remote for all conflicts at once.",
+    "The add-folder dialog lists existing remote folders (Nextcloud) instead of typing the path.",
+    "Account avatar is fetched and cached; image bodies on 404 are trusted.",
+    "Transient keyring failures (Unavailable/Locked) are retried on the next trigger instead of latching auth-required.",
+    "The tray menu is shorter (Open / Log / Quit); account summary is two lines with an accented Add Folder button."
   ],
   "released_at": "2026-08-14T10:00:00Z"
 }

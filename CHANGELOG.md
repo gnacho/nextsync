@@ -1,6 +1,32 @@
 # Changelog
 
-Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.10 por release** (decisión del usuario, 14-Ago-2026).
+Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
+
+## [0.84.0] - 2026-08-20
+
+### Añadido
+- **Avatares en la tarjeta de cuenta (#50)**: el fetch del avatar está cableado de verdad (antes solo existía en los tests); se confía en el body de imagen aunque el servidor responda 404 con el placeholder PNG. Caché local en `~/.local/state/nextsync/avatars/`.
+- **Lista de carpetas remotas en el wizard (#82)**: al añadir una carpeta, un desplegable muestra las carpetas remotas existentes (Nextcloud) en vez de teclear la ruta; en OpenCloud se sigue introduciendo a mano.
+- **Resolución de conflictos en bloque (#77)**: barra de acción para conservar Local o Remoto en todos los conflictos a la vez, con confirmación y contador.
+- **Progreso por archivo en vivo (#86)**: la fila de carpeta muestra "subiendo x.txt · N" junto al spinner durante la sincronización.
+- **Glifos de bandeja por estado (#87, #76)**: iconos específicos para sincronizando, problemas y sin configurar, y un glifo "todo sincronizado" cuando todo está al día.
+
+### Corregido
+- **Reintento ante fallos transitorios del llavero (#85)**: un error `Unavailable` o `Locked` del Secret Service ya no marca la cuenta como "credenciales rechazadas" (que bloqueaba los sync automáticos); ahora se reintenta en el siguiente disparador y solo `Missing` cuenta como fallo de credenciales.
+- **Nombres de carpetas remotas con escapes (#88)**: los nombres con `%20` y similares devueltos por WebDAV se decodifican antes de mostrarse en el selector del wizard.
+- **Ventana "Añadir cuenta" (#80)**: la ventana ya no se olvida al cerrar (no pierde lo tecleado), el título correcto es "Add Account" y el welcome no produce scrollbar.
+- **Diálogos de quitar cuenta (#79)**: ambos dicen explícitamente que no se borran archivos.
+- **Tooltip de fila (#78)**: el tooltip se pasa como cadena plana al builder (corrige el aviso de ruta).
+
+### Cambiado
+- **Plegado de `~` y wizard más ancho (#75)**: las rutas del home se pliegan (con tooltip del path absoluto) y la ventana de configuración pasa a 720px.
+- **Aviso de carpeta ya sincronizada (#74)**: una línea: "This folder was synchronized before.".
+- **Botón final del wizard (#73)**: el paso de carpetas cierra la configuración con "Finish Setup" (se elimina la página de resumen redundante).
+- **Fila de carpeta más legible (#78)**: nombre en negrita y subtítulo "Synced in local {folder}" sin barra inicial.
+- **Resumen de cuenta en dos líneas (#81)**: servidor en una línea, login y espacio usado en otra, con botón "Añadir carpeta" pill y acento.
+- **Menú de bandeja más corto (#84)**: Open / Log / Quit; las acciones Settings y Pause Everything viven en la ventana.
+- **Trazo de glifos de bandeja (#83)**: ancho 3 para legibilidad a tamaños de bandeja.
+- **Nota de numeración**: v0.84.0 sigue la regla +0.02 (v0.82.0 colisionaba por otras vías); el tag v0.82.0 existe y no se reutiliza.
 
 ## [0.82.0] - 2026-08-19
 
