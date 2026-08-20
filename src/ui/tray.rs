@@ -26,11 +26,8 @@
 //!
 //! The item publishes the bare themed icon name and lets the tray host resolve
 //! it, mirroring the fix #18 decision of the Python client (no rasterized
-//! pixmaps). The monochrome SVGs (`nextsync-tray-cloud.svg`,
-//! `nextsync-tray-cloud-check.svg`, `nextsync-tray-cloud-sync.svg`,
-//! `nextsync-tray-cloud-alert.svg`, `nextsync-tray-cloud-off.svg`,
-//! `nextsync-status-<key>-symbolic.svg`) are
-//! installed into the hicolor symbolic theme by the packaging (Task 6.2).
+//! pixmaps). The monochrome SVGs (`nextsync-status-<key>-symbolic.svg`)
+//! are installed into the hicolor symbolic theme by the packaging (Task 6.2).
 
 use std::rc::Rc;
 
@@ -87,15 +84,15 @@ pub struct TrayCallbacks {
 /// else (paused, battery, plain offline) keeps the plain cloud.
 pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'static str {
     if presentation.icon_key == "offline" && state == AppState::Unconfigured {
-        "nextsync-tray-cloud-off"
+        "nextsync-status-offline-symbolic"
     } else if presentation.icon_key == "ok" {
-        "nextsync-tray-cloud-check"
+        "nextsync-status-ok-symbolic"
     } else if presentation.icon_key == "syncing" {
-        "nextsync-tray-cloud-sync"
+        "nextsync-status-syncing-symbolic"
     } else if presentation.icon_key == "error" {
-        "nextsync-tray-cloud-alert"
+        "nextsync-status-error-symbolic"
     } else {
-        "nextsync-tray-cloud"
+        "nextsync-status-paused-symbolic"
     }
 }
 
@@ -111,7 +108,7 @@ pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
         "battery" => "nextsync-status-battery-symbolic",
         "offline" => "nextsync-status-offline-symbolic",
         "error" => "nextsync-status-error-symbolic",
-        _ => "nextsync-tray-cloud",
+        _ => "nextsync-status-paused-symbolic",
     }
 }
 
@@ -167,7 +164,7 @@ impl TrayItem {
         let quit = self.actions.clone();
         let mut items: Vec<MenuItem<Self>> = vec![StandardItem {
             label: t("Open NextSync").into(),
-            icon_name: "window-new-symbolic".into(),
+            icon_name: "nextsync-menu-open-symbolic".into(),
             activate: Box::new(move |_this: &mut Self| {
                 let _ = open.try_send(TrayAction::Open);
             }),
@@ -182,7 +179,7 @@ impl TrayItem {
                     // and Conflicts"): renaming the menu item must not change
                     // the window title (issue #32).
                     label: t("Log").into(),
-                    icon_name: "emblem-synchronizing-symbolic".into(),
+                    icon_name: "nextsync-menu-log-symbolic".into(),
                     activate: Box::new(move |_this: &mut Self| {
                         let _ = conflicts.try_send(TrayAction::Conflicts);
                     }),
@@ -194,7 +191,7 @@ impl TrayItem {
         items.push(
             StandardItem {
                 label: t("Quit").into(),
-                icon_name: "application-exit-symbolic".into(),
+                icon_name: "nextsync-menu-quit-symbolic".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = quit.try_send(TrayAction::Quit);
                 }),
@@ -430,30 +427,30 @@ mod tests {
     #[test]
     fn icon_name_follows_the_python_tray_glyph_choice() {
         let (unconfigured, _rx) = item_with(AppState::Unconfigured);
-        assert_eq!(unconfigured.icon_name(), "nextsync-tray-cloud-off");
+        assert_eq!(unconfigured.icon_name(), "nextsync-status-offline-symbolic");
 
         let (offline, _rx) = item_with(AppState::Offline);
-        assert_eq!(offline.icon_name(), "nextsync-tray-cloud");
+        assert_eq!(offline.icon_name(), "nextsync-status-paused-symbolic");
 
         // Everything synced and OK gets the cloud-check glyph (issue #76).
         let (idle, _rx) = item_with(AppState::IdleOk);
-        assert_eq!(idle.icon_name(), "nextsync-tray-cloud-check");
+        assert_eq!(idle.icon_name(), "nextsync-status-ok-symbolic");
 
         // A running or queued sync shows the swirl (issue #87).
         let (syncing, _rx) = item_with(AppState::Syncing);
-        assert_eq!(syncing.icon_name(), "nextsync-tray-cloud-sync");
+        assert_eq!(syncing.icon_name(), "nextsync-status-syncing-symbolic");
         let (queued, _rx) = item_with(AppState::SyncQueued);
-        assert_eq!(queued.icon_name(), "nextsync-tray-cloud-sync");
+        assert_eq!(queued.icon_name(), "nextsync-status-syncing-symbolic");
 
         // Problem states show cloud-alert (issue #87).
         let (error, _rx) = item_with(AppState::Error);
-        assert_eq!(error.icon_name(), "nextsync-tray-cloud-alert");
+        assert_eq!(error.icon_name(), "nextsync-status-error-symbolic");
         let (auth, _rx) = item_with(AppState::AuthRequired);
-        assert_eq!(auth.icon_name(), "nextsync-tray-cloud-alert");
+        assert_eq!(auth.icon_name(), "nextsync-status-error-symbolic");
 
         // Paused keeps the plain cloud.
         let (paused, _rx) = item_with(AppState::PausedUser);
-        assert_eq!(paused.icon_name(), "nextsync-tray-cloud");
+        assert_eq!(paused.icon_name(), "nextsync-status-paused-symbolic");
     }
 
     #[test]
@@ -495,6 +492,9 @@ mod tests {
         ] {
             assert_eq!(status_icon_key_to_name(key), name);
         }
-        assert_eq!(status_icon_key_to_name("bogus"), "nextsync-tray-cloud");
+        assert_eq!(
+            status_icon_key_to_name("bogus"),
+            "nextsync-status-paused-symbolic"
+        );
     }
 }
