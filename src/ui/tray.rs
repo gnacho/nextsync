@@ -111,8 +111,8 @@ pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
     }
 }
 
-/// Number of items in the tray menu (Open, Settings, Log, Pause, Quit).
-pub const MENU_ITEM_COUNT: usize = 5;
+/// Number of items in the tray menu (Open, Log, Quit).
+pub const MENU_ITEM_COUNT: usize = 3;
 
 /// The StatusNotifier item. Only `Send` data lives here, satisfying the
 /// `ksni::Tray` bound; user actions leave through the [`TrayAction`] channel.
@@ -156,29 +156,20 @@ impl TrayItem {
     /// [`TrayAction`] with `try_send` (async-channel 2.x `Sender::send` is an
     /// async fn and would need an executor to make progress).
     fn build_menu(&self) -> Vec<MenuItem<Self>> {
+        // Issue #84: Settings and Pause Everything left the tray menu; both
+        // live in the main window, one Open click away. The menu keeps Open,
+        // Log (when wired) and Quit.
         let open = self.actions.clone();
-        let settings = self.actions.clone();
         let quit = self.actions.clone();
-        let mut items: Vec<MenuItem<Self>> = vec![
-            StandardItem {
-                label: t("Open NextSync").into(),
-                icon_name: "window-new-symbolic".into(),
-                activate: Box::new(move |_this: &mut Self| {
-                    let _ = open.try_send(TrayAction::Open);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: t("Settings").into(),
-                icon_name: "nextsync-tray-settings".into(),
-                activate: Box::new(move |_this: &mut Self| {
-                    let _ = settings.try_send(TrayAction::Settings);
-                }),
-                ..Default::default()
-            }
-            .into(),
-        ];
+        let mut items: Vec<MenuItem<Self>> = vec![StandardItem {
+            label: t("Open NextSync").into(),
+            icon_name: "window-new-symbolic".into(),
+            activate: Box::new(move |_this: &mut Self| {
+                let _ = open.try_send(TrayAction::Open);
+            }),
+            ..Default::default()
+        }
+        .into()];
         if self.show_conflicts {
             let conflicts = self.actions.clone();
             items.push(
@@ -196,26 +187,6 @@ impl TrayItem {
                 .into(),
             );
         }
-        // Pause/resume every account at once (issue #42). The label asks for
-        // the action that is currently NOT active.
-        let pause = self.actions.clone();
-        let label = if self.all_paused {
-            t("Resume Everything")
-        } else {
-            t("Pause Everything")
-        };
-        items.push(
-            StandardItem {
-                label: label.into(),
-                icon_name: "media-playback-pause-symbolic".into(),
-                activate: Box::new(move |this: &mut Self| {
-                    let next = !this.all_paused;
-                    let _ = pause.try_send(TrayAction::PauseAll(next));
-                }),
-                ..Default::default()
-            }
-            .into(),
-        );
         items.push(
             StandardItem {
                 label: t("Quit").into(),
@@ -356,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_has_five_items_when_conflicts_is_wired() {
+    fn menu_has_three_items_when_conflicts_is_wired() {
         set_locale(Locale::English);
         let (item, _rx) = item_with(AppState::IdleOk);
         let menu = item.build_menu();
@@ -368,16 +339,8 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(
-            labels,
-            vec![
-                "Open NextSync",
-                "Settings",
-                "Log",
-                "Pause Everything",
-                "Quit"
-            ]
-        );
+        // Settings and Pause Everything live in the main window (issue #84).
+        assert_eq!(labels, vec!["Open NextSync", "Log", "Quit"]);
         reset_locale();
     }
 
@@ -394,28 +357,26 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(
-            labels,
-            vec!["Open NextSync", "Settings", "Pause Everything", "Quit"]
-        );
+        assert_eq!(labels, vec!["Open NextSync", "Quit"]);
         reset_locale();
     }
 
     #[test]
-    fn menu_pause_label_flips_when_everything_is_paused() {
+    fn menu_has_no_pause_or_settings_entry() {
         set_locale(Locale::English);
         let (mut item, _rx) = item_with(AppState::PausedUser);
         item.set_all_paused(true);
-        let menu = item.build_menu();
-        let labels: Vec<&str> = menu
+        let labels: Vec<String> = item
+            .build_menu()
             .iter()
             .map(|entry| match entry {
-                MenuItem::Standard(standard) => standard.label.as_str(),
+                MenuItem::Standard(standard) => standard.label.clone(),
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert!(labels.contains(&"Resume Everything"));
-        assert!(!labels.contains(&"Pause Everything"));
+        assert!(!labels.iter().any(|l| l.contains("Pause")));
+        assert!(!labels.iter().any(|l| l.contains("Resume")));
+        assert!(!labels.iter().any(|l| l == "Settings"));
         reset_locale();
     }
 
@@ -431,16 +392,7 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(
-            labels,
-            vec![
-                "Abrir NextSync",
-                "Configuración",
-                "Registro",
-                "Pausar todo",
-                "Salir"
-            ]
-        );
+        assert_eq!(labels, vec!["Abrir NextSync", "Registro", "Salir"]);
         reset_locale();
     }
 
@@ -455,9 +407,7 @@ mod tests {
             }
         }
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Open);
-        assert_eq!(rx.try_recv().unwrap(), TrayAction::Settings);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Conflicts);
-        assert_eq!(rx.try_recv().unwrap(), TrayAction::PauseAll(true));
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Quit);
         assert!(rx.try_recv().is_err(), "no extra actions should be sent");
     }
