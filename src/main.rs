@@ -38,11 +38,17 @@ fn main() {
 
     // App-wide style: the folder rows show their title in bold (issue #78).
     // The internal title label has no public handle, so the weight is set
-    // through CSS on every folder-source row.
+    // through CSS on every folder-source row. The syncing glyph spins
+    // (issue #94).
     if let Some(display) = gtk4::gdk::Display::default() {
         let provider = gtk4::CssProvider::new();
         provider.load_from_bytes(&gtk4::glib::Bytes::from(
-            "row.folder-source .title label { font-weight: 700; }".as_bytes(),
+            concat!(
+                "row.folder-source .title label { font-weight: 700; }",
+                "@keyframes nextsync-spin { to { transform: rotate(360deg); } }",
+                "image.nextsync-spin { animation: nextsync-spin 1.2s linear infinite; }",
+            )
+            .as_bytes(),
         ));
         gtk4::style_context_add_provider_for_display(
             &display,
