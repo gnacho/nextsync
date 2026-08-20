@@ -188,15 +188,10 @@ impl AccountView {
         );
         let light = gtk4::Image::builder().pixel_size(14).build();
         light.set_icon_name(Some(if connected {
-            "nextsync-state-globe-symbolic"
+            "nextsync-state-globe"
         } else {
-            "nextsync-state-globe-off-symbolic"
+            "nextsync-state-globe-off"
         }));
-        if connected {
-            light.add_css_class("success");
-        } else {
-            light.add_css_class("error");
-        }
         line_one.append(&light);
         // The status label doubles as the anti-race guard for the
         // background quota fetch (detached rows keep their text).
