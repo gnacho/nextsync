@@ -25,19 +25,37 @@ use crate::util::i18n::t;
 /// `'static` lifetimes.
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("dialog-question-symbolic", t("Not Configured")),
-        AppState::IdleOk => ("emblem-ok-symbolic", t("Synchronized")),
-        AppState::IdleManualOnly => ("media-playback-pause-symbolic", t("Automatic Sync Is Off")),
-        AppState::IdleNotSynced => ("appointment-soon-symbolic", t("Not Synchronized Yet")),
-        AppState::SyncQueued => ("appointment-soon-symbolic", t("Synchronization Scheduled")),
-        AppState::Syncing => ("emblem-synchronizing-symbolic", t("Synchronizing…")),
-        AppState::PausedUser => ("media-playback-pause-symbolic", t("Paused")),
-        AppState::PausedBattery => ("battery-symbolic", t("Paused on Battery")),
-        AppState::Offline => ("network-offline-symbolic", t("Offline")),
-        AppState::Error => ("dialog-error-symbolic", t("Synchronization Error")),
-        AppState::AuthRequired => ("dialog-password-symbolic", t("Account Needs Attention")),
-        AppState::KeyringLocked => ("changes-prevent-symbolic", t("Password Keyring Locked")),
-        AppState::DeleteReview => ("security-high-symbolic", t("Review Deletions")),
+        AppState::Unconfigured => ("nextsync-row-help-circle-symbolic", t("Not Configured")),
+        AppState::IdleOk => ("nextsync-row-circle-check-symbolic", t("Synchronized")),
+        AppState::IdleManualOnly => (
+            "nextsync-row-circle-pause-symbolic",
+            t("Automatic Sync Is Off"),
+        ),
+        AppState::IdleNotSynced => (
+            "nextsync-row-circle-pause-symbolic",
+            t("Not Synchronized Yet"),
+        ),
+        AppState::SyncQueued => (
+            "nextsync-row-circle-pause-symbolic",
+            t("Synchronization Scheduled"),
+        ),
+        AppState::Syncing => ("nextsync-row-cloud-sync-symbolic", t("Synchronizing…")),
+        AppState::PausedUser => ("nextsync-row-circle-pause-symbolic", t("Paused")),
+        AppState::PausedBattery => ("nextsync-row-battery-symbolic", t("Paused on Battery")),
+        AppState::Offline => ("nextsync-row-cloud-off-symbolic", t("Offline")),
+        AppState::Error => (
+            "nextsync-row-cloud-alert-symbolic",
+            t("Synchronization Error"),
+        ),
+        AppState::AuthRequired => (
+            "nextsync-row-cloud-alert-symbolic",
+            t("Account Needs Attention"),
+        ),
+        AppState::KeyringLocked => (
+            "nextsync-row-cloud-alert-symbolic",
+            t("Password Keyring Locked"),
+        ),
+        AppState::DeleteReview => ("nextsync-row-cloud-alert-symbolic", t("Review Deletions")),
     }
 }
 
@@ -549,7 +567,7 @@ mod tests {
     fn idle_ok_presents_as_synchronized() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::IdleOk);
-        assert_eq!(icon, "emblem-ok-symbolic");
+        assert_eq!(icon, "nextsync-row-circle-check-symbolic");
         assert_eq!(label, "Synchronized");
         assert_eq!(folder_status_color(AppState::IdleOk), Some("success"));
         reset_locale();
@@ -559,7 +577,7 @@ mod tests {
     fn syncing_presents_with_spinner_icon() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::Syncing);
-        assert_eq!(icon, "emblem-synchronizing-symbolic");
+        assert_eq!(icon, "nextsync-row-cloud-sync-symbolic");
         assert_eq!(label, "Synchronizing…");
         assert_eq!(folder_status_color(AppState::Syncing), None);
         reset_locale();
@@ -570,7 +588,7 @@ mod tests {
         // Native theme icons; attention states turn red.
         assert_eq!(
             folder_status_presentation(AppState::SyncQueued).0,
-            "appointment-soon-symbolic"
+            "nextsync-row-circle-pause-symbolic"
         );
         assert_eq!(folder_status_color(AppState::SyncQueued), None);
         for state in [
@@ -587,7 +605,7 @@ mod tests {
         }
         assert_eq!(
             folder_status_presentation(AppState::Offline).0,
-            "network-offline-symbolic"
+            "nextsync-row-cloud-off-symbolic"
         );
     }
 

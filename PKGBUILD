@@ -62,11 +62,6 @@ package() {
     local colored=(
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
-        nextsync-tray-cloud
-        nextsync-tray-cloud-alert
-        nextsync-tray-cloud-check
-        nextsync-tray-cloud-off
-        nextsync-tray-cloud-sync
         nextsync-tray-settings
     )
     for icon in "${colored[@]}"; do
@@ -78,16 +73,28 @@ package() {
     # symbolic/status — installing under status makes the icons unresolvable.
     local symbolic=(
         io.github.gnacho.nextsync-symbolic
+        nextsync-info-symbolic
+        nextsync-list-checks-symbolic
+        nextsync-menu-log-symbolic
+        nextsync-menu-open-symbolic
+        nextsync-menu-quit-symbolic
+        nextsync-row-battery-symbolic
+        nextsync-row-circle-check-symbolic
+        nextsync-row-circle-pause-symbolic
+        nextsync-row-cloud-alert-symbolic
+        nextsync-row-cloud-off-symbolic
+        nextsync-row-cloud-sync-symbolic
+        nextsync-row-help-circle-symbolic
+        nextsync-settings-2-symbolic
+        nextsync-state-globe-off-symbolic
+        nextsync-state-globe-symbolic
         nextsync-status-battery-symbolic
         nextsync-status-error-symbolic
         nextsync-status-offline-symbolic
         nextsync-status-ok-symbolic
         nextsync-status-paused-symbolic
         nextsync-status-syncing-symbolic
-        nextsync-info-symbolic
-        nextsync-settings-2-symbolic
         nextsync-theme-auto-symbolic
-        nextsync-list-checks-symbolic
     )
     for icon in "${symbolic[@]}"; do
         install -Dm644 "data/icons/$icon.svg" \
