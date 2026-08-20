@@ -26,8 +26,10 @@
 //!
 //! The item publishes the bare themed icon name and lets the tray host resolve
 //! it, mirroring the fix #18 decision of the Python client (no rasterized
-//! pixmaps). The monochrome SVGs (`nextsync-status-<key>-symbolic.svg`)
-//! are installed into the hicolor symbolic theme by the packaging (Task 6.2).
+//! pixmaps). The full-color scalable SVGs (`nextsync-tray-cloud*.svg`)
+//! use a fixed white stroke for the panel; the monochrome symbolic SVGs
+//! (`nextsync-status-<key>-symbolic.svg`) use the GTK reference color and
+//! are installed into the hicolor symbolic theme by the packaging.
 
 use std::rc::Rc;
 
@@ -84,15 +86,15 @@ pub struct TrayCallbacks {
 /// else (paused, battery, plain offline) keeps the plain cloud.
 pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'static str {
     if presentation.icon_key == "offline" && state == AppState::Unconfigured {
-        "nextsync-status-offline-symbolic"
+        "nextsync-tray-cloud-off"
     } else if presentation.icon_key == "ok" {
-        "nextsync-status-ok-symbolic"
+        "nextsync-tray-cloud-check"
     } else if presentation.icon_key == "syncing" {
-        "nextsync-status-syncing-symbolic"
+        "nextsync-tray-cloud-sync"
     } else if presentation.icon_key == "error" {
-        "nextsync-status-error-symbolic"
+        "nextsync-tray-cloud-alert"
     } else {
-        "nextsync-status-paused-symbolic"
+        "nextsync-tray-cloud"
     }
 }
 
@@ -108,7 +110,7 @@ pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
         "battery" => "nextsync-status-battery-symbolic",
         "offline" => "nextsync-status-offline-symbolic",
         "error" => "nextsync-status-error-symbolic",
-        _ => "nextsync-status-paused-symbolic",
+        _ => "nextsync-tray-cloud",
     }
 }
 
@@ -427,30 +429,30 @@ mod tests {
     #[test]
     fn icon_name_follows_the_python_tray_glyph_choice() {
         let (unconfigured, _rx) = item_with(AppState::Unconfigured);
-        assert_eq!(unconfigured.icon_name(), "nextsync-status-offline-symbolic");
+        assert_eq!(unconfigured.icon_name(), "nextsync-tray-cloud-off");
 
         let (offline, _rx) = item_with(AppState::Offline);
-        assert_eq!(offline.icon_name(), "nextsync-status-paused-symbolic");
+        assert_eq!(offline.icon_name(), "nextsync-tray-cloud");
 
         // Everything synced and OK gets the cloud-check glyph (issue #76).
         let (idle, _rx) = item_with(AppState::IdleOk);
-        assert_eq!(idle.icon_name(), "nextsync-status-ok-symbolic");
+        assert_eq!(idle.icon_name(), "nextsync-tray-cloud-check");
 
         // A running or queued sync shows the swirl (issue #87).
         let (syncing, _rx) = item_with(AppState::Syncing);
-        assert_eq!(syncing.icon_name(), "nextsync-status-syncing-symbolic");
+        assert_eq!(syncing.icon_name(), "nextsync-tray-cloud-sync");
         let (queued, _rx) = item_with(AppState::SyncQueued);
-        assert_eq!(queued.icon_name(), "nextsync-status-syncing-symbolic");
+        assert_eq!(queued.icon_name(), "nextsync-tray-cloud-sync");
 
         // Problem states show cloud-alert (issue #87).
         let (error, _rx) = item_with(AppState::Error);
-        assert_eq!(error.icon_name(), "nextsync-status-error-symbolic");
+        assert_eq!(error.icon_name(), "nextsync-tray-cloud-alert");
         let (auth, _rx) = item_with(AppState::AuthRequired);
-        assert_eq!(auth.icon_name(), "nextsync-status-error-symbolic");
+        assert_eq!(auth.icon_name(), "nextsync-tray-cloud-alert");
 
         // Paused keeps the plain cloud.
         let (paused, _rx) = item_with(AppState::PausedUser);
-        assert_eq!(paused.icon_name(), "nextsync-status-paused-symbolic");
+        assert_eq!(paused.icon_name(), "nextsync-tray-cloud");
     }
 
     #[test]
@@ -492,9 +494,6 @@ mod tests {
         ] {
             assert_eq!(status_icon_key_to_name(key), name);
         }
-        assert_eq!(
-            status_icon_key_to_name("bogus"),
-            "nextsync-status-paused-symbolic"
-        );
+        assert_eq!(status_icon_key_to_name("bogus"), "nextsync-tray-cloud");
     }
 }

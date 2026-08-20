@@ -62,6 +62,11 @@ package() {
     local colored=(
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
+        nextsync-tray-cloud
+        nextsync-tray-cloud-alert
+        nextsync-tray-cloud-check
+        nextsync-tray-cloud-off
+        nextsync-tray-cloud-sync
         nextsync-tray-settings
     )
     for icon in "${colored[@]}"; do
