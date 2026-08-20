@@ -1,6 +1,8 @@
 // NextSync landing - i18n ES/EN. Paridad como invariante: mismas claves en ambos.
 const I18N = {
   es: {
+    "meta.title": "NextSync - Tus archivos en local, en sincronía",
+    "meta.description": "App GNOME que mantiene espejos locales de tus cuentas Nextcloud y OpenCloud. Rust y GTK 4. Sin nube propia ni telemetría. GPL-3.0+.",
     "misc.skip": "Saltar al contenido",
     "misc.theme": "Cambiar tema",
     "misc.close": "Cerrar",
@@ -48,6 +50,7 @@ const I18N = {
     "shots.zoom": "Captura ampliada",
     "shots.capLight": "Ventana principal, tema claro",
     "shots.capDark": "Ventana principal, tema oscuro",
+    "shots.alt": "Ventana principal de NextSync",
     "compare.title": "El compañero GNOME que faltaba",
     "compare.lead": "Comparativa con los clientes de escritorio oficiales, contrastada el 20 de agosto de 2026 contra sus repos públicos.",
     "compare.h0": "Función",
@@ -95,6 +98,8 @@ const I18N = {
     "footer.copy": "NextSync es software libre (GPL-3.0+). Nextcloud es marca de Nextcloud GmbH; OpenCloud es un producto del Heinlein Group. Este sitio no está afiliado a ninguna de las dos empresas."
   },
   en: {
+    "meta.title": "NextSync - Your files, local. Any server, in sync.",
+    "meta.description": "GNOME desktop app that keeps local mirrors of your Nextcloud and OpenCloud accounts. Rust and GTK 4. No telemetry. GPL-3.0+.",
     "misc.skip": "Skip to content",
     "misc.theme": "Toggle theme",
     "misc.close": "Close",
@@ -142,6 +147,7 @@ const I18N = {
     "shots.zoom": "Enlarged screenshot",
     "shots.capLight": "Main window, light theme",
     "shots.capDark": "Main window, dark theme",
+    "shots.alt": "NextSync main window",
     "compare.title": "The GNOME companion that was missing",
     "compare.lead": "Compared with the official desktop clients, checked on August 20, 2026 against their public repos.",
     "compare.h0": "Feature",
@@ -211,6 +217,13 @@ function applyLang(lang) {
     const v = dict[el.dataset.i18nAria];
     if (v !== undefined) el.setAttribute("aria-label", v);
   });
+  document.querySelectorAll("[data-i18n-alt]").forEach(el => {
+    const v = dict[el.dataset.i18nAlt];
+    if (v !== undefined) el.setAttribute("alt", v);
+  });
+  if (dict["meta.title"]) document.title = dict["meta.title"];
+  const metaDesc = document.querySelector('meta[name="description"]');
+  if (metaDesc && dict["meta.description"]) metaDesc.setAttribute("content", dict["meta.description"]);
   localStorage.setItem("nextsync-lang", lang);
   document.dispatchEvent(new CustomEvent("langchange", { detail: { lang } }));
 }
