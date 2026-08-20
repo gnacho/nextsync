@@ -401,7 +401,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("The version information could not be obtained. Check your connection and try again later.", "No se pudo obtener la información de versión. Compruebe su conexión e inténtelo de nuevo más tarde."),
     ("Third-party projects and licenses", "Proyectos de terceros y licencias"),
     ("This folder has no synchronization journal yet, so every local file counts as new. Remote changes are not included.", "Esta carpeta aún no tiene registro de sincronización, así que cada archivo local cuenta como nuevo. Los cambios remotos no se incluyen."),
-    ("This folder was synchronized before. Hidden sync journal files were found: {names}. They record what the engine already transferred. Starting fresh moves them to the trash and re-downloads from the server; keeping them resumes the previous sync history.", "Esta carpeta se sincronizó anteriormente. Se encontraron archivos ocultos de registro de sincronización: {names}. Registran lo que el motor ya transfirió. Empezar de cero los mueve a la papelera y vuelve a descargar todo del servidor; mantenerlos reanuda el historial de sincronización anterior."),
+    ("This folder was synchronized before.", "Esta carpeta se sincronizó anteriormente."),
     ("This local folder is already added.", "Esta carpeta local ya está añadida."),
     ("This update is mandatory. NextSync will not start synchronization or allow use of the current version.", "Esta actualización es obligatoria. NextSync no iniciará la sincronización ni permitirá usar la versión actual."),
     ("This update is optional. NextSync can continue running while you decide when to install it.", "Esta actualización es opcional. NextSync puede seguir funcionando mientras decide cuándo instalarla."),
