@@ -1,16 +1,15 @@
 {
   "schema_version": 1,
-  "version": "0.86.0",
+  "version": "0.88.0",
   "mandatory": false,
-  "summary": "Tray glyphs by state, live per-file progress, bulk conflict resolution, wizard lists remote folders, avatar fetch wired, and transient keyring failures now retry instead of latching auth-required.",
+  "summary": "Per-state Lucide icons on folder rows, live run progress bar, pending-changes menu gating, and a keyring/auth state fix.",
   "changelog": [
-    "Tray glyphs distinguish syncing, problems, unconfigured and all-synced states.",
-    "Folder rows show live per-file progress while a synchronization is running.",
-    "Bulk conflict resolution: keep local or remote for all conflicts at once.",
-    "The add-folder dialog lists existing remote folders (Nextcloud) instead of typing the path.",
-    "Account avatar is fetched and cached; image bodies on 404 are trusted.",
-    "Transient keyring failures (Unavailable/Locked) are retried on the next trigger instead of latching auth-required.",
-    "The tray menu is shorter (Open / Log / Quit); account summary is two lines with an accented Add Folder button."
+    "Folder rows show a Lucide glyph and tint per state instead of the old generic icons (issue #94).",
+    "Row status icons are sized at 22 px so they no longer look like empty circles.",
+    "The 'Synced in local' subtitle only appears while the folder is actually synchronized.",
+    "A slim green run-progress bar pulses under a folder row while it is syncing (issue #90).",
+    "The folder-row menu offers 'Pending changes…' only when a scan has found pending items (issue #92).",
+    "A locked password keyring is reported as such and retried, instead of being misread as missing credentials and showing 'Account Needs Attention' on every account (issue #98)."
   ],
-  "released_at": "2026-08-14T10:00:00Z"
+  "released_at": "2026-08-20T19:00:00Z"
 }

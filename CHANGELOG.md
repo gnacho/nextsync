@@ -2,6 +2,17 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.88.0] - 2026-08-20
+
+### Corregido
+- **Iconos Lucide a 22 px en filas de carpeta (#94)**: sube el tamaño de los glifos de estado de 16 px a 22 px para que no se lean como círculos vacíos.
+- **"Sincronizado en local" solo en estado sincronizado**: el subtítulo con la ruta remota solo se muestra cuando la carpeta está en `Synchronized`; en cola, sincronizando o con error solo aparece el estado.
+- **Llavero bloqueado vs credenciales ausentes (#98)**: cuando el Secret Service devuelve elementos bloqueados, el cliente los distingue de "no hay contraseña" y muestra "Password Keyring Locked" en vez de "Account Needs Attention", permitiendo que el reintento automático recupere la cuenta.
+
+### Añadido
+- **Barra de progreso del run bajo la fila (#90)**: una fina barra verde pulsa bajo una carpeta mientras se sincroniza.
+- **Entrada "Pending changes…" bajo demanda (#92)**: la opción del menú de carpeta solo aparece cuando un scan encuentra cambios pendientes.
+
 ## [0.86.0] - 2026-08-20
 
 ### Corregido
