@@ -45,6 +45,8 @@ pub enum SyncOutcome {
     AuthFailed,
     /// The password keyring was locked during the credential lookup.
     KeyringLocked,
+    /// No credentials are stored for this account (issue #95).
+    NoCredentials,
     /// The synchronization failed (any other error).
     Failed,
 }
@@ -433,7 +435,7 @@ impl SchedulerInner {
             self.queue.add(trigger);
             self.state.set(
                 AppState::AuthRequired,
-                t("Credentials rejected — sign in again to resume synchronization"),
+                t("Credentials rejected. Sign in again in Account settings."),
             );
             return;
         }
@@ -519,7 +521,7 @@ impl SchedulerInner {
             self.queue.extend(reasons.iter().copied());
             self.state.set(
                 AppState::AuthRequired,
-                t("Credentials rejected — sign in again to resume synchronization"),
+                t("Credentials rejected. Sign in again in Account settings."),
             );
             return;
         }
@@ -646,7 +648,18 @@ impl SchedulerInner {
                 self.auth_required = true;
                 self.state.set(
                     AppState::AuthRequired,
-                    t("Credentials rejected — sign in again to resume synchronization"),
+                    t("Credentials rejected. Sign in again in Account settings."),
+                );
+                false
+            }
+            SyncOutcome::NoCredentials => {
+                self.keyring_locked = false;
+                // No stored credentials: park the folder like a rejection so
+                // the triggers do not hammer the server (issue #95).
+                self.auth_required = true;
+                self.state.set(
+                    AppState::AuthRequired,
+                    t("No saved credentials. Use Sign in again in Account settings."),
                 );
                 false
             }
@@ -841,7 +854,7 @@ impl SchedulerInner {
         } else if self.auth_required {
             self.state.set(
                 AppState::AuthRequired,
-                t("Credentials rejected — sign in again to resume synchronization"),
+                t("Credentials rejected. Sign in again in Account settings."),
             );
         } else if self.manual_only() {
             self.state.set(

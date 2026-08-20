@@ -54,6 +54,9 @@ pub fn failure_notification(outcome: &crate::core::scheduler::SyncOutcome) -> Op
             "The server rejected the account credentials.",
         )),
         SyncOutcome::KeyringLocked => Some(crate::util::i18n::t("The password keyring is locked.")),
+        SyncOutcome::NoCredentials => Some(crate::util::i18n::t(
+            "No credentials are saved for this account.",
+        )),
         SyncOutcome::Failed => Some(crate::util::i18n::t("A synchronization failed.")),
         SyncOutcome::Success | SyncOutcome::Conflict => None,
     }

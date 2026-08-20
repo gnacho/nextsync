@@ -35,7 +35,7 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
         AppState::PausedBattery => ("nextsync-row-battery", t("Paused on Battery")),
         AppState::Offline => ("nextsync-row-offline", t("Offline")),
         AppState::Error => ("nextsync-row-error", t("Synchronization Error")),
-        AppState::AuthRequired => ("nextsync-row-error", t("Account Needs Attention")),
+        AppState::AuthRequired => ("nextsync-row-error", t("Credentials rejected")),
         AppState::KeyringLocked => ("nextsync-row-error", t("Password Keyring Locked")),
         AppState::DeleteReview => ("nextsync-row-error", t("Review Deletions")),
     }
@@ -537,9 +537,17 @@ fn render(
     // The synced-in-local segment belongs to the synchronized state only and
     // already says "Synced in local {folder}", so the redundant "Synchronized"
     // status is dropped there (issue #108): the green check already conveys it.
+    // Attention states surface the scheduler's specific message (which says
+    // what the attention is and what to do) instead of a generic label (#95).
     let mut parts: Vec<String> = Vec::new();
     if !remote_path.is_empty() && snapshot.state == AppState::IdleOk {
         parts.push(remote_label(remote_path));
+    } else if matches!(
+        snapshot.state,
+        AppState::AuthRequired | AppState::KeyringLocked
+    ) && !snapshot.message.is_empty()
+    {
+        parts.push(snapshot.message.clone());
     } else {
         parts.push(status.to_string());
     }

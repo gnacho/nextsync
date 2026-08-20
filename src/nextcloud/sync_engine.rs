@@ -329,7 +329,7 @@ fn engine_thread(
         CredentialLookup::Locked | CredentialLookup::Unavailable => {
             return EngineRun::Direct(SyncOutcome::KeyringLocked)
         }
-        CredentialLookup::Missing => return EngineRun::Direct(SyncOutcome::AuthFailed),
+        CredentialLookup::Missing => return EngineRun::Direct(SyncOutcome::NoCredentials),
     };
     // `nextcloudcmd` exits 1 with no output when the remote folder does not
     // exist; create it (and its parents) first. Auth rejection surfaces as
@@ -721,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_credential_maps_to_auth_failed() {
+    fn missing_credential_maps_to_no_credentials() {
         let (progress_tx, progress_rx) = async_channel::unbounded();
         let engine = SyncEngine::new(
             account(),
@@ -733,7 +733,7 @@ mod tests {
         )
         .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Missing)));
         let (outcome, events) = run_engine(engine, &progress_rx);
-        assert_eq!(outcome, SyncOutcome::AuthFailed);
+        assert_eq!(outcome, SyncOutcome::NoCredentials);
         assert!(events.is_empty());
     }
 

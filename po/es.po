@@ -2597,3 +2597,23 @@ msgstr "Se pausará al terminar la sincronización actual"
 #: src/ui/folder_status.rs
 msgid "Resolve conflicts"
 msgstr "Resolver conflictos"
+
+#: src/core/scheduler.rs
+msgid "Credentials rejected"
+msgstr "Credenciales rechazadas"
+
+#: src/core/scheduler.rs
+msgid "Credentials rejected. Sign in again in Account settings."
+msgstr "Credenciales rechazadas. Vuelve a iniciar sesión en los ajustes de la cuenta."
+
+#: src/core/scheduler.rs
+msgid "No saved credentials. Use Sign in again in Account settings."
+msgstr "No hay credenciales guardadas. Usa Iniciar sesión de nuevo en los ajustes de la cuenta."
+
+#: src/core/notifications.rs
+msgid "No credentials are saved for this account."
+msgstr "No hay credenciales guardadas para esta cuenta."
+
+#: src/core/account_runtime.rs
+msgid "Synchronization blocked: no saved credentials"
+msgstr "Sincronización bloqueada: no hay credenciales guardadas"

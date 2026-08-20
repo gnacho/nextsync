@@ -449,6 +449,9 @@ pub fn outcome_log_line(outcome: &crate::core::scheduler::SyncOutcome) -> &'stat
         crate::core::scheduler::SyncOutcome::AuthFailed => {
             t("Synchronization failed: credentials rejected")
         }
+        crate::core::scheduler::SyncOutcome::NoCredentials => {
+            t("Synchronization blocked: no saved credentials")
+        }
         crate::core::scheduler::SyncOutcome::KeyringLocked => {
             t("Synchronization blocked: password keyring is locked")
         }
