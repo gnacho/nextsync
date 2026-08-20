@@ -473,4 +473,5 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("{count} conflicted copy(ies) found in {folder}.", "Se encontraron {count} copia(s) en conflicto en {folder}."),
     ("{count} of {total} items were restored from the server trash.", "Se restauraron {count} de {total} elementos de la papelera del servidor."),
     ("{size} local", "{size} en local"),
+    ("{used} used", "{used} usados"),
 ];
