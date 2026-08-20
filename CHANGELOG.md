@@ -2,6 +2,15 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.104.0] - 2026-08-21
+
+### Corregido
+- **Flecha de volver en Añadir cuenta (#111)**: el asistente embebido usa la flecha de volver de la ventana principal (que lo cierra) y ya no duplica los botones de minimizar/cerrar.
+- **Icono de conexión más legible (#112)**: sube a 22 px como los iconos de fila.
+
+### Añadido
+- **Progreso a ancho completo con contador de archivos (#113)**: el texto de sincronización ocupa el ancho de la barra de progreso y muestra el número de archivos procesados ("subiendo x.txt · 7 archivos").
+
 ## [0.102.0] - 2026-08-20
 
 ### Añadido
