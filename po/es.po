@@ -1764,8 +1764,8 @@ msgstr "Empezar"
 
 #: src/nextsync/ui/tray.py:266
 #, python-brace-format
-msgid "NextSync — {state}"
-msgstr "NextSync — {state}"
+msgid "NextSync - {state}"
+msgstr "NextSync - {state}"
 
 #: src/nextsync/ui/tray.py:270
 msgid "Syncing"

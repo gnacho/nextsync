@@ -215,7 +215,7 @@ impl ksni::Tray for TrayItem {
     }
 
     fn title(&self) -> String {
-        t("NextSync — {state}").replace("{state}", self.presentation.label)
+        t("NextSync - {state}").replace("{state}", self.presentation.label)
     }
 
     fn status(&self) -> Status {
