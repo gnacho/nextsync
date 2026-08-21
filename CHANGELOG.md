@@ -2,6 +2,23 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.120.0] - 2026-08-21
+
+### Corregido
+- **El push se reconecta al cambiar la contraseña (#133)**: tras una re-autenticación, el canal push usa la contraseña nueva de inmediato; antes seguía con la antigua hasta una reconexión casual.
+- **El overflow del watcher ya no se pierde (#134)**: la señal de rescan se guarda en un flag atómico que no compite con el buffer lleno; antes podía descartarse y se sincronizaba desde un stream parcial.
+- **El avatar se borra al quitar la cuenta y se limita su tamaño (#135)**: la caché de avatares ya no deja huérfanos ni persiste cuerpos desmedidos.
+- **Escritura de configuración durable (#136)**: nombres temporales únicos (pid+contador) y fsync del directorio tras el rename; antes dos instancias podían pisarse y un corte de luz deshacía el cambio.
+- **schema_version ilegible se rechaza (#137)**: un valor no entero/negativo ya no se trata como v1 y no migra datos corruptos.
+- **color_scheme validado (#138)**: solo `system`/`light`/`dark` llegan al conmutador de tema; cualquier otro valor cae al predeterminado.
+- **Secreto no UTF-8 ya no se corrompe en silencio (#139)**: la tienda de credenciales devuelve un error en vez de sustituir bytes inválidos.
+- **El Debug redacta el secreto (#140)**: `DriverContext` y `CommandSpec` ya no imprimen la contraseña o el token en los logs.
+- **Las notificaciones del servidor siembran la línea base una vez (#141)**: un primer sondeo vacío ya no hace que la primera notificación real se trague.
+- **Catálogo ES sincronizado con el po y verificado en CI (#142)**: las 18 cadenas huérfanas vuelven al po, es.rs se regenera de él y el CI falla ante cualquier desviación.
+- **Título del tray sin em dash (#143)**: "NextSync - {estado}" con guión normal.
+- **Código muerto eliminado (#144)**: el parser `parse_metered` que solo usaba su propio test.
+- **El progreso ya no reaparece tras terminar el run (#145)**: un flag compartido impide que los eventos residuales del buffer repinten el label después de que la sincronización acabó.
+
 ## [0.118.0] - 2026-08-21
 
 ### Corregido
