@@ -507,8 +507,24 @@ pub fn validate_config(value: Value) -> Result<Config, ConfigError> {
         .ok_or_else(|| ConfigError::new("Configuration root must be an object."))?;
 
     let version = match data.get("schema_version") {
-        Some(Value::Number(number)) => number.as_i64().unwrap_or(0),
-        _ => 1,
+        // Absent means legacy v1, which the migrations handle.
+        None | Some(Value::Null) => 1,
+        // Present but not a clean positive integer is corrupt, not v1
+        // (issue #137): running the v1 migrations over such data would
+        // misread it.
+        Some(Value::Number(number)) => match number.as_i64() {
+            Some(version) if version >= 1 => version,
+            _ => {
+                return Err(ConfigError::new(
+                    "Configuration schema_version is not a valid integer.",
+                ))
+            }
+        },
+        Some(_) => {
+            return Err(ConfigError::new(
+                "Configuration schema_version is not a valid integer.",
+            ))
+        }
     };
     if version > SCHEMA_VERSION as i64 {
         return Err(ConfigError::new(format!(
@@ -1601,6 +1617,20 @@ mod tests {
         assert!(err
             .message
             .contains("Configuration schema 8 is newer than this application supports"));
+    }
+
+    #[test]
+    fn illegible_schema_version_is_rejected_not_treated_as_v1() {
+        // Issue #137: a present but unreadable schema_version must not run
+        // the v1 migrations over corrupt data.
+        let err = validate_config(json!({ "schema_version": "7" })).unwrap_err();
+        assert!(err.message.contains("schema_version is not a valid integer"));
+        let err = validate_config(json!({ "schema_version": 7.5 })).unwrap_err();
+        assert!(err.message.contains("schema_version is not a valid integer"));
+        let err = validate_config(json!({ "schema_version": -1 })).unwrap_err();
+        assert!(err.message.contains("schema_version is not a valid integer"));
+        // Absent stays the legitimate v1 default.
+        assert!(validate_config(json!({})).is_ok());
     }
 
     #[test]
