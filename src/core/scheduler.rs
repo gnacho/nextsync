@@ -533,16 +533,21 @@ impl SchedulerInner {
                 return;
             }
         }
-        self.delete_bypass_once = false;
         // Fase 3: the deletion guard runs before every reconciliation. When it
         // finds a mass deletion the run is blocked and the app must review it.
+        // A one-time approval (delete_bypass_once) skips the guard so the run
+        // can propagate the deletions; the baseline is refreshed afterwards
+        // and the next run is guarded again.
         if let Some(guard) = &mut self.guard {
-            if let Some(alert) = guard.check() {
-                self.queue.extend(reasons.iter().copied());
-                self.set_delete_alert(alert);
-                return;
+            if !self.delete_bypass_once {
+                if let Some(alert) = guard.check() {
+                    self.queue.extend(reasons.iter().copied());
+                    self.set_delete_alert(alert);
+                    return;
+                }
             }
         }
+        self.delete_bypass_once = false;
         self.prepare_sync(reasons);
     }
 
@@ -1726,12 +1731,14 @@ mod tests {
         assert_eq!(scheduler.queue_len(), 1);
         assert_eq!(guard.0.borrow().check_calls, 1);
 
-        // The deletion is over; approve once and the run goes through.
-        guard.0.borrow_mut().alert = None;
+        // Approve once WITHOUT clearing the guard: the bypass must skip the
+        // still-active guard check this once and let the run proceed.
         scheduler.approve_delete_once();
         assert!(source.borrow().pending() >= 1);
         run_idle(&source);
         assert_eq!(runner.0.borrow().start_calls, 1);
+        // The guard was not consulted again on the bypassed run.
+        assert_eq!(guard.0.borrow().check_calls, 1);
     }
 
     #[test]
