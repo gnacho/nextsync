@@ -2,6 +2,17 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.114.0] - 2026-08-21
+
+### Añadido
+- **Pestaña Eliminaciones en la ventana de actividad (#118)**: tercera pestaña con la lista de archivos detectados por el guard y acciones Aprobar/Restaurar, y estado vacío con `broom-sparkles` ("No hay archivos borrados que resolver").
+- **Iconos en las pestañas**: Recientes (`message-circle-check`), Conflictos (`copy-x`) y Eliminaciones (`broom-sparkles`).
+
+### Corregido
+- **Iconos de actividad y conflictos a color fijo (#118)**: dejan de ser simbólicos oscuros y se ven.
+- **Fondo unificado (#118)**: las listas van en un `Clamp`, sin el corte blanco/gris al ampliar.
+- **Quitado el botón Cerrar redundante y el texto repetido** de la parte superior.
+
 ## [0.112.0] - 2026-08-21
 
 ### Corregido

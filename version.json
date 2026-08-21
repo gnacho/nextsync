@@ -1,10 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.112.0",
+  "version": "0.114.0",
   "mandatory": false,
-  "summary": "A one-time deletion approval now actually bypasses the guard for one run.",
+  "summary": "Reworked the activity window: Deletions tab, tab icons, fixed-color icons and uniform background.",
   "changelog": [
-    "'Approve These Deletions Once' now skips the deletion guard for a single run, so the folder unblocks and the deletions propagate (issue #117)."
+    "Added a Deletions tab to the activity window with the deletion-review list and Approve/Restore actions, plus an empty state (issue #118).",
+    "Tabs now carry icons (message-circle-check, copy-x, broom-sparkles); activity and conflict rows use fixed-color icons.",
+    "Removed the redundant Close button and repeated summary label; lists are clamped for a uniform background."
   ],
-  "released_at": "2026-08-21T03:30:00Z"
+  "released_at": "2026-08-21T04:00:00Z"
 }
