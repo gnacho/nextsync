@@ -16,6 +16,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -637,7 +638,7 @@ impl ConfigStore {
             ConfigError::new(format!("Could not serialize configuration: {error}"))
         })? + "\n";
 
-        let temporary = self.path.with_extension("tmp");
+        let temporary = temporary_path(&self.path);
         let write_result = (|| -> io::Result<()> {
             let mut handle = fs::OpenOptions::new()
                 .write(true)
@@ -648,7 +649,11 @@ impl ConfigStore {
             handle.write_all(content.as_bytes())?;
             handle.sync_all()?;
             drop(handle);
-            fs::rename(&temporary, &self.path)
+            fs::rename(&temporary, &self.path)?;
+            // Durability: an fsync of the directory makes the rename itself
+            // survive a power cut, not just the file contents (issue #136).
+            fs::File::open(parent)?.sync_all()?;
+            Ok(())
         })();
         if let Err(error) = write_result {
             let _ = fs::remove_file(&temporary);
@@ -786,6 +791,24 @@ impl ConfigStore {
         self.save(&config)?;
         Ok(())
     }
+}
+
+/// Counter for unique temporary names within this process.
+static TMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A unique temporary path for an atomic config write (issue #136). The
+/// fixed `.tmp` suffix allowed two concurrent instances to share the same
+/// staging file and interleave writes; pid + a per-process counter keeps
+/// every writer on its own file.
+fn temporary_path(config_path: &Path) -> PathBuf {
+    let pid = std::process::id();
+    let sequence = TMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let mut name = config_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config".to_string());
+    name.push_str(&format!(".tmp-{pid}-{sequence}"));
+    config_path.with_file_name(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -1850,6 +1873,35 @@ mod tests {
         assert!(!obj.contains_key("account"));
         assert!(!obj.contains_key("sync"));
         assert!(!obj.contains_key("runtime"));
+    }
+
+    #[test]
+    fn consecutive_saves_use_unique_temporary_names_and_leave_none_behind() {
+        // Issue #136: every write stages on its own pid+counter tmp file, so
+        // two writers cannot interleave on a shared settings.tmp, and the
+        // rename removes the staging file.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = ConfigStore::with_path(path.clone());
+        let first = temporary_path(&path);
+        let second = temporary_path(&path);
+        assert_ne!(first, second);
+        assert!(first.to_string_lossy().contains(".tmp-"));
+
+        let config = Config::default();
+        store.save(&config).unwrap();
+        store.save(&config).unwrap();
+        let leftovers = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp-"))
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "no staging files should remain after saves: {leftovers:?}"
+        );
+        assert!(path.exists());
     }
 
     #[test]
