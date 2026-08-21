@@ -239,7 +239,8 @@ mod tests {
         assert!(seen.borrow().is_empty());
         assert!(*seeded.borrow());
         // A later poll with a real notification finds the seed flag on.
-        let new_items = unseen(&seen.borrow(), &[sample(7, "new")]);
+        let items = [sample(7, "new")];
+        let new_items = unseen(&seen.borrow(), &items);
         assert_eq!(new_items.len(), 1);
     }
 }

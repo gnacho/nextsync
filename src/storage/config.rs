@@ -1632,11 +1632,17 @@ mod tests {
         // Issue #137: a present but unreadable schema_version must not run
         // the v1 migrations over corrupt data.
         let err = validate_config(json!({ "schema_version": "7" })).unwrap_err();
-        assert!(err.message.contains("schema_version is not a valid integer"));
+        assert!(err
+            .message
+            .contains("schema_version is not a valid integer"));
         let err = validate_config(json!({ "schema_version": 7.5 })).unwrap_err();
-        assert!(err.message.contains("schema_version is not a valid integer"));
+        assert!(err
+            .message
+            .contains("schema_version is not a valid integer"));
         let err = validate_config(json!({ "schema_version": -1 })).unwrap_err();
-        assert!(err.message.contains("schema_version is not a valid integer"));
+        assert!(err
+            .message
+            .contains("schema_version is not a valid integer"));
         // Absent stays the legitimate v1 default.
         assert!(validate_config(json!({})).is_ok());
     }
