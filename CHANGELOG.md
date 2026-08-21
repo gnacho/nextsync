@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.116.0] - 2026-08-21
+
+### Corregido
+- **Autostart funcionando (#119)**: el binario acepta `--background` y arranca minimizado al tray, así la entrada de inicio de sesión ya no fallaba (antes la opción era rechazada y la app salía).
+
 ## [0.114.0] - 2026-08-21
 
 ### Añadido

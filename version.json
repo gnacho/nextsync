@@ -1,12 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.114.0",
+  "version": "0.116.0",
   "mandatory": false,
-  "summary": "Reworked the activity window: Deletions tab, tab icons, fixed-color icons and uniform background.",
+  "summary": "Support --background so the autostart starts the app in the tray.",
   "changelog": [
-    "Added a Deletions tab to the activity window with the deletion-review list and Approve/Restore actions, plus an empty state (issue #118).",
-    "Tabs now carry icons (message-circle-check, copy-x, broom-sparkles); activity and conflict rows use fixed-color icons.",
-    "Removed the redundant Close button and repeated summary label; lists are clamped for a uniform background."
+    "The binary accepts --background and starts minimized to the tray, so the login autostart entry now works (issue #119)."
   ],
-  "released_at": "2026-08-21T04:00:00Z"
+  "released_at": "2026-08-21T05:00:00Z"
 }
