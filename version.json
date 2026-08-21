@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.110.0",
+  "version": "0.112.0",
   "mandatory": false,
-  "summary": "De-duplicated Review deletions menu entry.",
+  "summary": "A one-time deletion approval now actually bypasses the guard for one run.",
   "changelog": [
-    "The per-folder menu no longer shows the Review deletions entry twice (issue #116)."
+    "'Approve These Deletions Once' now skips the deletion guard for a single run, so the folder unblocks and the deletions propagate (issue #117)."
   ],
-  "released_at": "2026-08-21T03:00:00Z"
+  "released_at": "2026-08-21T03:30:00Z"
 }

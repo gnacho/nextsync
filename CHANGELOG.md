@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.112.0] - 2026-08-21
+
+### Corregido
+- **Aprobar eliminaciones una vez ya desbloquea (#117)**: "Aprobar estas eliminaciones una vez" ahora salta el guard de borrado durante una sola sincronización, de modo que la carpeta se desbloquea y los borrados se propagan. Antes el bypass se reseteaba antes de la comprobación del guard y la carpeta quedaba bloqueada igual.
+
 ## [0.110.0] - 2026-08-21
 
 ### Corregido
