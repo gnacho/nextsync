@@ -54,6 +54,10 @@ pub struct ServerNotificationWatcher {
     logger: crate::core::log::LogBuffer,
     /// Notification ids already shown (or seeded as the baseline).
     seen: Rc<RefCell<HashSet<i64>>>,
+    /// Whether the baseline has been seeded. A separate flag from `seen`
+    /// being non-empty: the first poll may legitimately return zero
+    /// notifications, and the seed must happen exactly once (issue #141).
+    seeded: Rc<RefCell<bool>>,
     /// Guards against overlapping fetches when the push poke and the timer
     /// fire together.
     running: Rc<RefCell<bool>>,
@@ -79,6 +83,7 @@ impl ServerNotificationWatcher {
             notifier,
             logger,
             seen: Rc::new(RefCell::new(HashSet::new())),
+            seeded: Rc::new(RefCell::new(false)),
             running: Rc::new(RefCell::new(false)),
             source_id: RefCell::new(None),
         }
@@ -119,6 +124,7 @@ impl ServerNotificationWatcher {
         let server = self.server.clone();
         let login = self.login.clone();
         let seen = self.seen.clone();
+        let seeded = self.seeded.clone();
         let notifier = self.notifier.clone();
         let logger = self.logger.clone();
         let running = self.running.clone();
@@ -139,13 +145,17 @@ impl ServerNotificationWatcher {
             // the join-handle result (the outer layer reports panics).
             match task.await {
                 Ok(Ok(notifications)) => {
-                    if seen.borrow().is_empty() {
+                    if !*seeded.borrow() {
                         // First run: seed the baseline so enabling the option
-                        // does not replay a backlog of old notifications.
+                        // does not replay a backlog of old notifications. The
+                        // flag (not the set being empty) decides, so a first
+                        // poll that returns zero items still counts as seeded
+                        // (issue #141).
                         let mut seen = seen.borrow_mut();
                         for item in &notifications {
                             seen.insert(item.notification_id);
                         }
+                        *seeded.borrow_mut() = true;
                     } else {
                         let new_items = {
                             let seen = seen.borrow();
@@ -215,5 +225,21 @@ mod tests {
         let items = vec![sample(1, "one")];
         let seen = HashSet::from([1i64]);
         assert!(unseen(&seen, &items).is_empty());
+    }
+
+    #[test]
+    fn seeded_flag_decides_the_baseline_not_the_set_size() {
+        // Issue #141: a first poll that returns zero notifications still
+        // seeds the baseline, so the next poll with one real notification is
+        // not swallowed by a second seed.
+        let seen = Rc::new(RefCell::new(HashSet::new()));
+        let seeded = Rc::new(RefCell::new(false));
+        // First poll: zero notifications, but it marks the baseline seeded.
+        *seeded.borrow_mut() = true;
+        assert!(seen.borrow().is_empty());
+        assert!(*seeded.borrow());
+        // A later poll with a real notification finds the seed flag on.
+        let new_items = unseen(&seen.borrow(), &[sample(7, "new")]);
+        assert_eq!(new_items.len(), 1);
     }
 }
