@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.108.0] - 2026-08-21
+
+### Añadido
+- **Listado de eliminaciones en la revisión (#115)**: el diálogo de revisión muestra los archivos que el guard detectó como desaparecidos (con su número) en una lista desplazable, y quita el botón Cerrar redundante; Mantener en pausa es la opción por defecto.
+
 ## [0.106.0] - 2026-08-21
 
 ### Corregido
