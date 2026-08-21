@@ -330,6 +330,13 @@ impl FolderRuntime {
         // cannot repaint the row.
         let run_active = std::rc::Rc::new(std::cell::Cell::new(false));
         self.scheduler.set_run_active(run_active.clone());
+        // Issue #148: startup syncs begin before connect_progress() wires the
+        // forwarder, so the flag would stay false for the entire first run and
+        // the UI would show no per-file progress. Seed it from the scheduler
+        // state when connecting, so an in-flight run keeps emitting events.
+        if self.scheduler.is_running() {
+            run_active.set(true);
+        }
         glib::spawn_future_local(async move {
             while let Ok(progress) = progress_rx.recv().await {
                 if !run_active.get() {
