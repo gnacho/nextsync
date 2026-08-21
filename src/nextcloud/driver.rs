@@ -83,7 +83,7 @@ impl FromStr for Provider {
 /// expects (`NC_PASSWORD` for Nextcloud, the app password / token for
 /// OpenCloud) and `sync_hidden_files` follows the OpenCloud flag that is
 /// opt-in by default (the Nextcloud driver always syncs hidden files via `-h`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct DriverContext {
     /// Account server URL, already normalized.
     pub server_url: String,
@@ -109,6 +109,26 @@ pub struct DriverContext {
     pub exclude_file: Option<PathBuf>,
     /// Override of the provider binary (used by tests).
     pub executable: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for DriverContext {
+    /// Custom `Debug` so the account secret never reaches logs (issue #140).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DriverContext")
+            .field("server_url", &self.server_url)
+            .field("user", &self.user)
+            .field("password", &"[REDACTED]")
+            .field("local_root", &self.local_root)
+            .field("remote_path", &self.remote_path)
+            .field("space_id", &self.space_id)
+            .field("network", &self.network)
+            .field("retries", &self.retries)
+            .field("detailed_output", &self.detailed_output)
+            .field("sync_hidden_files", &self.sync_hidden_files)
+            .field("exclude_file", &self.exclude_file)
+            .field("executable", &self.executable)
+            .finish()
+    }
 }
 
 impl DriverContext {
