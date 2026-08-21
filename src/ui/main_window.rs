@@ -1240,12 +1240,71 @@ impl MainWindow {
         };
         let scheduler = folder.scheduler();
         let alert = scheduler.delete_alert();
-        let message = alert
+        let missing = alert
             .as_ref()
-            .map(|alert| alert.message.clone())
+            .map(|alert| alert.missing_paths.clone())
             .unwrap_or_default();
+        let missing_len = missing.len();
 
-        let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&message));
+        let body = if missing_len > 0 {
+            t("{count} files disappeared from the local folder.")
+                .replace("{count}", &missing_len.to_string())
+        } else {
+            alert
+                .as_ref()
+                .map(|alert| alert.message.clone())
+                .unwrap_or_default()
+        };
+
+        let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&body));
+
+        // List the files the guard detected as missing (issue #115), capped so
+        // a very large deletion stays readable; the count above stays exact.
+        if !missing.is_empty() {
+            const CAP: usize = 100;
+            let list = gtk4::ListBox::builder()
+                .css_classes(["boxed-list"])
+                .selection_mode(gtk4::SelectionMode::None)
+                .build();
+            for path in missing.iter().take(CAP) {
+                let row = libadwaita::ActionRow::builder()
+                    .title(path)
+                    .activatable(false)
+                    .selectable(false)
+                    .build();
+                list.append(&row);
+            }
+            let note = if missing_len > CAP {
+                t("Showing {count} of {total} files.")
+                    .replace("{count}", &CAP.to_string())
+                    .replace("{total}", &missing_len.to_string())
+            } else {
+                t("These deletions will be propagated to the server when it synchronizes.")
+                    .to_string()
+            };
+            let label = gtk4::Label::builder()
+                .label(&note)
+                .css_classes(["dim-label", "caption"])
+                .xalign(0.0)
+                .wrap(true)
+                .margin_top(6)
+                .build();
+            let content = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Vertical)
+                .spacing(6)
+                .build();
+            let scroller = gtk4::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk4::PolicyType::Never)
+                .min_content_height(160)
+                .max_content_height(360)
+                .vexpand(true)
+                .build();
+            scroller.set_child(Some(&list));
+            content.append(&scroller);
+            content.append(&label);
+            dialog.set_extra_child(Some(&content));
+        }
+
         dialog.add_response("keep", t("Keep Paused"));
         if account.provider == Provider::Nextcloud {
             dialog.add_response("restore", t("Restore from Nextcloud"));
@@ -1257,7 +1316,6 @@ impl MainWindow {
         if account.provider == Provider::Nextcloud {
             dialog.add_response("trash", t("Restore from server trash…"));
         }
-        dialog.add_response("close", t("Close"));
         dialog.set_default_response(Some("keep"));
 
         let approve = scheduler.clone();

@@ -2621,3 +2621,15 @@ msgstr "Sincronización bloqueada: no hay credenciales guardadas"
 #: src/ui/folder_status.rs
 msgid "{action} · {count} files"
 msgstr "{action} · {count} archivos"
+
+#: src/ui/main_window.rs
+msgid "{count} files disappeared from the local folder."
+msgstr "{count} archivos desaparecieron de la carpeta local."
+
+#: src/ui/main_window.rs
+msgid "Showing {count} of {total} files."
+msgstr "Mostrando {count} de {total} archivos."
+
+#: src/ui/main_window.rs
+msgid "These deletions will be propagated to the server when it synchronizes."
+msgstr "Estos borrados se propagarán al servidor al sincronizar."
