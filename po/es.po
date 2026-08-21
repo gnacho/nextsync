@@ -2653,3 +2653,58 @@ msgstr "No hay archivos borrados que resolver"
 #: src/ui/conflict_resolver.rs
 msgid "The deletion guard has not flagged any files in this folder."
 msgstr "El guard de borrado no ha marcado ningún archivo en esta carpeta."
+
+msgid "Could not list the remote folders."
+msgstr "No se pudieron listar las carpetas remotas."
+
+msgid "Keep Local for All"
+msgstr "Conservar la local en todo"
+
+msgid "Keep Remote for All"
+msgstr "Conservar la remota en todo"
+
+msgid "Keep the local version of all {count} conflicted copy(ies)? The conflicted copies are deleted."
+msgstr "¿Conservar la versión local de las {count} copias en conflicto? Las copias en conflicto se eliminan."
+
+msgid "Keep the server version of all {count} conflicted copy(ies)? The working files are replaced."
+msgstr "¿Conservar la versión del servidor de las {count} copias en conflicto? Los archivos de trabajo se reemplazan."
+
+msgid "Kept the local version of {count} file(s)"
+msgstr "Versión local conservada en {count} archivo(s)"
+
+msgid "Kept the server version of {count} file(s)"
+msgstr "Versión del servidor conservada en {count} archivo(s)"
+
+msgid "Resolve All Conflicts"
+msgstr "Resolver todos los conflictos"
+
+msgid "Synced in local {folder}"
+msgstr "Sincronizado en local {folder}"
+
+msgid "Waiting to synchronize"
+msgstr "Esperando para sincronizar"
+
+msgid "checking {file}"
+msgstr "comprobando {file}"
+
+msgid "conflict on {file}"
+msgstr "conflicto en {file}"
+
+msgid "deleting {file}"
+msgstr "eliminando {file}"
+
+msgid "downloading {file}"
+msgstr "descargando {file}"
+
+msgid "processing {file}"
+msgstr "procesando {file}"
+
+msgid "uploading {file}"
+msgstr "subiendo {file}"
+
+msgid "{action} · {count}"
+msgstr "{action} · {count}"
+
+msgid "{used} used"
+msgstr "{used} usados"
+

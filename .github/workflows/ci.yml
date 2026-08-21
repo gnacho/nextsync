@@ -34,5 +34,10 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: i18n catalog parity
+        run: |
+          python3 tools/gen-translations.py po/es.po /tmp/es-regenerated.rs
+          diff -u src/util/translations/es.rs /tmp/es-regenerated.rs
+
       - name: Build release
         run: cargo build --release
