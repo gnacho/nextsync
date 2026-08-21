@@ -541,19 +541,21 @@ impl NextcloudApi {
             if !entry.is_collection {
                 continue;
             }
-            let segments: Vec<&str> = entry.href_path.split('/').collect();
-            if segments.iter().any(|segment| {
-                segment.starts_with('.')
-                    || segment.contains("trashbin")
-                    || segment.contains("trash")
-                    || segment.contains("versions")
-            }) {
+            // Filter only the folder name (the last path segment): earlier
+            // segments include the username and the fixed dav root, whose
+            // substrings must not hide every folder (issue #128).
+            let name = entry.href_path.rsplit('/').next().unwrap_or_default();
+            if name.starts_with('.')
+                || name.contains("trashbin")
+                || name.contains("trash")
+                || name.contains("versions")
+            {
                 continue;
             }
             // WebDAV hrefs arrive percent-encoded; decode so pickers show
             // and store the real name (issue #88). The engine re-encodes
             // when building URLs.
-            let name = percent_decode_path(entry.href_path.rsplit('/').next().unwrap_or_default());
+            let name = percent_decode_path(name);
             folders.push(format!("/{name}"));
         }
         folders.sort();
