@@ -2137,7 +2137,7 @@ fn present_remove_account_step_two(
             return;
         }
         if !typed_confirmation_matches(&entry.text()) {
-            let toast = libadwaita::Toast::new("Type “remove” to confirm account removal.");
+            let toast = libadwaita::Toast::new(t("Type “remove” to confirm account removal."));
             host_for_response.add_toast(toast);
             return;
         }
