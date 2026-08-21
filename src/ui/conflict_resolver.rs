@@ -89,18 +89,21 @@ pub struct ConflictResolverWindow {
     // also keeps the row handlers' captures trivially safe.
     _recent_list: gtk4::ListBox,
     _conflict_list: gtk4::ListBox,
+    _deletion_list: gtk4::ListBox,
     _toast_overlay: libadwaita::ToastOverlay,
 }
 
 impl ConflictResolverWindow {
     /// Build the window (already wired, not yet shown). `local_root` is the
-    /// synchronized folder to scan for conflicted copies and `matcher` the
-    /// exclusion rules that apply to its files.
+    /// synchronized folder to scan for conflicted copies, `matcher` the
+    /// exclusion rules that apply to its files, and `scheduler` the folder
+    /// scheduler driving the deletion-review tab (issue #118).
     pub fn new(
         application: &libadwaita::Application,
         local_root: impl AsRef<Path>,
         matcher: ExclusionMatcher,
         log: Rc<dyn RecentLog>,
+        scheduler: Option<crate::core::scheduler::Scheduler>,
         on_close: Option<Rc<dyn Fn()>>,
     ) -> Self {
         let window = libadwaita::Window::builder()
@@ -134,9 +137,10 @@ impl ConflictResolverWindow {
             .build();
         let recent_scroller = gtk4::ScrolledWindow::builder().vexpand(true).build();
         recent_scroller.set_child(Some(&recent_list));
-        recent_box.append(&recent_scroller);
+        recent_box.append(&clamp(&recent_scroller));
         let recent_page = stack.add_named(&recent_box, Some("recent"));
         recent_page.set_title(Some(t("Recent")));
+        recent_page.set_icon_name(Some("nextsync-tab-recent"));
 
         // ---- Conflicts page -------------------------------------------------
         let conflicts_box = gtk4::Box::builder()
@@ -145,13 +149,8 @@ impl ConflictResolverWindow {
             .build();
         conflicts_box.set_margin_top(4);
         conflicts_box.set_margin_bottom(4);
-        let summary = gtk4::Label::builder()
-            .xalign(0.0)
-            .css_classes(["dim-label"])
-            .wrap(true)
-            .build();
         let empty_state = libadwaita::StatusPage::builder()
-            .icon_name("emblem-ok-symbolic")
+            .icon_name("nextsync-activity-ok")
             .title(t("No Conflicts"))
             .description(t(
                 "No Nextcloud conflicted copies were found in this folder.",
@@ -173,12 +172,49 @@ impl ConflictResolverWindow {
             .halign(gtk4::Align::End)
             .build();
         bulk_bar.set_visible(false);
-        conflicts_box.append(&summary);
         conflicts_box.append(&empty_state);
-        conflicts_box.append(&bulk_bar);
-        conflicts_box.append(&conflict_scroller);
+        conflicts_box.append(&clamp(&bulk_bar));
+        conflicts_box.append(&clamp(&conflict_scroller));
         let conflicts_page = stack.add_named(&conflicts_box, Some("conflicts"));
         conflicts_page.set_title(Some(t("Conflicts")));
+        conflicts_page.set_icon_name(Some("nextsync-tab-conflicts"));
+
+        // ---- Deletions page -------------------------------------------------
+        let deletions_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(8)
+            .build();
+        deletions_box.set_margin_top(4);
+        deletions_box.set_margin_bottom(4);
+        let deletions_empty = libadwaita::StatusPage::builder()
+            .icon_name("nextsync-tab-deletions")
+            .title(t("No deleted files to resolve"))
+            .description(t(
+                "The deletion guard has not flagged any files in this folder.",
+            ))
+            .vexpand(true)
+            .build();
+        let deletion_list = gtk4::ListBox::builder()
+            .css_classes(["boxed-list"])
+            .selection_mode(gtk4::SelectionMode::None)
+            .build();
+        let deletion_scroller = gtk4::ScrolledWindow::builder().vexpand(true).build();
+        deletion_scroller.set_child(Some(&deletion_list));
+        let deletion_clamp = clamp(&deletion_scroller);
+        deletion_clamp.set_visible(false);
+        let deletion_actions = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .halign(gtk4::Align::End)
+            .build();
+        deletion_actions.set_visible(false);
+        let deletion_actions_clamp = clamp(&deletion_actions);
+        deletions_box.append(&deletions_empty);
+        deletions_box.append(&deletion_actions_clamp);
+        deletions_box.append(&deletion_clamp);
+        let deletions_page = stack.add_named(&deletions_box, Some("deletions"));
+        deletions_page.set_title(Some(t("Deletions")));
+        deletions_page.set_icon_name(Some("nextsync-tab-deletions"));
 
         switcher.set_stack(Some(&stack));
         toolbar.set_content(Some(&stack));
@@ -191,18 +227,10 @@ impl ConflictResolverWindow {
             .icon_name("view-refresh-symbolic")
             .build();
         header.pack_end(&refresh);
-        let close = gtk4::Button::builder()
-            .label(t("Close"))
-            .css_classes(["suggested-action"])
-            .build();
-        header.pack_end(&close);
-        let window_for_close = window.clone();
-        close.connect_clicked(move |_| window_for_close.close());
 
         // ---- Shared conflict reload target ----------------------------------
         let target = ReloadTarget {
             list: conflict_list.clone(),
-            summary: summary.clone(),
             empty_state: empty_state.clone(),
             bulk_bar: bulk_bar.clone(),
             parent: window.upcast_ref::<gtk4::Widget>().clone(),
@@ -214,6 +242,21 @@ impl ConflictResolverWindow {
         let target_for_refresh = target.clone();
         refresh.connect_clicked(move |_| target_for_refresh.reload());
         target.reload();
+
+        // ---- Deletion review tab --------------------------------------------
+        let deletion_target = scheduler.map(|scheduler| {
+            wire_deletion_actions(
+                &deletion_actions,
+                &deletions_empty,
+                &deletion_list,
+                &deletion_clamp,
+                &deletion_actions_clamp,
+                scheduler,
+            )
+        });
+        if let Some(deletion_target) = &deletion_target {
+            reload_deletions(deletion_target);
+        }
 
         // ---- Live Recent via the log getter ---------------------------------
         let last_rendered: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -246,6 +289,7 @@ impl ConflictResolverWindow {
             window,
             _recent_list: recent_list,
             _conflict_list: conflict_list,
+            _deletion_list: deletion_list,
             _toast_overlay: toast_overlay,
         }
     }
@@ -267,7 +311,6 @@ impl ConflictResolverWindow {
 #[derive(Clone)]
 struct ReloadTarget {
     list: gtk4::ListBox,
-    summary: gtk4::Label,
     empty_state: libadwaita::StatusPage,
     /// The bulk action bar, shown only while conflicts exist (issue #77).
     bulk_bar: gtk4::Box,
@@ -289,6 +332,100 @@ impl ReloadTarget {
         self.toast_overlay
             .add_toast(libadwaita::Toast::new(message.as_ref()));
     }
+}
+
+/// Wrap a widget in a `Clamp` so the boxed lists keep a uniform, centered
+/// background instead of stretching white across a wide window (issue #118).
+fn clamp(child: &impl IsA<gtk4::Widget>) -> libadwaita::Clamp {
+    let clamp = libadwaita::Clamp::builder()
+        .maximum_size(760)
+        .tightening_threshold(600)
+        .build();
+    clamp.set_child(Some(child));
+    clamp
+}
+
+/// The widgets driving the deletion-review tab (issue #118): the folder
+/// scheduler plus the list, empty state and actions, cloned into the action
+/// handlers.
+#[derive(Clone)]
+struct DeletionTarget {
+    scheduler: crate::core::scheduler::Scheduler,
+    list: gtk4::ListBox,
+    empty_state: libadwaita::StatusPage,
+    list_clamp: libadwaita::Clamp,
+    actions_clamp: libadwaita::Clamp,
+    approve_button: gtk4::Button,
+    restore_button: gtk4::Button,
+}
+
+/// Wire the Approve/Restore actions of the deletion tab and return the target.
+fn wire_deletion_actions(
+    actions: &gtk4::Box,
+    empty_state: &libadwaita::StatusPage,
+    list: &gtk4::ListBox,
+    list_clamp: &libadwaita::Clamp,
+    actions_clamp: &libadwaita::Clamp,
+    scheduler: crate::core::scheduler::Scheduler,
+) -> DeletionTarget {
+    let approve = gtk4::Button::builder()
+        .label(t("Approve These Deletions Once"))
+        .css_classes(["suggested-action"])
+        .build();
+    let restore = gtk4::Button::builder()
+        .label(t("Restore from Nextcloud"))
+        .build();
+    actions.append(&restore);
+    actions.append(&approve);
+
+    let target = DeletionTarget {
+        scheduler,
+        list: list.clone(),
+        empty_state: empty_state.clone(),
+        list_clamp: list_clamp.clone(),
+        actions_clamp: actions_clamp.clone(),
+        approve_button: approve.clone(),
+        restore_button: restore.clone(),
+    };
+
+    let target_for_approve = target.clone();
+    approve.connect_clicked(move |_| {
+        target_for_approve.scheduler.approve_delete_once();
+        reload_deletions(&target_for_approve);
+    });
+    let target_for_restore = target.clone();
+    restore.connect_clicked(move |_| {
+        target_for_restore.scheduler.restore_from_server();
+        reload_deletions(&target_for_restore);
+    });
+
+    target
+}
+
+/// Rebuild the deletion-review tab from the folder's current deletion alert.
+fn reload_deletions(target: &DeletionTarget) {
+    while let Some(child) = target.list.first_child() {
+        child.unparent();
+    }
+    let Some(alert) = target.scheduler.delete_alert() else {
+        target.empty_state.set_visible(true);
+        target.list_clamp.set_visible(false);
+        target.actions_clamp.set_visible(false);
+        return;
+    };
+    target.empty_state.set_visible(false);
+    for path in &alert.missing_paths {
+        let row = libadwaita::ActionRow::builder()
+            .title(path)
+            .activatable(false)
+            .selectable(false)
+            .build();
+        target.list.append(&row);
+    }
+    target.list_clamp.set_visible(true);
+    target.approve_button.set_visible(alert.can_approve_once);
+    target.restore_button.set_visible(true);
+    target.actions_clamp.set_visible(true);
 }
 
 /// Which side every conflict should be resolved to (issue #77).
@@ -367,9 +504,8 @@ fn apply_bulk_resolve(target: &ReloadTarget, side: BulkSide) -> usize {
 
 /// Rebuild the Conflicts list from a fresh scan.
 fn reload_conflicts(target: &ReloadTarget) {
-    let (list, summary, empty_state, bulk_bar, local_root, matcher) = (
+    let (list, empty_state, bulk_bar, local_root, matcher) = (
         &target.list,
-        &target.summary,
         &target.empty_state,
         &target.bulk_bar,
         &target.local_root,
@@ -382,19 +518,10 @@ fn reload_conflicts(target: &ReloadTarget) {
     if conflicts.is_empty() {
         empty_state.set_visible(true);
         bulk_bar.set_visible(false);
-        summary.set_text(
-            &t("No conflicted copies found in {folder}.")
-                .replace("{folder}", &local_root.display().to_string()),
-        );
         return;
     }
     empty_state.set_visible(false);
     bulk_bar.set_visible(true);
-    summary.set_text(
-        &t("{count} conflicted copy(ies) found in {folder}.")
-            .replace("{count}", &conflicts.len().to_string())
-            .replace("{folder}", &local_root.display().to_string()),
-    );
     for conflict in conflicts {
         list.append(&build_conflict_row(&conflict, target));
     }
@@ -420,7 +547,7 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
         .build();
 
     let icon = gtk4::Image::builder()
-        .icon_name("dialog-warning-symbolic")
+        .icon_name("nextsync-conflict-warning")
         .pixel_size(24)
         .valign(gtk4::Align::Start)
         .build();
@@ -610,7 +737,7 @@ mod tests {
             let log = Rc::new(FakeLog(vec![
                 "2026-08-07 14:12:41 INFO    Synchronization completed successfully.".to_string(),
             ]));
-            let window = ConflictResolverWindow::new(&app, dir.path(), matcher, log, None);
+            let window = ConflictResolverWindow::new(&app, dir.path(), matcher, log, None, None);
             assert_eq!(
                 window.window().title().unwrap_or_default().to_string(),
                 window_title()

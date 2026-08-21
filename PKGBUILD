@@ -62,6 +62,12 @@ package() {
     local colored=(
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
+        nextsync-activity-debug
+        nextsync-activity-error
+        nextsync-activity-info
+        nextsync-activity-ok
+        nextsync-activity-warning
+        nextsync-conflict-warning
         nextsync-menu-log
         nextsync-menu-open
         nextsync-menu-quit
@@ -80,6 +86,9 @@ package() {
         nextsync-status-ok
         nextsync-status-paused
         nextsync-status-syncing
+        nextsync-tab-conflicts
+        nextsync-tab-deletions
+        nextsync-tab-recent
         nextsync-tray-cloud
         nextsync-tray-cloud-alert
         nextsync-tray-cloud-check

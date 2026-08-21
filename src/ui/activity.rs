@@ -16,20 +16,20 @@
 use std::fmt;
 
 /// Icon used when the level is `INFO` and the message announces success.
-const OK_ICON: &str = "emblem-ok-symbolic";
+const OK_ICON: &str = "nextsync-activity-ok";
 /// Fallback icon when a level is unknown.
-const FALLBACK_ICON: &str = "dialog-information-symbolic";
+const FALLBACK_ICON: &str = "nextsync-activity-info";
 
 /// Level → icon mapping, mirroring the Python `LEVEL_ICONS` dict.
 pub const LEVEL_ICONS: [(&str, &str); 5] = [
-    ("DEBUG", "utilities-terminal-symbolic"),
-    ("INFO", "dialog-information-symbolic"),
-    ("WARNING", "dialog-warning-symbolic"),
-    ("ERROR", "dialog-error-symbolic"),
-    ("CRITICAL", "software-update-urgent-symbolic"),
+    ("DEBUG", "nextsync-activity-debug"),
+    ("INFO", "nextsync-activity-info"),
+    ("WARNING", "nextsync-activity-warning"),
+    ("ERROR", "nextsync-activity-error"),
+    ("CRITICAL", "nextsync-activity-error"),
 ];
 
-/// The icon name for a log level (fallback `dialog-information-symbolic`).
+/// The icon name for a log level (fallback `nextsync-activity-info`).
 pub fn level_icon(level: &str) -> &'static str {
     LEVEL_ICONS
         .iter()
@@ -151,7 +151,7 @@ mod tests {
         );
         assert_eq!(entry.level, "INFO");
         assert_eq!(entry.message, "Synchronization completed successfully.");
-        assert_eq!(entry.icon_name, "emblem-ok-symbolic");
+        assert_eq!(entry.icon_name, "nextsync-activity-ok");
     }
 
     #[test]
@@ -165,18 +165,18 @@ mod tests {
     fn warning_has_warning_icon() {
         let entry = parse_activity_line("2026-08-07 14:12:41 WARNING Push unavailable");
         assert_eq!(entry.level, "WARNING");
-        assert_eq!(entry.icon_name, "dialog-warning-symbolic");
+        assert_eq!(entry.icon_name, "nextsync-activity-warning");
     }
 
     #[test]
     fn error_and_critical_have_their_icons() {
         assert_eq!(
             parse_activity_line("2026-08-07 14:12:41 ERROR Sync failed").icon_name,
-            "dialog-error-symbolic"
+            "nextsync-activity-error"
         );
         assert_eq!(
             parse_activity_line("2026-08-07 14:12:41 CRITICAL Keyring locked").icon_name,
-            "software-update-urgent-symbolic"
+            "nextsync-activity-error"
         );
     }
 
@@ -185,7 +185,7 @@ mod tests {
         let entry = parse_activity_line(
             "2026-08-07 14:12:41 INFO    SYNCHRONIZATION COMPLETED SUCCESSFULLY",
         );
-        assert_eq!(entry.icon_name, "emblem-ok-symbolic");
+        assert_eq!(entry.icon_name, "nextsync-activity-ok");
     }
 
     #[test]
@@ -193,7 +193,7 @@ mod tests {
         let entry = parse_activity_line("nextcloudcmd started");
         assert_eq!(entry.level, "INFO");
         assert_eq!(entry.message, "nextcloudcmd started");
-        assert_eq!(entry.icon_name, "dialog-information-symbolic");
+        assert_eq!(entry.icon_name, "nextsync-activity-info");
     }
 
     #[test]
@@ -205,11 +205,11 @@ mod tests {
 
     #[test]
     fn level_icon_has_the_python_defaults() {
-        assert_eq!(level_icon("DEBUG"), "utilities-terminal-symbolic");
-        assert_eq!(level_icon("INFO"), "dialog-information-symbolic");
-        assert_eq!(level_icon("WARNING"), "dialog-warning-symbolic");
-        assert_eq!(level_icon("ERROR"), "dialog-error-symbolic");
-        assert_eq!(level_icon("CRITICAL"), "software-update-urgent-symbolic");
-        assert_eq!(level_icon("nope"), "dialog-information-symbolic");
+        assert_eq!(level_icon("DEBUG"), "nextsync-activity-debug");
+        assert_eq!(level_icon("INFO"), "nextsync-activity-info");
+        assert_eq!(level_icon("WARNING"), "nextsync-activity-warning");
+        assert_eq!(level_icon("ERROR"), "nextsync-activity-error");
+        assert_eq!(level_icon("CRITICAL"), "nextsync-activity-error");
+        assert_eq!(level_icon("nope"), "nextsync-activity-info");
     }
 }

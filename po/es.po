@@ -2637,3 +2637,15 @@ msgstr "Estos borrados se propagarán al servidor al sincronizar."
 #: src/ui/main_window.rs
 msgid "No deletions are pending review."
 msgstr "No hay eliminaciones pendientes de revisión."
+
+#: src/ui/conflict_resolver.rs
+msgid "Deletions"
+msgstr "Eliminaciones"
+
+#: src/ui/conflict_resolver.rs
+msgid "No deleted files to resolve"
+msgstr "No hay archivos borrados que resolver"
+
+#: src/ui/conflict_resolver.rs
+msgid "The deletion guard has not flagged any files in this folder."
+msgstr "El guard de borrado no ha marcado ningún archivo en esta carpeta."

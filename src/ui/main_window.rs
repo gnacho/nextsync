@@ -907,11 +907,17 @@ impl MainWindow {
             account.sync.exclude_patterns_enabled,
         );
         let logger = self.logger.clone();
+        let scheduler = self
+            .account_manager
+            .get(account_id)
+            .and_then(|runtime| runtime.folders().get(folder_id).cloned())
+            .map(|folder| folder.scheduler());
         let window = crate::ui::conflict_resolver::ConflictResolverWindow::new(
             &self.application,
             &folder.local_root,
             matcher,
             Rc::new(logger),
+            scheduler,
             None,
         );
         window.present();
