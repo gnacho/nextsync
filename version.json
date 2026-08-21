@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.116.0",
+  "version": "0.118.0",
   "mandatory": false,
-  "summary": "Support --background so the autostart starts the app in the tray.",
+  "summary": "Audit batch: 7 bug fixes and 4 robustness improvements.",
   "changelog": [
-    "The binary accepts --background and starts minimized to the tray, so the login autostart entry now works (issue #119)."
+    "keep_remote now deletes the conflicted copy (issues #120-#130)."
   ],
-  "released_at": "2026-08-21T05:00:00Z"
+  "released_at": "2026-08-21T00:00:00Z"
 }
