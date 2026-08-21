@@ -396,6 +396,7 @@ impl FolderStatusRow {
                 let spinner = this.spinner.clone();
                 let progress_bar = this.progress_bar.clone();
                 let row = this.row.clone();
+                let slot = this.slot.clone();
                 let remote_path = this.remote_path.clone();
                 let format_last_sync = this.format_last_sync.clone();
                 let subscription = controller.subscribe(move |snapshot: &StateSnapshot| {
@@ -408,6 +409,11 @@ impl FolderStatusRow {
                         format_last_sync.as_ref().map(|f| f()),
                         snapshot,
                     );
+                    // Issue #150: GTK may not repaint the row when properties
+                    // are updated from a subscription callback. Force a redraw
+                    // of the whole slot so state, spinner, bar and caption all
+                    // update together.
+                    slot.queue_draw();
                 });
                 this._subscription = Some(subscription);
                 // Live per-file progress (issue #86). Only the widgets are
@@ -422,8 +428,12 @@ impl FolderStatusRow {
                                 .unwrap_or_else(|| progress.path.clone());
                             progress_label.set_text(&progress_line_text(progress, &file));
                             progress_label.set_visible(true);
+                            progress_label.queue_draw();
                         }
-                        _ => progress_label.set_visible(false),
+                        _ => {
+                            progress_label.set_visible(false);
+                            progress_label.queue_draw();
+                        }
                     });
                 this._progress_subscription = Some(progress_subscription);
             }
