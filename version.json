@@ -1,11 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.108.0",
+  "version": "0.110.0",
   "mandatory": false,
-  "summary": "The deletion-review dialog lists the missing files and simplifies its options.",
+  "summary": "De-duplicated Review deletions menu entry.",
   "changelog": [
-    "The deletion-review dialog shows the files the guard detected as missing, with a count, in a scrollable list (issue #115).",
-    "The redundant Close button was removed; Keep Paused is the default."
+    "The per-folder menu no longer shows the Review deletions entry twice (issue #116)."
   ],
-  "released_at": "2026-08-21T02:30:00Z"
+  "released_at": "2026-08-21T03:00:00Z"
 }
