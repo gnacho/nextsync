@@ -397,7 +397,7 @@ impl NextcloudApi {
             if !accumulated.is_empty() {
                 accumulated.push('/');
             }
-            accumulated.push_str(segment);
+            accumulated.push_str(&percent_encode_path(segment));
             let url = format!("{base}/{accumulated}");
             let response = self.http.request(
                 "MKCOL",
@@ -428,7 +428,10 @@ impl NextcloudApi {
         remote_path: &str,
     ) -> Result<bool, ApiError> {
         let base = dav_base(server, username);
-        let folder = format!("{base}{}/", remote_path.trim_end_matches('/'));
+        let folder = format!(
+            "{base}{}/",
+            percent_encode_path(remote_path.trim_end_matches('/'))
+        );
         let folder_path = href_path_of(&folder).to_owned();
         let entries = self.propfind(&folder, username, password)?;
         let children = entries
@@ -454,7 +457,10 @@ impl NextcloudApi {
         remote_path: &str,
     ) -> Result<Option<u64>, ApiError> {
         let base = dav_base(server, username);
-        let folder = format!("{base}{}/", remote_path.trim_end_matches('/'));
+        let folder = format!(
+            "{base}{}/",
+            percent_encode_path(remote_path.trim_end_matches('/'))
+        );
         let authorization = basic_authorization(username, password);
         let headers = [
             ("Depth", "infinity"),
@@ -816,8 +822,9 @@ impl NextcloudApi {
         password: &str,
     ) -> Result<Vec<TrashItem>, ApiError> {
         let url = format!(
-            "{}/remote.php/dav/trashbin/{username}/trash",
-            server.trim_end_matches('/')
+            "{}/remote.php/dav/trashbin/{}/trash",
+            server.trim_end_matches('/'),
+            percent_encode_path(username)
         );
         let authorization = basic_authorization(username, password);
         let headers = [
@@ -1034,8 +1041,9 @@ fn percent_decode_path(value: &str) -> String {
 /// Base URL of the per-user WebDAV root.
 fn dav_base(server: &str, username: &str) -> String {
     format!(
-        "{}/remote.php/dav/files/{username}",
-        server.trim_end_matches('/')
+        "{}/remote.php/dav/files/{}",
+        server.trim_end_matches('/'),
+        percent_encode_path(username)
     )
 }
 
