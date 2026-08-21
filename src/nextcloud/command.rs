@@ -54,13 +54,43 @@ impl fmt::Display for CommandError {
 impl std::error::Error for CommandError {}
 
 /// A fully resolved `nextcloudcmd` invocation: argv plus environment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CommandSpec {
     /// Argument vector, first element is the executable.
     pub argv: Vec<String>,
     /// Environment overrides (`NC_USER`, `NC_PASSWORD`).
     pub environment: Vec<(String, String)>,
 }
+
+impl std::fmt::Debug for CommandSpec {
+    /// Custom `Debug` so secret-bearing environment values never reach logs
+    /// (issue #140): the argv is shown in full, but the password/token
+    /// variables print as `[REDACTED]`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandSpec")
+            .field("argv", &self.argv)
+            .field(
+                "environment",
+                &self
+                    .environment
+                    .iter()
+                    .map(|(key, value)| {
+                        let shown = if SECRET_ENV_KEYS.iter().any(|secret| secret == key) {
+                            "[REDACTED]".to_string()
+                        } else {
+                            value.clone()
+                        };
+                        (key.clone(), shown)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+/// Environment variable names whose values are account secrets and must be
+/// redacted from `Debug` output (issue #140).
+const SECRET_ENV_KEYS: [&str; 3] = ["NC_PASSWORD", "OPENCLOUD_TOKEN", "OPENCLOUD_PASSWORD"];
 
 impl CommandSpec {
     /// Materialize this spec as a `std::process::Command`.
@@ -355,6 +385,25 @@ mod tests {
         assert_eq!(password.1, "very-secret");
         assert!(spec.argv.iter().any(|arg| arg == "--non-interactive"));
         assert!(spec.argv.iter().any(|arg| arg == "-h"));
+    }
+
+    #[test]
+    fn debug_redacts_secret_environment_values() {
+        // Issue #140: formatting a spec for logs must never echo the secret.
+        let spec = build_command(
+            &account(),
+            &folder(),
+            &NetworkConfig::default(),
+            "very-secret",
+            None,
+            Some(Path::new("/bin/true")),
+        )
+        .expect("build should succeed");
+        let rendered = format!("{spec:?}");
+        assert!(rendered.contains("[REDACTED]"));
+        assert!(!rendered.contains("very-secret"));
+        // The argv is still readable (the binary path matters for debugging).
+        assert!(rendered.contains("/bin/true"));
     }
 
     #[test]

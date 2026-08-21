@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.118.0",
+  "version": "0.120.0",
   "mandatory": false,
-  "summary": "Audit batch: 7 bug fixes and 4 robustness improvements.",
+  "summary": "Robustness batch: 12 fixes from the P2 audit plus the stale progress label race.",
   "changelog": [
-    "keep_remote now deletes the conflicted copy (issues #120-#130)."
+    "Push reconnects on password change, watcher overflow never lost, config writes are durable, secrets redacted (issues #133-#145)."
   ],
   "released_at": "2026-08-21T00:00:00Z"
 }

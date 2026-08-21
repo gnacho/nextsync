@@ -184,10 +184,14 @@ impl NotifyPushClient {
         let effective_enabled = enabled && remote_push_supported(self.inner.borrow().provider);
         let changed = {
             let mut inner = self.inner.borrow_mut();
-            let changed = (server, username, effective_enabled)
+            // The password participates in the change detection (issue #133):
+            // after a re-authentication the worker must pick up the new
+            // secret immediately, not keep the one captured at startup.
+            let changed = (server, username, password, effective_enabled)
                 != (
                     inner.server.as_str(),
                     inner.username.as_str(),
+                    inner.password.as_str(),
                     inner.enabled,
                 );
             inner.server = server.to_string();
@@ -1134,6 +1138,56 @@ mod tests {
             .iter()
             .all(|(state, _)| *state == PushState::Disabled));
         assert_eq!(states.last().unwrap().1, "Push notifications are disabled.");
+    }
+
+    #[test]
+    fn configure_with_a_new_password_reconnects() {
+        // Issue #133: a re-authentication changes the password; the push
+        // worker must pick it up immediately. Each configure with a changed
+        // password disconnects and starts a fresh connect attempt.
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let (client, states, _notifications) = test_client(Provider::Nextcloud);
+                client.configure("https://cloud.example.com", "alice", "secret", true);
+                client.configure("https://cloud.example.com", "alice", "new-secret", true);
+                let states = states.borrow();
+                let connects = states
+                    .iter()
+                    .filter(|(state, _)| matches!(state, PushState::Connecting))
+                    .count();
+                assert!(
+                    connects >= 2,
+                    "a password change must reconnect (states: {states:?})"
+                );
+            })
+            .expect("the test main context is available");
+    }
+
+    #[test]
+    fn configure_with_the_same_password_does_not_reconnect() {
+        // Same server/user/password/enabled → nothing changes, so no new
+        // connect attempt beyond the first.
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let (client, states, _notifications) = test_client(Provider::Nextcloud);
+                client.configure("https://cloud.example.com", "alice", "secret", true);
+                client.configure("https://cloud.example.com", "alice", "secret", true);
+                let states = states.borrow();
+                let connects = states
+                    .iter()
+                    .filter(|(state, _)| matches!(state, PushState::Connecting))
+                    .count();
+                assert_eq!(connects, 1, "an identical configure must not reconnect");
+            })
+            .expect("the test main context is available");
     }
 
     #[test]

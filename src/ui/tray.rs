@@ -215,7 +215,7 @@ impl ksni::Tray for TrayItem {
     }
 
     fn title(&self) -> String {
-        t("NextSync — {state}").replace("{state}", self.presentation.label)
+        t("NextSync - {state}").replace("{state}", self.presentation.label)
     }
 
     fn status(&self) -> Status {
@@ -459,7 +459,7 @@ mod tests {
     fn title_includes_the_state_label() {
         set_locale(Locale::English);
         let (idle, _rx) = item_with(AppState::IdleOk);
-        assert_eq!(idle.title(), "NextSync — Synchronized");
+        assert_eq!(idle.title(), "NextSync - Synchronized");
         reset_locale();
     }
 
@@ -467,7 +467,7 @@ mod tests {
     fn title_translates_the_state_label_to_spanish() {
         set_locale(Locale::Spanish);
         let (syncing, _rx) = item_with(AppState::Syncing);
-        assert_eq!(syncing.title(), "NextSync — Sincronizando…");
+        assert_eq!(syncing.title(), "NextSync - Sincronizando…");
         reset_locale();
     }
 
@@ -477,7 +477,7 @@ mod tests {
         let (item, _rx) = item_with(AppState::KeyringLocked);
         let tooltip = item.tool_tip();
         assert_eq!(tooltip.description, "Password Keyring Locked");
-        assert_eq!(tooltip.title, "NextSync — Password Keyring Locked");
+        assert_eq!(tooltip.title, "NextSync - Password Keyring Locked");
         assert!(tooltip.icon_pixmap.is_empty(), "no rasterized pixmaps");
         reset_locale();
     }

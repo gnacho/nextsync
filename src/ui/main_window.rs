@@ -1406,11 +1406,15 @@ impl MainWindow {
         else {
             let _ = self.config_store.remove_account(&account_id);
             let _ = self.account_manager.remove(&account_id);
+            // Best-effort: the account's cached avatar must not outlive it
+            // (issue #135).
+            let _ = crate::util::avatar_cache::delete_avatar(&account_id);
             self.refresh_after_config_change();
             return;
         };
         let _ = self.config_store.remove_account(&account_id);
         let _ = self.account_manager.remove(&account_id);
+        let _ = crate::util::avatar_cache::delete_avatar(&account_id);
         self.refresh_after_config_change();
 
         // Best-effort cleanup off the UI thread: resolve the stored password,

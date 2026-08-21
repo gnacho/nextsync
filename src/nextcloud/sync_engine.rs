@@ -94,7 +94,9 @@ impl CredentialSource for KeyringCredentialSource {
         ) {
             Ok(Some(password)) => CredentialLookup::Found(password),
             Ok(None) => CredentialLookup::Missing,
-            Err(secret_service::Error::Locked) => CredentialLookup::Locked,
+            Err(crate::nextcloud::credentials::CredentialError::Service(
+                secret_service::Error::Locked,
+            )) => CredentialLookup::Locked,
             Err(_) => CredentialLookup::Unavailable,
         }
     }

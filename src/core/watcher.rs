@@ -75,6 +75,11 @@ pub struct FsWatcher {
     root: PathBuf,
     watcher: RecommendedWatcher,
     sender: Sender<WatcherEvent>,
+    /// Set by the notify callback when the bounded channel is full and an
+    /// event was dropped. Read and cleared by the consumer; it does not
+    /// compete for the full buffer, so the overflow is never lost (issue
+    /// #134).
+    overflow: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl FsWatcher {
@@ -93,6 +98,8 @@ impl FsWatcher {
         }
         let (sender, receiver) = async_channel::bounded(1024);
         let event_sender = sender.clone();
+        let overflow = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let overflow_signal = overflow.clone();
         let mut watcher =
             notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
                 let event = match result {
@@ -102,10 +109,12 @@ impl FsWatcher {
                 if let Some(event) = event {
                     if event_sender.try_send(event).is_err() {
                         // Backpressure: the consumer fell behind and the bounded
-                        // channel dropped history. Signal an overflow so it can
-                        // rescan instead of syncing from a partial event stream.
-                        let _ =
-                            event_sender.try_send(WatcherEvent::Degraded(WatcherError::Overflow));
+                        // channel dropped history. Set the overflow flag instead
+                        // of trying to send again into the same full buffer (that
+                        // second send could also fail and the rescan request
+                        // would be lost): the consumer polls it and rescans,
+                        // avoiding a sync from a partial event stream.
+                        overflow_signal.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             })
@@ -118,6 +127,7 @@ impl FsWatcher {
                 root,
                 watcher,
                 sender,
+                overflow,
             },
             receiver,
         ))
@@ -150,6 +160,15 @@ impl FsWatcher {
                     .try_send(WatcherEvent::Degraded(WatcherError::from(error)));
             }
         }
+    }
+
+    /// Whether the notify callback reported an overflow since the last poll.
+    /// The consumer calls this on every received event and rescans when it
+    /// reads `true`, so a full buffer never silently loses the rescan
+    /// request (issue #134).
+    pub fn take_overflow(&self) -> bool {
+        self.overflow
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -234,6 +253,21 @@ mod tests {
             classified,
             Some(WatcherEvent::Degraded(WatcherError::Overflow))
         );
+    }
+
+    #[test]
+    fn take_overflow_reads_once_and_clears_the_flag() {
+        // Issue #134: the overflow flag must survive a full channel (it is
+        // set by the notify callback instead of a second try_send into the
+        // same full buffer) and be consumed once by the loop.
+        let dir = tempdir().unwrap();
+        let (watcher, _receiver) = FsWatcher::start(dir.path(), empty_matcher()).unwrap();
+        assert!(!watcher.take_overflow());
+        watcher
+            .overflow
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(watcher.take_overflow());
+        assert!(!watcher.take_overflow());
     }
 
     #[test]

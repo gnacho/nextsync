@@ -50,15 +50,6 @@ pub fn parse_active_ssid(output: &str) -> Option<String> {
     })
 }
 
-/// Parse `nmcli -t -f GENERAL.METERED dev status` output into whether any
-/// device reports a metered connection. Each line is `device:metered` in
-/// the common case, but tolerate extra fields (`device:state:metered`).
-pub fn parse_metered(output: &str) -> bool {
-    output
-        .lines()
-        .any(|line| line.split(':').any(|field| field.trim() == "yes"))
-}
-
 /// Parse the raw `network.allowed_ssids` config value (comma separated).
 /// Empty entries are dropped; comparison elsewhere is exact.
 pub fn parse_allowed_ssids(raw: &str) -> Vec<String> {
@@ -345,14 +336,6 @@ mod tests {
         assert_eq!(parse_active_ssid("no:CoffeeShop\nno:Other"), None);
         assert_eq!(parse_active_ssid("yes:"), None);
         assert_eq!(parse_active_ssid(""), None);
-    }
-
-    #[test]
-    fn parse_metered_only_triggers_on_yes() {
-        assert!(parse_metered("wlan0:connected:yes\neth0:connected:no"));
-        assert!(!parse_metered("wlan0:connected:no"));
-        assert!(!parse_metered("wlan0:connected:unknown"));
-        assert!(!parse_metered(""));
     }
 
     #[test]

@@ -16,6 +16,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -506,8 +507,24 @@ pub fn validate_config(value: Value) -> Result<Config, ConfigError> {
         .ok_or_else(|| ConfigError::new("Configuration root must be an object."))?;
 
     let version = match data.get("schema_version") {
-        Some(Value::Number(number)) => number.as_i64().unwrap_or(0),
-        _ => 1,
+        // Absent means legacy v1, which the migrations handle.
+        None | Some(Value::Null) => 1,
+        // Present but not a clean positive integer is corrupt, not v1
+        // (issue #137): running the v1 migrations over such data would
+        // misread it.
+        Some(Value::Number(number)) => match number.as_i64() {
+            Some(version) if version >= 1 => version,
+            _ => {
+                return Err(ConfigError::new(
+                    "Configuration schema_version is not a valid integer.",
+                ))
+            }
+        },
+        Some(_) => {
+            return Err(ConfigError::new(
+                "Configuration schema_version is not a valid integer.",
+            ))
+        }
     };
     if version > SCHEMA_VERSION as i64 {
         return Err(ConfigError::new(format!(
@@ -637,7 +654,7 @@ impl ConfigStore {
             ConfigError::new(format!("Could not serialize configuration: {error}"))
         })? + "\n";
 
-        let temporary = self.path.with_extension("tmp");
+        let temporary = temporary_path(&self.path);
         let write_result = (|| -> io::Result<()> {
             let mut handle = fs::OpenOptions::new()
                 .write(true)
@@ -648,7 +665,11 @@ impl ConfigStore {
             handle.write_all(content.as_bytes())?;
             handle.sync_all()?;
             drop(handle);
-            fs::rename(&temporary, &self.path)
+            fs::rename(&temporary, &self.path)?;
+            // Durability: an fsync of the directory makes the rename itself
+            // survive a power cut, not just the file contents (issue #136).
+            fs::File::open(parent)?.sync_all()?;
+            Ok(())
         })();
         if let Err(error) = write_result {
             let _ = fs::remove_file(&temporary);
@@ -786,6 +807,24 @@ impl ConfigStore {
         self.save(&config)?;
         Ok(())
     }
+}
+
+/// Counter for unique temporary names within this process.
+static TMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A unique temporary path for an atomic config write (issue #136). The
+/// fixed `.tmp` suffix allowed two concurrent instances to share the same
+/// staging file and interleave writes; pid + a per-process counter keeps
+/// every writer on its own file.
+fn temporary_path(config_path: &Path) -> PathBuf {
+    let pid = std::process::id();
+    let sequence = TMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let mut name = config_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config".to_string());
+    name.push_str(&format!(".tmp-{pid}-{sequence}"));
+    config_path.with_file_name(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,7 +1157,10 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
     GeneralConfig {
         autostart: get_bool(obj, "autostart", true),
         pause_on_battery: get_bool(obj, "pause_on_battery", false),
-        color_scheme: get_string(obj, "color_scheme", &default_color_scheme()),
+        // The theme switch only understands system/light/dark; anything else
+        // falls back to the system default instead of reaching the UI
+        // (issue #138).
+        color_scheme: get_valid_color_scheme(obj),
         show_notifications: get_bool(obj, "show_notifications", true),
         show_server_notifications: get_bool(obj, "show_server_notifications", false),
         size_confirm_threshold_mb: get_i64_tolerant(
@@ -1129,6 +1171,18 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
             1_000_000,
         ),
         quiet_hours: parse_quiet_hours(obj),
+    }
+}
+
+/// Read `color_scheme` restricted to the three values the theme switch
+/// understands (`system` / `light` / `dark`); anything else is treated as
+/// missing and falls back to the default (issue #138).
+fn get_valid_color_scheme(obj: &serde_json::Map<String, Value>) -> String {
+    match obj.get("color_scheme") {
+        Some(Value::String(value)) if matches!(value.as_str(), "system" | "light" | "dark") => {
+            value.clone()
+        }
+        _ => default_color_scheme(),
     }
 }
 
@@ -1302,13 +1356,6 @@ fn get_bool(obj: &Map<String, Value>, key: &str, default: bool) -> bool {
             _ => default,
         },
         _ => default,
-    }
-}
-
-fn get_string(obj: &Map<String, Value>, key: &str, default: &str) -> String {
-    match obj.get(key) {
-        Some(Value::String(text)) => text.clone(),
-        _ => default.to_string(),
     }
 }
 
@@ -1581,6 +1628,26 @@ mod tests {
     }
 
     #[test]
+    fn illegible_schema_version_is_rejected_not_treated_as_v1() {
+        // Issue #137: a present but unreadable schema_version must not run
+        // the v1 migrations over corrupt data.
+        let err = validate_config(json!({ "schema_version": "7" })).unwrap_err();
+        assert!(err
+            .message
+            .contains("schema_version is not a valid integer"));
+        let err = validate_config(json!({ "schema_version": 7.5 })).unwrap_err();
+        assert!(err
+            .message
+            .contains("schema_version is not a valid integer"));
+        let err = validate_config(json!({ "schema_version": -1 })).unwrap_err();
+        assert!(err
+            .message
+            .contains("schema_version is not a valid integer"));
+        // Absent stays the legitimate v1 default.
+        assert!(validate_config(json!({})).is_ok());
+    }
+
+    #[test]
     fn retention_days_and_proxy_validation() {
         let err = validate_config(json!({ "logging": { "retention_days": 0 } })).unwrap_err();
         assert!(err
@@ -1596,6 +1663,18 @@ mod tests {
         }))
         .unwrap_err();
         assert!(err.message.contains("custom proxy"));
+    }
+
+    #[test]
+    fn invalid_color_scheme_falls_back_to_the_default() {
+        // Issue #138: only system/light/dark reach the theme switch; any
+        // other value is treated as missing.
+        let config = validate_config(json!({ "general": { "color_scheme": "banana" } })).unwrap();
+        assert_eq!(config.general.color_scheme, "system");
+        let config = validate_config(json!({ "general": { "color_scheme": "dark" } })).unwrap();
+        assert_eq!(config.general.color_scheme, "dark");
+        let config = validate_config(json!({ "general": { "color_scheme": 7 } })).unwrap();
+        assert_eq!(config.general.color_scheme, "system");
     }
 
     // ---- migrations -----------------------------------------------------------
@@ -1850,6 +1929,35 @@ mod tests {
         assert!(!obj.contains_key("account"));
         assert!(!obj.contains_key("sync"));
         assert!(!obj.contains_key("runtime"));
+    }
+
+    #[test]
+    fn consecutive_saves_use_unique_temporary_names_and_leave_none_behind() {
+        // Issue #136: every write stages on its own pid+counter tmp file, so
+        // two writers cannot interleave on a shared settings.tmp, and the
+        // rename removes the staging file.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = ConfigStore::with_path(path.clone());
+        let first = temporary_path(&path);
+        let second = temporary_path(&path);
+        assert_ne!(first, second);
+        assert!(first.to_string_lossy().contains(".tmp-"));
+
+        let config = Config::default();
+        store.save(&config).unwrap();
+        store.save(&config).unwrap();
+        let leftovers = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp-"))
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "no staging files should remain after saves: {leftovers:?}"
+        );
+        assert!(path.exists());
     }
 
     #[test]
