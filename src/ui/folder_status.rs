@@ -460,6 +460,21 @@ impl FolderStatusRow {
     }
 }
 
+impl Drop for FolderStatusRow {
+    /// Unsubscribe the live state/progress callbacks so they stop touching the
+    /// row's widgets once the row leaves the tree (issue #121). A plain drop
+    /// keeps the subscription active and leaks the closures, the same crash
+    /// vector fixed for the account view in #102.
+    fn drop(&mut self) {
+        if let Some(mut subscription) = self._subscription.take() {
+            subscription.unsubscribe();
+        }
+        if let Some(mut progress) = self._progress_subscription.take() {
+            progress.unsubscribe();
+        }
+    }
+}
+
 /// Detached control of the pending-changes menu item (issue #92): the scan
 /// runs off the UI thread and reports through [`PendingMenuHandle`].
 #[derive(Clone)]
