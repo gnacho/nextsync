@@ -1359,13 +1359,6 @@ fn get_bool(obj: &Map<String, Value>, key: &str, default: bool) -> bool {
     }
 }
 
-fn get_string(obj: &Map<String, Value>, key: &str, default: &str) -> String {
-    match obj.get(key) {
-        Some(Value::String(text)) => text.clone(),
-        _ => default.to_string(),
-    }
-}
-
 fn sha256_hex(input: &[u8]) -> String {
     let digest = Sha256::digest(input);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()

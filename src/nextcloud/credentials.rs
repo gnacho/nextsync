@@ -17,8 +17,39 @@ use std::collections::HashMap;
 use secret_service::blocking::SecretService;
 use secret_service::EncryptionType;
 
-/// Error produced by the credential store (a [`secret_service::Error`]).
-pub type CredentialError = secret_service::Error;
+/// Error produced by the credential store: a wrapped [`secret_service::Error`]
+/// or an unreadable stored secret (issue #139).
+#[derive(Debug)]
+pub enum CredentialError {
+    /// The Secret Service call failed (locked, unavailable, transport…).
+    Service(secret_service::Error),
+    /// The stored secret is not valid UTF-8 and cannot be used as a password.
+    Utf8,
+}
+
+impl std::fmt::Display for CredentialError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CredentialError::Service(error) => write!(f, "{error}"),
+            CredentialError::Utf8 => write!(f, "stored secret is not valid UTF-8"),
+        }
+    }
+}
+
+impl std::error::Error for CredentialError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CredentialError::Service(error) => Some(error),
+            CredentialError::Utf8 => None,
+        }
+    }
+}
+
+impl From<secret_service::Error> for CredentialError {
+    fn from(error: secret_service::Error) -> Self {
+        CredentialError::Service(error)
+    }
+}
 
 /// Attribute key used to index items by account id.
 const ATTR_ACCOUNT_ID: &str = "account_id";
@@ -42,6 +73,7 @@ fn collection<'a>(
     service
         .get_collection_by_alias("login")
         .or_else(|_| service.get_default_collection())
+        .map_err(CredentialError::from)
 }
 
 /// Stores and retrieves account passwords in the Secret Service collection
@@ -77,11 +109,17 @@ impl CredentialsStore {
             return if result.locked.is_empty() {
                 Ok(None)
             } else {
-                Err(CredentialError::Locked)
+                Err(CredentialError::Service(secret_service::Error::Locked))
             };
         };
         let secret = item.get_secret()?;
-        Ok(Some(String::from_utf8_lossy(&secret).into_owned()))
+        match std::str::from_utf8(&secret) {
+            Ok(password) => Ok(Some(password.to_string())),
+            // The stored bytes are not a usable password (issue #139): a
+            // silent lossy substitution would authenticate with a different
+            // string and fail opaquely. Surface it as an error instead.
+            Err(_) => Err(CredentialError::Utf8),
+        }
     }
 
     /// Read the password for an account, falling back to the legacy entry.
@@ -110,7 +148,7 @@ impl CredentialsStore {
             return if result.locked.is_empty() {
                 Ok(None)
             } else {
-                Err(CredentialError::Locked)
+                Err(CredentialError::Service(secret_service::Error::Locked))
             };
         };
         let secret = item.get_secret()?;
@@ -259,5 +297,15 @@ mod tests {
         )
         .expect("get_for_account should succeed");
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn utf8_error_is_describable_and_does_not_expose_the_secret() {
+        // Issue #139: the Utf8 variant is constructible without a bus and
+        // its message never echoes the bytes.
+        let error = CredentialError::Utf8;
+        let message = error.to_string();
+        assert!(message.contains("UTF-8"));
+        assert!(!message.contains("0xFF"));
     }
 }
