@@ -23,8 +23,16 @@ pub fn read_cached_avatar(account_id: &str) -> Option<Vec<u8>> {
 }
 
 /// Persist the avatar for an account (creating the directory `0700` on
-/// first use). Failures are the caller's to log.
+/// first use). Failures are the caller's to log. Bodies larger than
+/// [`MAX_AVATAR_BYTES`] are refused so a malformed server response is not
+/// persisted whole (issue #135).
 pub fn store_avatar(account_id: &str, bytes: &[u8]) -> std::io::Result<()> {
+    if bytes.len() > MAX_AVATAR_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("avatar exceeds {} bytes", MAX_AVATAR_BYTES),
+        ));
+    }
     let path = avatar_path(account_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -35,6 +43,22 @@ pub fn store_avatar(account_id: &str, bytes: &[u8]) -> std::io::Result<()> {
         }
     }
     fs::write(&path, bytes)
+}
+
+/// The largest avatar a server is allowed to hand us before we refuse to
+/// cache it (issue #135): avatars are small images, anything larger is a
+/// malformed body not worth persisting.
+pub const MAX_AVATAR_BYTES: usize = 4 * 1024 * 1024;
+
+/// Remove the cached avatar for an account, if any. Called when the account
+/// is removed so its data does not linger in the state directory (issue
+/// #135).
+pub fn delete_avatar(account_id: &str) -> std::io::Result<()> {
+    match fs::remove_file(avatar_path(account_id)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -74,5 +98,30 @@ mod tests {
             assert_eq!(mode & 0o777, 0o700);
             std::env::remove_var("XDG_STATE_HOME");
         }
+    }
+
+    #[test]
+    fn delete_avatar_removes_the_cached_file() {
+        let _env = crate::util::test_env::lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("XDG_STATE_HOME", dir.path());
+        store_avatar("acct-del", b"png").unwrap();
+        assert_eq!(read_cached_avatar("acct-del"), Some(b"png".to_vec()));
+        delete_avatar("acct-del").unwrap();
+        assert_eq!(read_cached_avatar("acct-del"), None);
+        // Deleting again is a no-op success (idempotent).
+        delete_avatar("acct-del").unwrap();
+        std::env::remove_var("XDG_STATE_HOME");
+    }
+
+    #[test]
+    fn store_refuses_oversized_bodies() {
+        let _env = crate::util::test_env::lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("XDG_STATE_HOME", dir.path());
+        let big = vec![0u8; MAX_AVATAR_BYTES + 1];
+        assert!(store_avatar("acct-big", &big).is_err());
+        assert_eq!(read_cached_avatar("acct-big"), None);
+        std::env::remove_var("XDG_STATE_HOME");
     }
 }
