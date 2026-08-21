@@ -294,6 +294,12 @@ impl FolderRuntime {
         let task = glib::spawn_future_local(async move {
             let mut watcher = watcher;
             while let Ok(event) = receiver.recv().await {
+                // An overflow may have been flagged while the buffer was full
+                // (issue #134): it cannot be delivered through the full
+                // channel, so the consumer rescans on the flag instead.
+                if watcher.take_overflow() {
+                    watcher.rescan();
+                }
                 match event {
                     WatcherEvent::Change(_) | WatcherEvent::Rescan => {
                         scheduler.request(Trigger::LocalInotify);
