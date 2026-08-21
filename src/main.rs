@@ -8,6 +8,7 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
+use gio::prelude::*;
 use libadwaita::prelude::*;
 
 use nextsync::core::account_runtime::AccountManager;
@@ -61,6 +62,26 @@ fn main() {
     let window_slot: WindowSlot = Rc::new(RefCell::new(None));
     let tray_slot: TraySlot = Rc::new(RefCell::new(None));
     let tray_subscription: TraySubscriptionSlot = Rc::new(RefCell::new(None));
+    // Autostart (--background): start minimized to the tray instead of
+    // presenting the window. The tray's Open action raises it later.
+    let background = Rc::new(std::cell::Cell::new(false));
+    application.add_main_option(
+        "background",
+        glib::Char(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Start in the background (autostart)",
+        None,
+    );
+    {
+        let background = background.clone();
+        application.connect_handle_local_options(move |_application, options| {
+            if options.contains("background") {
+                background.set(true);
+            }
+            std::ops::ControlFlow::Continue(())
+        });
+    }
 
     {
         let window_slot = window_slot.clone();
@@ -293,9 +314,12 @@ fn main() {
 
     {
         let window_slot = window_slot.clone();
+        let background = background.clone();
         application.connect_activate(move |_application| {
             if let Some(main) = window_slot.borrow().as_ref() {
-                main.borrow().window().present();
+                if !background.get() {
+                    main.borrow().window().present();
+                }
             }
         });
     }
