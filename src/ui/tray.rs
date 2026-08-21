@@ -104,12 +104,12 @@ pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'stat
 /// kept for parity and as the reference for the packaged status icons.
 pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
     match icon_key {
-        "ok" => "nextsync-status-ok-symbolic",
-        "syncing" => "nextsync-status-syncing-symbolic",
-        "paused" => "nextsync-status-paused-symbolic",
-        "battery" => "nextsync-status-battery-symbolic",
-        "offline" => "nextsync-status-offline-symbolic",
-        "error" => "nextsync-status-error-symbolic",
+        "ok" => "nextsync-status-ok",
+        "syncing" => "nextsync-status-syncing",
+        "paused" => "nextsync-status-paused",
+        "battery" => "nextsync-status-battery",
+        "offline" => "nextsync-status-offline",
+        "error" => "nextsync-status-error",
         _ => "nextsync-tray-cloud",
     }
 }
@@ -485,12 +485,12 @@ mod tests {
     #[test]
     fn status_icon_key_mapping_covers_all_keys() {
         for (key, name) in [
-            ("ok", "nextsync-status-ok-symbolic"),
-            ("syncing", "nextsync-status-syncing-symbolic"),
-            ("paused", "nextsync-status-paused-symbolic"),
-            ("battery", "nextsync-status-battery-symbolic"),
-            ("offline", "nextsync-status-offline-symbolic"),
-            ("error", "nextsync-status-error-symbolic"),
+            ("ok", "nextsync-status-ok"),
+            ("syncing", "nextsync-status-syncing"),
+            ("paused", "nextsync-status-paused"),
+            ("battery", "nextsync-status-battery"),
+            ("offline", "nextsync-status-offline"),
+            ("error", "nextsync-status-error"),
         ] {
             assert_eq!(status_icon_key_to_name(key), name);
         }

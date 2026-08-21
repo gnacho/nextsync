@@ -1807,17 +1807,17 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
     use crate::state::AppState;
     match state {
         AppState::IdleOk | AppState::IdleManualOnly | AppState::SyncQueued | AppState::Syncing => {
-            "nextsync-status-ok-symbolic"
+            "nextsync-status-ok"
         }
         AppState::PausedUser
         | AppState::PausedBattery
         | AppState::Offline
-        | AppState::IdleNotSynced => "nextsync-status-paused-symbolic",
+        | AppState::IdleNotSynced => "nextsync-status-paused",
         AppState::Error
         | AppState::AuthRequired
         | AppState::KeyringLocked
-        | AppState::DeleteReview => "nextsync-status-error-symbolic",
-        AppState::Unconfigured => "nextsync-status-offline-symbolic",
+        | AppState::DeleteReview => "nextsync-status-error",
+        AppState::Unconfigured => "nextsync-status-offline",
     }
 }
 
@@ -2125,29 +2125,20 @@ mod tests {
     #[test]
     fn summary_light_maps_severity() {
         use crate::state::AppState;
-        assert_eq!(
-            summary_light_for(AppState::IdleOk),
-            "nextsync-status-ok-symbolic"
-        );
-        assert_eq!(
-            summary_light_for(AppState::Syncing),
-            "nextsync-status-ok-symbolic"
-        );
+        assert_eq!(summary_light_for(AppState::IdleOk), "nextsync-status-ok");
+        assert_eq!(summary_light_for(AppState::Syncing), "nextsync-status-ok");
         assert_eq!(
             summary_light_for(AppState::PausedUser),
-            "nextsync-status-paused-symbolic"
+            "nextsync-status-paused"
         );
         assert_eq!(
             summary_light_for(AppState::Offline),
-            "nextsync-status-paused-symbolic"
+            "nextsync-status-paused"
         );
-        assert_eq!(
-            summary_light_for(AppState::Error),
-            "nextsync-status-error-symbolic"
-        );
+        assert_eq!(summary_light_for(AppState::Error), "nextsync-status-error");
         assert_eq!(
             summary_light_for(AppState::DeleteReview),
-            "nextsync-status-error-symbolic"
+            "nextsync-status-error"
         );
     }
 

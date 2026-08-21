@@ -90,10 +90,9 @@ pub fn build_account_settings_panel(
         .margin_bottom(8)
         .build();
     let globe = gtk4::Image::builder()
-        .icon_name("globe-symbolic")
-        .pixel_size(16)
+        .icon_name("nextsync-state-globe")
+        .pixel_size(18)
         .build();
-    globe.add_css_class("success");
     status_row.append(&globe);
     let host_label = gtk4::Label::builder()
         .label(crate::util::url::server_host(&account.server_url))

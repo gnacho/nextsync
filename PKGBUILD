@@ -74,6 +74,12 @@ package() {
         nextsync-row-syncing
         nextsync-state-globe
         nextsync-state-globe-off
+        nextsync-status-battery
+        nextsync-status-error
+        nextsync-status-offline
+        nextsync-status-ok
+        nextsync-status-paused
+        nextsync-status-syncing
         nextsync-tray-cloud
         nextsync-tray-cloud-alert
         nextsync-tray-cloud-check
@@ -93,12 +99,6 @@ package() {
         nextsync-info-symbolic
         nextsync-list-checks-symbolic
         nextsync-settings-2-symbolic
-        nextsync-status-battery-symbolic
-        nextsync-status-error-symbolic
-        nextsync-status-offline-symbolic
-        nextsync-status-ok-symbolic
-        nextsync-status-paused-symbolic
-        nextsync-status-syncing-symbolic
         nextsync-theme-auto-symbolic
     )
     for icon in "${symbolic[@]}"; do
