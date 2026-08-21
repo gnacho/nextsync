@@ -2633,3 +2633,7 @@ msgstr "Mostrando {count} de {total} archivos."
 #: src/ui/main_window.rs
 msgid "These deletions will be propagated to the server when it synchronizes."
 msgstr "Estos borrados se propagarán al servidor al sincronizar."
+
+#: src/ui/main_window.rs
+msgid "No deletions are pending review."
+msgstr "No hay eliminaciones pendientes de revisión."

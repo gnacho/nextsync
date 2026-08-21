@@ -1240,20 +1240,23 @@ impl MainWindow {
         };
         let scheduler = folder.scheduler();
         let alert = scheduler.delete_alert();
-        let missing = alert
-            .as_ref()
-            .map(|alert| alert.missing_paths.clone())
-            .unwrap_or_default();
+        let Some(alert) = alert else {
+            let dialog = libadwaita::AlertDialog::new(
+                Some(t("Review Deletions")),
+                Some(t("No deletions are pending review.")),
+            );
+            dialog.add_response("close", t("Close"));
+            dialog.present(Some(self.window.upcast_ref::<gtk4::Widget>()));
+            return;
+        };
+        let missing = alert.missing_paths.clone();
         let missing_len = missing.len();
 
         let body = if missing_len > 0 {
             t("{count} files disappeared from the local folder.")
                 .replace("{count}", &missing_len.to_string())
         } else {
-            alert
-                .as_ref()
-                .map(|alert| alert.message.clone())
-                .unwrap_or_default()
+            alert.message.clone()
         };
 
         let dialog = libadwaita::AlertDialog::new(Some(t("Review Deletions")), Some(&body));
@@ -1309,7 +1312,7 @@ impl MainWindow {
         if account.provider == Provider::Nextcloud {
             dialog.add_response("restore", t("Restore from Nextcloud"));
         }
-        if alert.as_ref().is_some_and(|alert| alert.can_approve_once) {
+        if alert.can_approve_once {
             dialog.add_response("approve", t("Approve These Deletions Once"));
             dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Suggested);
         }

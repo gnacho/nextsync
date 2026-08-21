@@ -231,6 +231,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("No Synchronization Folders", "Sin carpetas de sincronización"),
     ("No conflicted copies found in {folder}.", "No se encontraron copias en conflicto en {folder}."),
     ("No credentials are saved for this account.", "No hay credenciales guardadas para esta cuenta."),
+    ("No deletions are pending review.", "No hay eliminaciones pendientes de revisión."),
     ("No files are deleted: neither the local synchronized folders nor anything on the server. Only this app forgets the account, its credentials and its sync configuration.", "No se elimina ningún archivo: ni las carpetas locales sincronizadas ni nada del servidor. Solo esta aplicación olvida la cuenta, sus credenciales y su configuración de sincronización."),
     ("No pending local changes since the last synchronization.", "No hay cambios locales pendientes desde la última sincronización."),
     ("No restorable files were found in the server trash.", "No se encontraron archivos recuperables en la papelera del servidor."),
