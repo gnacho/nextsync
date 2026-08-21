@@ -2,6 +2,21 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.118.0] - 2026-08-21
+
+### Corregido
+- **Conservar remoto borra la copia conflictiva (#120)**: al resolver un conflicto con "Conservar remoto", la copia `(Nextcloud conflicted copy …)` se eliminaba; antes quedaba en disco y el mismo conflicto reaparecía en cada sincronización.
+- **Suscripciones de fila desuscritas al descartar la fila (#121)**: cada fila de carpeta libera sus callbacks de estado y progreso al salir del árbol; antes quedaban vivos capturando widgets, el mismo vector de crash que #102 más una fuga de listeners.
+- **La ventana de conflictos cacheada se resetea al cerrar (#122)**: "Resolver conflictos" de otra carpeta ya no reabre la ventana de la carpeta anterior con su poll detenido.
+- **Rutas WebDAV con escape de porcentaje (#123)**: carpetas con espacios o acentos ("Música Albums") generan URIs válidas en MKCOL/PROPFIND; el nombre de usuario también se escapa.
+- **Traducción de mensajes dinámicos (#124)**: "Eliminar {name}?", "No se pudo guardar la contraseña…" y "Espacio: {id}" se traducen de verdad vía catálogo, no claves dinámicas que jamás matcheaban.
+- **Icono de éxito en pestaña Recientes en español (#125)**: las líneas localizadas ("Sincronización completada") reciben el check, no el icono de información.
+- **El secreto de la cuenta se limpia del registro del motor (#126)**: si el motor imprime la contraseña o token, se redacta en el buffer de salida y en el log.
+- **Un trigger que llega durante el enfriamiento arranca al terminar (#127)**: "sincronizar ahora" durante los 4 s de enfriamiento ya no se queda varado hasta el siguiente trigger.
+- **El selector de carpetas remotas filtra por el nombre, no el path completo (#128)**: un login que contenga "trash"/"versions" ya no oculta todas las carpetas.
+- **El texto "Conectado" sigue al estado (#129)**: al caer la conexión el resumen cambia a "No conectado", no solo el icono.
+- **Toast de confirmación de borrado traducido (#130)**: "Escribe «remove» para confirmar la eliminación de la cuenta." en español.
+
 ## [0.116.0] - 2026-08-21
 
 ### Corregido

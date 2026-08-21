@@ -45,7 +45,7 @@ use crate::nextcloud::command::{BoundedOutputCapture, Classification, DEFAULT_MA
 use crate::nextcloud::credentials::CredentialsStore;
 use crate::nextcloud::driver::{driver_for, DriverContext, Provider};
 use crate::storage::config::{AccountConfig, FolderConfig, NetworkConfig};
-use crate::util::redact::Redact;
+use crate::util::redact::Redactor;
 
 /// Result of looking up the account password.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,6 +331,10 @@ fn engine_thread(
         }
         CredentialLookup::Missing => return EngineRun::Direct(SyncOutcome::NoCredentials),
     };
+    // Scrub the known secret from the captured output: nextcloudcmd can echo
+    // the password/token on its diagnostics, and the structural passes alone
+    // would leave it verbatim in the run tail (issue #126).
+    let redactor = Arc::new(Redactor::from_secrets([password.clone()]));
     // `nextcloudcmd` exits 1 with no output when the remote folder does not
     // exist; create it (and its parents) first. Auth rejection surfaces as
     // such; anything else falls through and lets nextcloudcmd report.
@@ -386,6 +390,7 @@ fn engine_thread(
         Arc::clone(&capture),
         Arc::clone(&processed),
         Arc::clone(&conflict_signal),
+        Arc::clone(&redactor),
     );
     let stderr_handle = drain_stream(
         stderr,
@@ -393,6 +398,7 @@ fn engine_thread(
         capture.clone(),
         processed.clone(),
         conflict_signal.clone(),
+        redactor,
     );
     let exit_code = wait_for_exit(&process);
     let _ = stdout_handle.join();
@@ -428,12 +434,13 @@ fn drain_stream(
     capture: Arc<Mutex<BoundedOutputCapture>>,
     processed: Arc<std::sync::atomic::AtomicU32>,
     conflict_signal: Arc<std::sync::atomic::AtomicBool>,
+    redactor: Arc<Redactor>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stream);
         for line in reader.lines() {
             let Ok(line) = line else { break };
-            let line = Redact::redact_line(&line);
+            let line = redactor.redact(&line);
             match parse_progress_line(&line) {
                 Some(parsed) => {
                     let processed =
@@ -772,6 +779,32 @@ mod tests {
         let (outcome, events) = run_engine(engine, &progress_rx);
         assert_eq!(outcome, SyncOutcome::Success);
         assert_eq!(events[0].action, "download");
+    }
+
+    #[test]
+    fn engine_output_has_the_password_redacted() {
+        // Issue #126: the engine can echo the password/token on its own
+        // diagnostics; the run tail must scrub it with the known-secret
+        // redactor, not only the structural passes.
+        let capture = Arc::new(Mutex::new(BoundedOutputCapture::new(DEFAULT_MAX_LINES)));
+        let processed = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let conflict_signal = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let redactor = Arc::new(Redactor::from_secrets(["s3cr3t-t0ken-here"]));
+        let line = "Downloading using token s3cr3t-t0ken-here\n".to_string();
+        let handle = drain_stream(
+            std::io::Cursor::new(line),
+            progress_tx,
+            Arc::clone(&capture),
+            Arc::clone(&processed),
+            Arc::clone(&conflict_signal),
+            Arc::clone(&redactor),
+        );
+        handle.join().expect("drain thread joined");
+        let output = capture.lock().expect("capture mutex poisoned").output();
+        assert!(!output.contains("s3cr3t-t0ken-here"));
+        assert!(output.contains("[REDACTED]"));
+        assert!(progress_rx.try_recv().is_err());
     }
 
     #[test]

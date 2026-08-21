@@ -203,11 +203,7 @@ impl AccountView {
         // The status label doubles as the anti-race guard for the
         // background quota fetch (detached rows keep their text).
         let name_label = gtk4::Label::builder()
-            .label(if connected {
-                t("Connected")
-            } else {
-                t("Not connected")
-            })
+            .label(summary_connection_text(runtime.state().snapshot().state))
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
@@ -465,8 +461,10 @@ impl AccountView {
         // (the Sync/Pause buttons are gone; the light carries the state).
         let aggregate = runtime.state();
         let light = light.clone();
+        let name_label = name_label.clone();
         let subscription = aggregate.subscribe(move |snapshot: &StateSnapshot| {
             light.set_icon_name(Some(summary_light_for(snapshot.state)));
+            name_label.set_text(summary_connection_text(snapshot.state));
         });
 
         Self {
@@ -912,13 +910,19 @@ impl MainWindow {
             .get(account_id)
             .and_then(|runtime| runtime.folders().get(folder_id).cloned())
             .map(|folder| folder.scheduler());
+        let self_weak = self.self_weak.clone();
+        let on_close = Rc::new(move || {
+            if let Some(main) = self_weak.upgrade() {
+                main.borrow_mut().conflicts_window = None;
+            }
+        });
         let window = crate::ui::conflict_resolver::ConflictResolverWindow::new(
             &self.application,
             &folder.local_root,
             matcher,
             Rc::new(logger),
             scheduler,
-            None,
+            Some(on_close),
         );
         window.present();
         self.conflicts_window = Some(window);
@@ -1885,6 +1889,18 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
         | AppState::KeyringLocked
         | AppState::DeleteReview => "nextsync-status-error",
         AppState::Unconfigured => "nextsync-status-offline",
+    }
+}
+
+/// The connection text for the account summary card. Only `Offline` reads
+/// "Not connected"; every other state implies the server is reachable (the
+/// light already carries the severity, issue #129).
+pub fn summary_connection_text(state: crate::state::AppState) -> &'static str {
+    use crate::state::AppState;
+    if state == AppState::Offline {
+        t("Not connected")
+    } else {
+        t("Connected")
     }
 }
 

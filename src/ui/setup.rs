@@ -783,9 +783,13 @@ fn manual_login(ctx: &SetupContext) {
                         }
                         Err(message) => {
                             ctx_for_store.widgets.manual_button.set_sensitive(true);
-                            ctx_for_store.widgets.auth_error.set_text(t(&format!(
-                                "Could not store the account password: {message}"
-                            )));
+                            ctx_for_store.widgets.auth_error.set_text(
+                                &t("Could not store the account password: {message}").replacen(
+                                    "{message}",
+                                    &message,
+                                    1,
+                                ),
+                            );
                         }
                     }
                 });
@@ -1004,7 +1008,9 @@ fn present_folder_error(ctx: &SetupContext, message: &str) {
 fn update_space_label(ctx: &SetupContext, space_id: Option<&str>) {
     match space_id {
         Some(id) => {
-            ctx.widgets.space_label.set_text(t(&format!("Space: {id}")));
+            ctx.widgets
+                .space_label
+                .set_text(&t("Space: {id}").replace("{id}", id));
             ctx.widgets.space_label.set_visible(true);
         }
         None => {

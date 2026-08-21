@@ -1473,7 +1473,7 @@ msgstr "Continuar"
 #: src/nextsync/ui/settings.py:722
 #, python-brace-format
 msgid "Remove {name}?"
-msgstr ""
+msgstr "¿Eliminar {name}?"
 
 #: src/nextsync/ui/settings.py:725
 msgid ""
@@ -2532,6 +2532,10 @@ msgstr "Inicia sesión autorizando la aplicación en tu navegador"
 #: src/ui/setup.rs
 msgid "Space"
 msgstr "Espacio"
+
+#: src/ui/setup.rs
+msgid "Space: {id}"
+msgstr "Espacio: {id}"
 
 #: src/ui/setup.rs
 msgid "Sync provider"

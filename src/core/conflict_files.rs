@@ -280,6 +280,16 @@ pub fn keep_remote(conflict: &ConflictFile) -> bool {
             .write(true)
             .open(&conflict.original_path)?
             .set_times(fs::FileTimes::new().set_modified(modified))?;
+        // The conflicted copy was promoted; remove it so the next discovery
+        // does not report the same conflict again (and the engine does not
+        // reprocess it on the following run).
+        match fs::remove_file(&conflict.path) {
+            Ok(()) => {}
+            // The copy may already be gone; promoting the content is what
+            // matters.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {}
+        }
         Ok(())
     })()
     .is_ok()
@@ -540,6 +550,7 @@ mod tests {
         assert!(keep_remote(&conflicts[0]));
         assert!(original.exists());
         assert_eq!(fs::read_to_string(&original).unwrap(), "remote-content");
+        assert!(!dir.path().join(name).exists());
     }
 
     // ---- helpers ------------------------------------------------------------

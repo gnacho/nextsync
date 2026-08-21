@@ -696,7 +696,6 @@ impl SchedulerInner {
         }
         self.running = false;
         if ran {
-            let mut queued = !self.queue.is_empty();
             if self.inotify_during_sync {
                 if feedback_followup {
                     // Suppress only the local feedback from the reconciliation
@@ -706,7 +705,6 @@ impl SchedulerInner {
                     self.feedback_followup_pending = true;
                     self.queue.add(Trigger::LocalInotify);
                 }
-                queued = !self.queue.is_empty();
             }
             self.inotify_during_sync = false;
             self.state.set_progress(None);
@@ -716,7 +714,7 @@ impl SchedulerInner {
             let weak = self.self_ref.clone();
             self.debounce().begin_cooldown(move || {
                 if let Some(inner) = weak.upgrade() {
-                    inner.borrow_mut().cooldown_finished(queued);
+                    inner.borrow_mut().cooldown_finished();
                 }
             });
         } else {
@@ -727,11 +725,15 @@ impl SchedulerInner {
         }
     }
 
-    fn cooldown_finished(&mut self, run_pending: bool) {
+    fn cooldown_finished(&mut self) {
         if self.stopped {
             return;
         }
-        if run_pending && !self.queue.is_empty() && self.online && !self.paused() {
+        // Re-read the real queue instead of the snapshot captured when the
+        // run ended: a trigger arriving during the 4s cooldown was queued
+        // (schedule_start aborts on in_cooldown) and must start now
+        // (issue #127).
+        if !self.queue.is_empty() && self.online && !self.paused() {
             self.schedule_start();
         } else if !self.paused() {
             self.set_idle_state();
@@ -1365,6 +1367,26 @@ mod tests {
         assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
         run_idle(&source); // cooldown elapses with nothing queued → idle
         assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    #[test]
+    fn trigger_queued_during_cooldown_starts_when_it_elapses() {
+        // Issue #127: a trigger arriving while the 4s cooldown is pending is
+        // queued (schedule_start aborts on in_cooldown); when the cooldown
+        // finishes it must start, not park in idle because of the snapshot
+        // captured at run end.
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::Success);
+        // The run ended cleanly with an empty queue; a new trigger arrives
+        // during the cooldown.
+        assert!(source.borrow().pending() >= 1);
+        scheduler.request(Trigger::Manual);
+        assert!(scheduler.queue_len() >= 1);
+        run_idle(&source); // cooldown elapses with the queue non-empty
+        run_idle(&source); // the scheduled start fires
+        assert_eq!(runner.0.borrow().start_calls, 2);
     }
 
     #[test]

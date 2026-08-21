@@ -35,7 +35,7 @@ impl SyncProgress {
     pub fn is_operation(&self) -> bool {
         matches!(
             self.action.as_str(),
-            "download" | "upload" | "delete" | "conflict" | "checking"
+            "download" | "upload" | "delete" | "conflict" | "checking" | "processing"
         )
     }
 
@@ -125,6 +125,12 @@ fn strip_log_prefix(line: &str) -> &str {
 
 /// `Completed propagation of "x" by OCC::PropagateDownloadFile(...) with
 /// status OCC::SyncFileItem::Success`.
+///
+/// Every propagator job counts (issue #131): download/upload carry their
+/// action, directories/jobs read as discovery, and the remaining phases
+/// (local/remote remove, rename/move, mkdir, encrypted, vfs, ignore) all
+/// advance the counter as "processing" so the label does not freeze on the
+/// last transfer while the engine works on those phases.
 fn parse_propagation_line(line: &str) -> Option<SyncProgress> {
     let rest = line.strip_prefix("Completed propagation of \"")?;
     let (path, tail) = rest.split_once('"')?;
@@ -138,7 +144,7 @@ fn parse_propagation_line(line: &str) -> Option<SyncProgress> {
     } else if tail.contains("PropagateJob") || tail.contains("PropagateDirectory") {
         "checking"
     } else {
-        return None;
+        "processing"
     };
     Some(SyncProgress::new(action, path.to_string()))
 }
@@ -279,6 +285,37 @@ mod tests {
         )
         .expect("the propagator names the action even on failure");
         assert_eq!(failed.action, "download");
+    }
+
+    #[test]
+    fn propagation_phases_without_transfer_advance_the_counter() {
+        // Issue #131: deletes, moves and mkdirs emit propagator lines the old
+        // whitelist dropped, freezing the label on the last transfer. Every
+        // propagator job now counts.
+        let removed = parse_progress_line(
+            "Completed propagation of \"old.pdf\" by OCC::PropagateLocalRemove(0x1) with status OCC::SyncFileItem::Success",
+        )
+        .expect("a remove line should parse");
+        assert_eq!(removed.action, "processing");
+        assert_eq!(removed.path, "old.pdf");
+
+        let moved = parse_progress_line(
+            "Completed propagation of \"docs/report.txt\" by OCC::PropagateRemoteMove(0x1) with status OCC::SyncFileItem::Success",
+        )
+        .expect("a move line should parse");
+        assert_eq!(moved.action, "processing");
+
+        let mkdir = parse_progress_line(
+            "Completed propagation of \"new dir\" by OCC::PropagateLocalMkdir(0x1) with status OCC::SyncFileItem::Success",
+        )
+        .expect("a mkdir line should parse");
+        assert_eq!(mkdir.action, "processing");
+
+        let encrypted = parse_progress_line(
+            "Completed propagation of \"vault.pdf\" by OCC::PropagateUploadEncrypted(0x1) with status OCC::SyncFileItem::Success",
+        )
+        .expect("an encrypted line should parse");
+        assert_eq!(encrypted.action, "processing");
     }
 
     #[test]

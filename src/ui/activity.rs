@@ -53,18 +53,27 @@ pub struct ActivityEntry {
 impl ActivityEntry {
     /// Build the entry icon name: successful `INFO` lines get the OK emblem.
     fn with_icon(level: String, message: String) -> Self {
-        let icon_name =
-            if level == "INFO" && message.to_lowercase().contains("completed successfully") {
-                OK_ICON.to_string()
-            } else {
-                level_icon(&level).to_string()
-            };
+        let icon_name = if level == "INFO" && is_success_line(&message) {
+            OK_ICON.to_string()
+        } else {
+            level_icon(&level).to_string()
+        };
         Self {
             level,
             message,
             icon_name,
         }
     }
+}
+
+/// Whether a log line reports a finished run. `outcome_log_line`
+/// (account_runtime.rs) emits the fixed msgids "Synchronization completed"
+/// / "Synchronization completed with conflicts"; match them and their Spanish
+/// catalog forms (issue #125). The old English-only substring check never
+/// matched the localized lines actually written to the daily log.
+fn is_success_line(message: &str) -> bool {
+    let lowered = message.to_lowercase();
+    lowered.contains("synchronization completed") || lowered.contains("sincronización completada")
 }
 
 impl fmt::Display for ActivityEntry {
@@ -184,6 +193,22 @@ mod tests {
     fn success_icon_is_case_insensitive_in_the_message() {
         let entry = parse_activity_line(
             "2026-08-07 14:12:41 INFO    SYNCHRONIZATION COMPLETED SUCCESSFULLY",
+        );
+        assert_eq!(entry.icon_name, "nextsync-activity-ok");
+    }
+
+    #[test]
+    fn spanish_outcome_line_gets_the_ok_icon() {
+        let entry = parse_activity_line(
+            "2026-08-07 14:12:41 INFO    nacho@host · /home/user/Files: Sincronización completada",
+        );
+        assert_eq!(entry.icon_name, "nextsync-activity-ok");
+    }
+
+    #[test]
+    fn conflict_outcome_line_gets_the_ok_icon() {
+        let entry = parse_activity_line(
+            "2026-08-07 14:12:41 INFO    alice@host · /home/alice/Nextcloud: Synchronization completed with conflicts",
         );
         assert_eq!(entry.icon_name, "nextsync-activity-ok");
     }
