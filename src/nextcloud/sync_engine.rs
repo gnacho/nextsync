@@ -791,7 +791,7 @@ mod tests {
         let conflict_signal = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (progress_tx, progress_rx) = async_channel::unbounded();
         let redactor = Arc::new(Redactor::from_secrets(["s3cr3t-t0ken-here"]));
-        let line = format!("Downloading using token s3cr3t-t0ken-here\n");
+        let line = "Downloading using token s3cr3t-t0ken-here\n".to_string();
         let handle = drain_stream(
             std::io::Cursor::new(line),
             progress_tx,
