@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.106.0] - 2026-08-21
+
+### Corregido
+- **Luz de estado y conexión a color fijo (#114)**: la luz del sidebar (estado de la cuenta) y la fila de conexión de Ajustes de la cuenta pasan a iconos a color fijo (verde/azul/gris/rojo), dejando de verse en negro.
+
 ## [0.104.0] - 2026-08-21
 
 ### Corregido
