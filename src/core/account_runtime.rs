@@ -323,8 +323,18 @@ impl FolderRuntime {
             return;
         };
         let state_for_progress = self.state.clone();
+        // Issue #145: the engine's sender survives across runs, so events
+        // still in the buffer after a run finishes are drained AFTER the
+        // scheduler cleared the label. The scheduler flips this flag off at
+        // run end; while it is off, residual events are dropped so they
+        // cannot repaint the row.
+        let run_active = std::rc::Rc::new(std::cell::Cell::new(false));
+        self.scheduler.set_run_active(run_active.clone());
         glib::spawn_future_local(async move {
             while let Ok(progress) = progress_rx.recv().await {
+                if !run_active.get() {
+                    continue;
+                }
                 state_for_progress.set_progress(Some(progress));
             }
         });

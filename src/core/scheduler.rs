@@ -141,6 +141,11 @@ struct SchedulerInner {
     /// automatic triggers stay queued until the user signs in again, so a
     /// revoked password cannot hammer the server into a brute-force lockout.
     auth_required: bool,
+    /// Shared flag: true while a run is in flight, false the moment it
+    /// finishes. The progress forwarder reads it so stale events drained
+    /// after the run's `set_progress(None)` cannot repaint the label
+    /// (issue #145).
+    run_active: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
 impl Scheduler {
@@ -188,6 +193,7 @@ impl Scheduler {
             active_ssid: None,
             quiet_hours: None,
             auth_required: false,
+            run_active: None,
         };
         let inner = Rc::new(RefCell::new(inner));
         {
@@ -273,6 +279,13 @@ impl Scheduler {
     /// external-engine scan before every run.
     pub fn set_local_root(&self, local_root: Option<std::path::PathBuf>) {
         self.inner.borrow_mut().local_root = local_root;
+    }
+
+    /// Share the run-active flag with the progress forwarder (issue #145):
+    /// the forwarder must not repaint the label from stale events once a run
+    /// has finished and cleared it.
+    pub fn set_run_active(&self, flag: std::rc::Rc<std::cell::Cell<bool>>) {
+        self.inner.borrow_mut().run_active = Some(flag);
     }
 
     /// Override the procfs directory scanned for external engine processes.
@@ -552,6 +565,9 @@ impl SchedulerInner {
     }
 
     fn prepare_sync(&mut self, reasons: Vec<Trigger>) {
+        if let Some(flag) = &self.run_active {
+            flag.set(true);
+        }
         self.state.set(AppState::Syncing, t("Synchronizing files…"));
         self.state.set_progress(None);
         self.preparing = true;
@@ -695,6 +711,12 @@ impl SchedulerInner {
             callback(&outcome);
         }
         self.running = false;
+        // The run is over: clear the shared run-active flag BEFORE the
+        // progress is cleared, so the forwarder stops repainting the label
+        // from stale events drained after this point (issue #145).
+        if let Some(flag) = &self.run_active {
+            flag.set(false);
+        }
         if ran {
             if self.inotify_during_sync {
                 if feedback_followup {
@@ -1387,6 +1409,21 @@ mod tests {
         run_idle(&source); // cooldown elapses with the queue non-empty
         run_idle(&source); // the scheduled start fires
         assert_eq!(runner.0.borrow().start_calls, 2);
+    }
+
+    #[test]
+    fn run_active_flag_tracks_the_run_lifecycle() {
+        // Issue #145: the flag is true while the run is in flight and off
+        // once it finishes, so the progress forwarder can drop stale events.
+        let (scheduler, source, runner) = make_scheduler(None);
+        let flag = std::rc::Rc::new(std::cell::Cell::new(false));
+        scheduler.set_run_active(flag.clone());
+        assert!(!flag.get());
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        assert!(flag.get(), "the flag must be on while the run is in flight");
+        finish(&runner, SyncOutcome::Success);
+        assert!(!flag.get(), "the flag must clear when the run finishes");
     }
 
     #[test]
