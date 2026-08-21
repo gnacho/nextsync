@@ -912,13 +912,19 @@ impl MainWindow {
             .get(account_id)
             .and_then(|runtime| runtime.folders().get(folder_id).cloned())
             .map(|folder| folder.scheduler());
+        let self_weak = self.self_weak.clone();
+        let on_close = Rc::new(move || {
+            if let Some(main) = self_weak.upgrade() {
+                main.borrow_mut().conflicts_window = None;
+            }
+        });
         let window = crate::ui::conflict_resolver::ConflictResolverWindow::new(
             &self.application,
             &folder.local_root,
             matcher,
             Rc::new(logger),
             scheduler,
-            None,
+            Some(on_close),
         );
         window.present();
         self.conflicts_window = Some(window);
