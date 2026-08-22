@@ -785,14 +785,29 @@ impl AccountRuntime {
         // drive their own triggers). Without this the app sits idle until an
         // event or interval fires, so a fresh install never compares the
         // trees and the not-yet-synchronized state sticks until a manual run.
-        let schedulers: Vec<_> = self
-            .folders
-            .values()
-            .map(|folder| folder.scheduler())
-            .collect();
-        for scheduler in schedulers {
-            scheduler.request(Trigger::Startup);
+        //
+        // Issue #154: request the runs in the configured folder order, not
+        // the HashMap's (random) iteration order. The shared one-at-a-time
+        // permit wakes its waiters FIFO, so the request order IS the run
+        // order; following the configuration keeps the startup backlog
+        // stable and matching the folder list the window shows.
+        for runtime in self.ordered_folders() {
+            runtime.scheduler().request(Trigger::Startup);
         }
+    }
+
+    /// The folder runtimes in the account's configured order.
+    ///
+    /// `self.folders` is a HashMap, so its iteration order is random per
+    /// process; any fan-out whose order is user-visible (the startup sync
+    /// requests and the watcher target list, issue #154) must follow the
+    /// configuration instead.
+    fn ordered_folders(&self) -> Vec<&FolderRuntime> {
+        self.account
+            .folders
+            .iter()
+            .filter_map(|folder| self.folders.get(&folder.id))
+            .collect()
     }
 
     /// Wire the GLib main-loop consumers for every folder runtime: the local
@@ -863,10 +878,14 @@ impl AccountRuntime {
 
     /// Refresh the shared scheduler list watched by the system callbacks from
     /// the current folder runtimes (folders can be added or removed at runtime).
+    ///
+    /// The resume and remote-push callbacks request one sync per folder
+    /// through this list, so it follows the configured folder order (issue
+    /// #154), exactly like the startup fan-out.
     fn sync_targets(&self) {
         let schedulers: Vec<Scheduler> = self
-            .folders
-            .values()
+            .ordered_folders()
+            .iter()
             .map(|folder| folder.scheduler())
             .collect();
         self.targets.borrow_mut().schedulers = schedulers;
@@ -1485,6 +1504,53 @@ mod tests {
         // With folders gone the aggregate falls back to unconfigured until
         // start() is called again to install the idle state.
         assert_eq!(runtime.state().snapshot().state, AppState::Unconfigured);
+    }
+
+    /// Issue #154: the startup fan-out must follow the configured folder
+    /// order. `self.folders` is a HashMap (random iteration order per
+    /// process), so the startup requests used to go out in a different order
+    /// on every launch and the shared permit's FIFO ran the backlog in that
+    /// random order; the window lists folders in configuration order, hence
+    /// the visible hopping.
+    #[test]
+    fn startup_requests_follow_the_configured_folder_order() {
+        let source = fake_source();
+        let mut account = sample_account(true);
+        account.folders = vec![
+            FolderConfig {
+                id: "f-one".to_string(),
+                local_root: "/tmp/nsync-order-1".to_string(),
+                remote_path: "/one".to_string(),
+                space_id: None,
+                size_confirmed: false,
+            },
+            FolderConfig {
+                id: "f-two".to_string(),
+                local_root: "/tmp/nsync-order-2".to_string(),
+                remote_path: "/two".to_string(),
+                space_id: None,
+                size_confirmed: false,
+            },
+            FolderConfig {
+                id: "f-three".to_string(),
+                local_root: "/tmp/nsync-order-3".to_string(),
+                remote_path: "/three".to_string(),
+                space_id: None,
+                size_confirmed: false,
+            },
+        ];
+        let mut runtime =
+            AccountRuntime::new(account, NetworkConfig::default(), source, None, false);
+        runtime.start_without_watchers();
+        assert_eq!(runtime.folders().len(), 3);
+        // The same ordering source `mount_watchers` uses for the startup
+        // Trigger::Startup requests: configuration order, never HashMap order.
+        let order: Vec<&str> = runtime
+            .ordered_folders()
+            .iter()
+            .map(|runtime| runtime.folder.id.as_str())
+            .collect();
+        assert_eq!(order, vec!["f-one", "f-two", "f-three"]);
     }
 
     #[test]
