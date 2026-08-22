@@ -656,6 +656,17 @@ mod tests {
             env!("CARGO_PKG_VERSION"),
             "version.json and Cargo.toml must agree"
         );
+
+        let metainfo = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data/io.github.gnacho.nextsync.metainfo.xml"
+        ))
+        .expect("metainfo.xml ships with the repository");
+        let release_tag = format!("<release version=\"{}\"", env!("CARGO_PKG_VERSION"));
+        assert!(
+            metainfo.contains(&release_tag),
+            "metainfo.xml <release> must carry the current version"
+        );
     }
 
     #[test]
