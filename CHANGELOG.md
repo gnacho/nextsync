@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
 
+## [0.122.0] - 2026-08-22
+
+### Corregido
+- **Las filas de carpeta vuelven a actualizarse en vivo (#151)**: regresión de la v0.118.0 - la vista soltaba cada fila nada más construirla y el Drop del #121 desuscribía sus callbacks, congelando cada fila en su estado inicial (sin spinner, sin barra, sin progreso por archivo) hasta cambiar de cuenta y volver. La vista ahora retiene sus filas mientras están en pantalla, con test de regresión.
+- **Progreso por archivo también en el primer sync tras arrancar (#148)**: al conectar el forwarder durante un sync ya en marcha, el flag de run activo se siembra desde el scheduler; antes se descartaban todos los eventos del primer sync.
+- **La fila se redibuja tras cada actualización (#150)**: `queue_draw` forzado sobre el slot y el label de progreso; antes un sync completado podía quedar mostrando "Sincronizando…" hasta interactuar.
+- **Estado en cola más claro (#151)**: "Sincronización programada" pasa a "A la espera" ("Waiting to synchronize") en la fila, la bandeja y el mensaje del scheduler.
+
 ## [0.120.0] - 2026-08-21
 
 ### Corregido
