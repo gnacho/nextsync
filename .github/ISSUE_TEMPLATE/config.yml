@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/gnacho/nextsync/security/policy
+    about: Please report vulnerabilities privately, as described in SECURITY.md.
