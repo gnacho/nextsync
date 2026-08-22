@@ -1,0 +1,27 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and diagnostics
+      description: >-
+        Relevant output of `journalctl --user -u nextsync-app` or a coredump
+        (`coredumpctl info nextsync`). Redact personal data before pasting.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: NextSync version, distro and GTK version.
+      placeholder: e.g. 0.122.0, Arch Linux, gtk4 4.22
+    validations:
+      required: true

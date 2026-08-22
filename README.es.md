@@ -3,7 +3,7 @@
   <p><strong>Tus ficheros, en local. Cualquier servidor, en sincronización.</strong></p>
   <p>Un compañero de escritorio para GNOME que mantiene espejos locales completos de tus cuentas. Agnóstico del servidor, construido con Rust, GTK 4 y Libadwaita.</p>
   <p>
-    <a href="https://github.com/gnacho/nextsync">Sitio web</a>
+    <a href="https://nextsync.cloudless.club/">Sitio web</a>
     ·
     <a href="https://github.com/gnacho/nextsync/issues">Reportar un problema</a>
   </p>
@@ -13,6 +13,7 @@
   </p>
   <p>
     <img src="https://img.shields.io/badge/version-0.122.0-6557e8?style=flat-square" alt="Versión 0.120.0">
+    <a href="https://nextsync.cloudless.club/"><img src="https://img.shields.io/badge/web-nextsync.cloudless.club-26a269?style=flat-square" alt="Sitio web"></a>
     <img src="https://img.shields.io/badge/platform-Linux-f0c674?style=flat-square&logo=linux&logoColor=111" alt="Linux">
     <img src="https://img.shields.io/badge/desktop-GNOME-4a86cf?style=flat-square&logo=gnome&logoColor=white" alt="GNOME">
     <img src="https://img.shields.io/badge/GTK-4-4a86cf?style=flat-square&logo=gtk&logoColor=white" alt="GTK 4">

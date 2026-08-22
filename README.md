@@ -3,7 +3,7 @@
   <p><strong>Your files, local. Any server, in sync.</strong></p>
   <p>A GNOME-native desktop companion for keeping complete local mirrors of your accounts. Server agnostic, built with Rust, GTK 4, and Libadwaita.</p>
   <p>
-    <a href="https://github.com/gnacho/nextsync">Website</a>
+    <a href="https://nextsync.cloudless.club/">Website</a>
     ·
     <a href="https://github.com/gnacho/nextsync/issues">Report an issue</a>
   </p>
@@ -13,6 +13,7 @@
   </p>
   <p>
     <img src="https://img.shields.io/badge/version-0.122.0-6557e8?style=flat-square" alt="Version 0.120.0">
+    <a href="https://nextsync.cloudless.club/"><img src="https://img.shields.io/badge/web-nextsync.cloudless.club-26a269?style=flat-square" alt="Website"></a>
     <img src="https://img.shields.io/badge/platform-Linux-f0c674?style=flat-square&logo=linux&logoColor=111" alt="Linux">
     <img src="https://img.shields.io/badge/desktop-GNOME-4a86cf?style=flat-square&logo=gnome&logoColor=white" alt="GNOME">
     <img src="https://img.shields.io/badge/GTK-4-4a86cf?style=flat-square&logo=gtk&logoColor=white" alt="GTK 4">
