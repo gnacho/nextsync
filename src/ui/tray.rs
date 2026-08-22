@@ -55,6 +55,8 @@ pub enum TrayAction {
     Conflicts,
     /// Pause or resume every account at once (issue #42).
     PauseAll(bool),
+    /// Present the About dialog (issue #155).
+    About,
     /// Quit the application.
     Quit,
 }
@@ -73,6 +75,8 @@ pub struct TrayCallbacks {
     pub pause_all: Rc<dyn Fn(bool)>,
     /// Whether every account is currently paused (drives the menu label).
     pub all_paused: Rc<dyn Fn() -> bool>,
+    /// Present the About dialog (issue #155).
+    pub open_about: Rc<dyn Fn()>,
     /// Quit the application.
     pub quit: Rc<dyn Fn()>,
 }
@@ -114,8 +118,8 @@ pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
     }
 }
 
-/// Number of items in the tray menu (Open, Log, Quit).
-pub const MENU_ITEM_COUNT: usize = 3;
+/// Number of items in the tray menu (Open, Log, About, Quit).
+pub const MENU_ITEM_COUNT: usize = 4;
 
 /// The StatusNotifier item. Only `Send` data lives here, satisfying the
 /// `ksni::Tray` bound; user actions leave through the [`TrayAction`] channel.
@@ -151,9 +155,10 @@ impl TrayItem {
         self.all_paused = paused;
     }
 
-    /// The menu items: Open, Settings, Conflicts (when wired) and Quit,
-    /// following the v0.4.0 tray (`_layout_data` item ids 1, 7, 8 plus the
-    /// conflicts entry `application.py` wires via `open_conflicts`).
+    /// The menu items: Open, Log (when wired), About and Quit, following
+    /// the v0.4.0 tray (`_layout_data` item ids 1, 7, 8 plus the conflicts
+    /// entry `application.py` wires via `open_conflicts`); About joins from
+    /// the window's hamburger menu (issue #155).
     ///
     /// The callbacks run on the ksni service thread, so they only post a
     /// [`TrayAction`] with `try_send` (async-channel 2.x `Sender::send` is an
@@ -161,8 +166,9 @@ impl TrayItem {
     fn build_menu(&self) -> Vec<MenuItem<Self>> {
         // Issue #84: Settings and Pause Everything left the tray menu; both
         // live in the main window, one Open click away. The menu keeps Open,
-        // Log (when wired) and Quit.
+        // Log (when wired), About (issue #155) and Quit.
         let open = self.actions.clone();
+        let about = self.actions.clone();
         let quit = self.actions.clone();
         let mut items: Vec<MenuItem<Self>> = vec![StandardItem {
             label: t("Open NextSync").into(),
@@ -196,6 +202,19 @@ impl TrayItem {
                 icon_name: "nextsync-menu-quit".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = quit.try_send(TrayAction::Quit);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items.push(
+            StandardItem {
+                // Same dialog (and same Lucide info icon) as the window's
+                // hamburger menu (issue #155); the item closes the menu.
+                label: t("About").into(),
+                icon_name: "nextsync-menu-info".into(),
+                activate: Box::new(move |_this: &mut Self| {
+                    let _ = about.try_send(TrayAction::About);
                 }),
                 ..Default::default()
             }
@@ -291,7 +310,7 @@ impl Tray {
         let _ = self.handle.update(|item| item.set_all_paused(paused));
     }
 
-    /// Number of menu items (Open, Settings, [Conflicts], Quit).
+    /// Number of menu items (Open, [Log], About, Quit).
     pub fn menu_items(&self) -> usize {
         self.handle
             .update(|item| item.build_menu().len())
@@ -313,6 +332,7 @@ async fn dispatch(receiver: async_channel::Receiver<TrayAction>, callbacks: Tray
             TrayAction::PauseAll(paused) => {
                 (callbacks.pause_all)(paused);
             }
+            TrayAction::About => (callbacks.open_about)(),
             TrayAction::Quit => (callbacks.quit)(),
         }
     }
@@ -330,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_has_three_items_when_conflicts_is_wired() {
+    fn menu_has_the_expected_items_when_conflicts_is_wired() {
         set_locale(Locale::English);
         let (item, _rx) = item_with(AppState::IdleOk);
         let menu = item.build_menu();
@@ -342,8 +362,9 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        // Settings and Pause Everything live in the main window (issue #84).
-        assert_eq!(labels, vec!["Open NextSync", "Log", "Quit"]);
+        // Settings and Pause Everything live in the main window (issue #84);
+        // About sits above Quit (issue #155).
+        assert_eq!(labels, vec!["Open NextSync", "Log", "Quit", "About"]);
         reset_locale();
     }
 
@@ -360,7 +381,7 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(labels, vec!["Open NextSync", "Quit"]);
+        assert_eq!(labels, vec!["Open NextSync", "Quit", "About"]);
         reset_locale();
     }
 
@@ -395,7 +416,10 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(labels, vec!["Abrir NextSync", "Registro", "Salir"]);
+        assert_eq!(
+            labels,
+            vec!["Abrir NextSync", "Registro", "Salir", "Acerca de"]
+        );
         reset_locale();
     }
 
@@ -412,6 +436,7 @@ mod tests {
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Open);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Conflicts);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Quit);
+        assert_eq!(rx.try_recv().unwrap(), TrayAction::About);
         assert!(rx.try_recv().is_err(), "no extra actions should be sent");
     }
 

@@ -1247,6 +1247,49 @@ mod tests {
         assert_eq!(runner_second.0.borrow().start_calls, 1);
     }
 
+    /// Issue #154: the startup backlog runs strictly one folder at a time in
+    /// the exact order the startup triggers were requested. Every scheduler
+    /// defers its start through one idle hop (dispatched FIFO, like the GLib
+    /// equal-priority idle sources in production) and the shared permit
+    /// wakes its waiters oldest-first, so the request order IS the run order
+    /// across all accounts and folders.
+    #[test]
+    fn startup_backlog_runs_strictly_in_request_order() {
+        let permit = SyncPermit::try_new(1).unwrap();
+        let (first, source_first, runner_first) = make_scheduler(Some(permit.clone()));
+        let (second, source_second, runner_second) = make_scheduler(Some(permit.clone()));
+        let (third, source_third, runner_third) = make_scheduler(Some(permit));
+
+        // The startup fan-out requests one run per folder; the idles then
+        // fire in request order.
+        first.request(Trigger::Startup);
+        second.request(Trigger::Startup);
+        third.request(Trigger::Startup);
+        run_idle(&source_first);
+        run_idle(&source_second);
+        run_idle(&source_third);
+
+        // Exactly one run started; the rest of the backlog waits on the
+        // permit, oldest request first.
+        assert_eq!(runner_first.0.borrow().start_calls, 1);
+        assert_eq!(runner_second.0.borrow().start_calls, 0);
+        assert_eq!(runner_third.0.borrow().start_calls, 0);
+
+        // Finishing a run wakes only the oldest waiter: the second folder
+        // runs next, never the third.
+        finish(&runner_first, SyncOutcome::Success);
+        assert_eq!(source_second.borrow().pending(), 1);
+        assert_eq!(source_third.borrow().pending(), 0);
+        run_idle(&source_second);
+        assert_eq!(runner_second.0.borrow().start_calls, 1);
+        assert_eq!(runner_third.0.borrow().start_calls, 0);
+
+        finish(&runner_second, SyncOutcome::Success);
+        assert_eq!(source_third.borrow().pending(), 1);
+        run_idle(&source_third);
+        assert_eq!(runner_third.0.borrow().start_calls, 1);
+    }
+
     #[test]
     fn external_engine_on_the_folder_aborts_the_run_with_a_clear_error() {
         let (scheduler, source, runner) = make_scheduler(None);
