@@ -198,12 +198,10 @@ impl TrayItem {
         }
         items.push(
             StandardItem {
-                // Same dialog (and same Lucide info icon) as the window's
-                // hamburger menu (issue #155); the item sits above Quit.
-                label: t("About").into(),
-                icon_name: "nextsync-menu-info".into(),
+                label: t("Quit").into(),
+                icon_name: "nextsync-menu-quit".into(),
                 activate: Box::new(move |_this: &mut Self| {
-                    let _ = about.try_send(TrayAction::About);
+                    let _ = quit.try_send(TrayAction::Quit);
                 }),
                 ..Default::default()
             }
@@ -211,10 +209,12 @@ impl TrayItem {
         );
         items.push(
             StandardItem {
-                label: t("Quit").into(),
-                icon_name: "nextsync-menu-quit".into(),
+                // Same dialog (and same Lucide info icon) as the window's
+                // hamburger menu (issue #155); the item closes the menu.
+                label: t("About").into(),
+                icon_name: "nextsync-menu-info".into(),
                 activate: Box::new(move |_this: &mut Self| {
-                    let _ = quit.try_send(TrayAction::Quit);
+                    let _ = about.try_send(TrayAction::About);
                 }),
                 ..Default::default()
             }
@@ -364,7 +364,7 @@ mod tests {
             .collect();
         // Settings and Pause Everything live in the main window (issue #84);
         // About sits above Quit (issue #155).
-        assert_eq!(labels, vec!["Open NextSync", "Log", "About", "Quit"]);
+        assert_eq!(labels, vec!["Open NextSync", "Log", "Quit", "About"]);
         reset_locale();
     }
 
@@ -381,7 +381,7 @@ mod tests {
                 _ => panic!("unexpected menu item type"),
             })
             .collect();
-        assert_eq!(labels, vec!["Open NextSync", "About", "Quit"]);
+        assert_eq!(labels, vec!["Open NextSync", "Quit", "About"]);
         reset_locale();
     }
 
@@ -418,7 +418,7 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            vec!["Abrir NextSync", "Registro", "Acerca de", "Salir"]
+            vec!["Abrir NextSync", "Registro", "Salir", "Acerca de"]
         );
         reset_locale();
     }
@@ -435,8 +435,8 @@ mod tests {
         }
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Open);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Conflicts);
-        assert_eq!(rx.try_recv().unwrap(), TrayAction::About);
         assert_eq!(rx.try_recv().unwrap(), TrayAction::Quit);
+        assert_eq!(rx.try_recv().unwrap(), TrayAction::About);
         assert!(rx.try_recv().is_err(), "no extra actions should be sent");
     }
 
