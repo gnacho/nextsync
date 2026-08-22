@@ -75,7 +75,7 @@ const STATE_PRESENTATIONS: [(AppState, TrayPresentation); 13] = [
         TrayPresentation {
             icon_key: "syncing",
             status: "Active",
-            label: "Synchronization Scheduled",
+            label: "Waiting to synchronize",
             user_paused: false,
         },
     ),
@@ -216,7 +216,7 @@ mod tests {
                 TrayPresentation {
                     icon_key: "syncing",
                     status: "Active",
-                    label: "Synchronization Scheduled",
+                    label: "Waiting to synchronize",
                     user_paused: false,
                 },
             ),

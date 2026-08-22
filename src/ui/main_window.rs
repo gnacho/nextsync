@@ -135,6 +135,11 @@ pub struct AccountView {
     /// Per-folder state subscriptions (used-space refreshes after each
     /// completed synchronization, issue #43).
     _folder_subscriptions: Vec<crate::state::Subscription>,
+    /// The folder rows, owned for the whole lifetime of the view (issue
+    /// #151): dropping a FolderStatusRow unsubscribes its live state and
+    /// progress callbacks (issue #121), so the rows must live exactly as
+    /// long as they are on screen or they freeze at their initial state.
+    _folder_rows: Vec<FolderStatusRow>,
 }
 
 impl AccountView {
@@ -281,6 +286,9 @@ impl AccountView {
 
         let pairs = pair_folder_runtimes(&account.folders, runtime.folders());
         let mut folder_subscriptions: Vec<crate::state::Subscription> = Vec::new();
+        // The view owns its rows (issue #151): dropping one unsubscribes its
+        // live callbacks, so they stay alive until the whole view is rebuilt.
+        let mut folder_rows: Vec<FolderStatusRow> = Vec::new();
         for (folder, folder_runtime) in pairs {
             let local_root = folder.local_root.clone();
             let account_id = account.id.clone();
@@ -438,6 +446,7 @@ impl AccountView {
                 folder_subscriptions.push(subscription);
             }
             account_list.append(&row.slot);
+            folder_rows.push(row);
         }
         if account.folders.is_empty() {
             let row = libadwaita::ActionRow::builder()
@@ -472,6 +481,7 @@ impl AccountView {
             _account_runtime: account_runtime,
             _subscription: Some(subscription),
             _folder_subscriptions: folder_subscriptions,
+            _folder_rows: folder_rows,
         }
     }
 }
@@ -2539,6 +2549,89 @@ mod tests {
                 view._account_runtime.account.folders.is_empty(),
                 "removed folder disappears without restart"
             );
+        });
+    }
+
+    /// Regression test for issue #151: the view must own its FolderStatusRow
+    /// objects for as long as they are on screen. Dropping a row unsubscribes
+    /// its live state/progress callbacks (the Drop impl from issue #121), so
+    /// a view that does not retain its rows freezes every row at the state it
+    /// had when the view was built: no spinner, no run bar, no live file
+    /// progress, no queued state until the whole view is rebuilt.
+    #[test]
+    fn folder_rows_follow_live_state_changes() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let dir = tempfile::tempdir().unwrap();
+            let mut account = window_account();
+            account.folders = vec![crate::storage::config::FolderConfig {
+                id: "f1".to_string(),
+                local_root: dir.path().join("docs").to_string_lossy().into_owned(),
+                remote_path: "/docs".to_string(),
+                space_id: None,
+                size_confirmed: false,
+            }];
+            let mut runtime = AccountRuntime::new(
+                account,
+                crate::storage::config::NetworkConfig::default(),
+                std::rc::Rc::new(std::cell::RefCell::new(
+                    crate::core::debounce::FakeTimeoutSource::default(),
+                )),
+                None,
+                false,
+            );
+            runtime.start_without_watchers();
+            let callbacks = AccountCallbacks {
+                on_open_folder: None,
+                on_remove_folder: None,
+                on_edit_ignored: None,
+                on_add_folder: None,
+                on_pending_changes: None,
+                on_review_deletions: None,
+                on_resolve_conflicts: None,
+                on_avatar_cached: None,
+            };
+            let view = AccountView::new(
+                runtime.clone(),
+                callbacks,
+                crate::core::log::LogBuffer::new(),
+            );
+
+            // Locate the folder row: ListBox > ListBoxRow > slot > ActionRow.
+            let mut sibling = view.root.first_child();
+            let mut list = None;
+            while let Some(widget) = sibling {
+                if let Ok(candidate) = widget.clone().downcast::<gtk4::ListBox>() {
+                    list = Some(candidate);
+                    break;
+                }
+                sibling = widget.next_sibling();
+            }
+            let list = list.expect("folder list present");
+            let list_row = list.row_at_index(0).expect("one folder row");
+            let slot = list_row
+                .child()
+                .and_then(|widget| widget.downcast::<gtk4::Box>().ok())
+                .expect("row slot");
+            let action_row = slot
+                .first_child()
+                .and_then(|widget| widget.downcast::<libadwaita::ActionRow>().ok())
+                .expect("folder action row");
+            assert_eq!(
+                action_row.subtitle().as_deref(),
+                Some("Not Synchronized Yet")
+            );
+
+            // A live state change must repaint the row without a view rebuild.
+            let state = runtime.folders().get("f1").expect("folder runtime").state();
+            state.set(crate::state::AppState::Syncing, "");
+            assert_eq!(action_row.subtitle().as_deref(), Some("Synchronizing…"));
+            state.set(crate::state::AppState::IdleOk, "");
+            assert_eq!(
+                action_row.subtitle().as_deref(),
+                Some("Synced in local docs")
+            );
+            reset_locale();
         });
     }
 

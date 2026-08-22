@@ -920,10 +920,6 @@ msgstr "Sincronizado"
 msgid "Automatic Sync Is Off"
 msgstr "Sincronización automática desactivada"
 
-#: src/nextsync/ui/folder_status.py:21
-msgid "Synchronization Scheduled"
-msgstr "Sincronización programada"
-
 #: src/nextsync/ui/folder_status.py:22
 msgid "Synchronizing…"
 msgstr "Sincronizando…"
@@ -2575,10 +2571,6 @@ msgid "Synchronization is paused"
 msgstr "La sincronización está en pausa"
 
 #: src/core/scheduler.rs
-msgid "Synchronization scheduled"
-msgstr "Sincronización programada"
-
-#: src/core/scheduler.rs
 msgid "Synchronized with conflicts — review the log"
 msgstr "Sincronizado con conflictos: revisa el registro"
 
@@ -2682,7 +2674,7 @@ msgid "Synced in local {folder}"
 msgstr "Sincronizado en local {folder}"
 
 msgid "Waiting to synchronize"
-msgstr "Esperando para sincronizar"
+msgstr "A la espera"
 
 msgid "checking {file}"
 msgstr "comprobando {file}"
