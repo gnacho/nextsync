@@ -265,6 +265,18 @@ fn main() {
                         }
                     }
                 })),
+                // Issue #155: the same About dialog the hamburger menu opens.
+                // With minimize-to-tray the main window may be hidden; the
+                // dialog is transient for it and GTK still presents it on its
+                // own, so no standalone fallback is needed.
+                open_about: Rc::new({
+                    let weak = weak.clone();
+                    move || {
+                        if let Some(main) = weak.upgrade() {
+                            main.borrow_mut().show_about();
+                        }
+                    }
+                }),
                 pause_all: Rc::new({
                     let weak = weak.clone();
                     move |paused| {
