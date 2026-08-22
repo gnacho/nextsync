@@ -117,4 +117,6 @@ package() {
 
     install -Dm644 data/io.github.gnacho.nextsync.desktop \
         "$pkgdir/usr/share/applications/io.github.gnacho.nextsync.desktop"
+    install -Dm644 data/io.github.gnacho.nextsync.metainfo.xml \
+        "$pkgdir/usr/share/metainfo/io.github.gnacho.nextsync.metainfo.xml"
 }

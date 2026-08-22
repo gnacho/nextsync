@@ -5,6 +5,6 @@ Exec=nextsync
 Icon=io.github.gnacho.nextsync
 Terminal=false
 Type=Application
-Categories=Network;FileTransfer;Utility;
+Categories=Network;FileTransfer;
 Keywords=Nextcloud;Sync;Cloud;Files;
 StartupNotify=true

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.gnacho.nextsync</id>
+  <name>NextSync</name>
+  <summary>Your files, local. Any server, in sync</summary>
+  <developer id="io.github.gnacho">
+    <name>gnacho</name>
+  </developer>
+  <launchable type="desktop-id">io.github.gnacho.nextsync.desktop</launchable>
+  <url type="homepage">https://github.com/gnacho/nextsync</url>
+  <url type="bugtracker">https://github.com/gnacho/nextsync/issues</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      NextSync is a GNOME-native desktop companion for keeping complete local
+      mirrors of your Nextcloud accounts. It delegates the heavy lifting to the
+      proven command-line sync engine and adds the desktop integration: system
+      tray, live folder status, conflict resolution and deletion review.
+    </p>
+  </description>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+  <keywords>
+    <keyword>Nextcloud</keyword>
+    <keyword>sync</keyword>
+    <keyword>cloud</keyword>
+    <keyword>files</keyword>
+  </keywords>
+  <icon type="stock">io.github.gnacho.nextsync</icon>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.122.0" date="2026-08-22"/>
+  </releases>
+</component>
