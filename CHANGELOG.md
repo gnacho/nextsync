@@ -1,6 +1,19 @@
 # Changelog
 
-Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.02 por release** (decisión del usuario, 15-Ago-2026).
+Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
+
+## [0.1.4] - 2026-08-22
+
+### Nota de versionado
+- La numeración abandona el esquema 0.12x y se reinicia en **0.1.4**; desde aquí, +0.0.2 por release.
+
+### Añadido
+- **"Acerca de" en el menú de la bandeja (#155)**: última posición del menú, mismo diálogo que el menú de la ventana.
+- **Estructura de proyecto canónica (#156)**: metainfo AppStream (validado con appstreamcli e instalado por el paquete), SECURITY.md, código de conducta (Contributor Covenant 3.0), CONTRIBUTING.md con la lista del bump de versión, plantillas de issue (bug y feature) y badge/enlaces de la web pública en los README.
+
+### Corregido
+- **Arranque secuencial en orden estable (#154)**: el backlog de arranque se pedía iterando un mapa hash con orden aleatorio por proceso, así que cada lanzamiento atacaba las carpetas en orden distinto. Ahora se sincroniza una carpeta cada vez, en el orden configurado, con tests de regresión.
+- **Iconos del menú de la bandeja legibles en oscuro (#157)**: los iconos llevaban un gris oscuro fijo que desaparecía en temas oscuros; ahora usan un gris neutro visible en ambos temas, "Registro" tiene su propio glifo (antes duplicaba el de "Abrir") y "Acerca de" usa una variante de color fijo en vez del simbólico que el host de la bandeja pintaba negro.
 
 ## [0.122.0] - 2026-08-22
 

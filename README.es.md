@@ -12,7 +12,7 @@
     <a href="README.md">English</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.122.0-6557e8?style=flat-square" alt="Versión 0.120.0">
+    <img src="https://img.shields.io/badge/version-0.1.4-6557e8?style=flat-square" alt="Versión 0.1.4">
     <a href="https://nextsync.cloudless.club/"><img src="https://img.shields.io/badge/web-nextsync.cloudless.club-26a269?style=flat-square" alt="Sitio web"></a>
     <img src="https://img.shields.io/badge/platform-Linux-f0c674?style=flat-square&logo=linux&logoColor=111" alt="Linux">
     <img src="https://img.shields.io/badge/desktop-GNOME-4a86cf?style=flat-square&logo=gnome&logoColor=white" alt="GNOME">

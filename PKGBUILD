@@ -1,6 +1,6 @@
 # Maintainer: gnacho <https://github.com/gnacho>
 pkgname=nextsync
-pkgver=0.122.0
+pkgver=0.1.4
 pkgrel=1
 pkgdesc='Nextcloud desktop synchronization client for GNOME (Rust rewrite)'
 arch=('x86_64' 'aarch64')
