@@ -29,7 +29,7 @@ pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static st
         AppState::IdleOk => ("nextsync-row-ok", t("Synchronized")),
         AppState::IdleManualOnly => ("nextsync-row-paused", t("Automatic Sync Is Off")),
         AppState::IdleNotSynced => ("nextsync-row-paused", t("Not Synchronized Yet")),
-        AppState::SyncQueued => ("nextsync-row-paused", t("Synchronization Scheduled")),
+        AppState::SyncQueued => ("nextsync-row-paused", t("Waiting to synchronize")),
         AppState::Syncing => ("nextsync-row-syncing", t("Synchronizing…")),
         AppState::PausedUser => ("nextsync-row-paused", t("Paused")),
         AppState::PausedBattery => ("nextsync-row-battery", t("Paused on Battery")),
@@ -755,7 +755,7 @@ mod tests {
             state.set(AppState::SyncQueued, "queued");
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Synchronization Scheduled")
+                Some("Waiting to synchronize")
             );
             state.set(AppState::IdleOk, "ok");
             assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));

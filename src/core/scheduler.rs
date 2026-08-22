@@ -501,7 +501,7 @@ impl SchedulerInner {
             return;
         }
         self.state
-            .set(AppState::SyncQueued, t("Synchronization scheduled"));
+            .set(AppState::SyncQueued, t("Waiting to synchronize"));
         let weak = self.self_ref.clone();
         let id = self.source.borrow_mut().add_idle(Box::new(move || {
             if let Some(inner) = weak.upgrade() {
