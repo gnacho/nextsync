@@ -68,6 +68,7 @@ package() {
         nextsync-activity-ok
         nextsync-activity-warning
         nextsync-conflict-warning
+        nextsync-menu-info
         nextsync-menu-log
         nextsync-menu-open
         nextsync-menu-quit

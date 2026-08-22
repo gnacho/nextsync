@@ -201,7 +201,7 @@ impl TrayItem {
                 // Same dialog (and same Lucide info icon) as the window's
                 // hamburger menu (issue #155); the item sits above Quit.
                 label: t("About").into(),
-                icon_name: "nextsync-info-symbolic".into(),
+                icon_name: "nextsync-menu-info".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = about.try_send(TrayAction::About);
                 }),
