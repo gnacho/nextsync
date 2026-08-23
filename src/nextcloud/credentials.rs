@@ -11,8 +11,18 @@
 //!
 //! Uses `secret_service::blocking` (feature `rt-tokio-crypto-rust`, DH
 //! encrypted session). Blocking calls must not run on the async UI loop.
+//!
+//! Issue #178: resolved passwords are cached in process memory, so each
+//! account costs one Secret Service session negotiation per process instead
+//! of one per sync run (the desktop reference clients, e.g. Iotas, do the
+//! same). The cache is written through on [`CredentialsStore::set`], evicted
+//! on [`CredentialsStore::delete`], and invalidated when a sync run ends in
+//! authentication failure so the next lookup re-reads the keyring. Secrets
+//! therefore live in process memory for the whole session; a revoked
+//! password is noticed on the next 401, not before.
 
 use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use secret_service::blocking::SecretService;
 use secret_service::EncryptionType;
@@ -61,6 +71,16 @@ const ATTR_USERNAME: &str = "username";
 /// Secret content type used for stored passwords.
 const CONTENT_TYPE: &str = "text/plain";
 
+/// Process-local password cache, keyed by account id (issue #178).
+static PASSWORD_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn cache_lock() -> MutexGuard<'static, HashMap<String, String>> {
+    PASSWORD_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Prefer the `login` collection (unlocked automatically by the desktop
 /// session) and fall back to the default collection (issue #58).
 ///
@@ -92,6 +112,7 @@ impl CredentialsStore {
             true,
             CONTENT_TYPE,
         )?;
+        cache_lock().insert(account_id.to_string(), password.to_string());
         Ok(())
     }
 
@@ -124,18 +145,23 @@ impl CredentialsStore {
 
     /// Read the password for an account, falling back to the legacy entry.
     ///
-    /// Tries the `account_id` item first; when absent, searches the legacy
+    /// Serves the in-memory cache first (issue #178); on a miss, tries the
+    /// `account_id` item first; when absent, searches the legacy
     /// Python `nextsync` attributes (`{server, username}`). A legacy hit is
     /// adopted: the secret is re-stored under `account_id` so later lookups
     /// hit the fast path, while the legacy item itself is left in place for
     /// the Python app. Adoption failure is not fatal — the password is still
-    /// returned.
+    /// returned. Successful keyring resolutions populate the cache.
     pub fn get_for_account(
         account_id: &str,
         server: &str,
         login: &str,
     ) -> Result<Option<String>, CredentialError> {
+        if let Some(cached) = cache_lock().get(account_id) {
+            return Ok(Some(cached.clone()));
+        }
         if let Some(password) = Self::get(account_id)? {
+            cache_lock().insert(account_id.to_string(), password.clone());
             return Ok(Some(password));
         }
         let service = SecretService::connect(EncryptionType::Dh)?;
@@ -154,11 +180,22 @@ impl CredentialsStore {
         let secret = item.get_secret()?;
         let password = String::from_utf8_lossy(&secret).into_owned();
         let _ = Self::set(account_id, &password);
+        cache_lock().insert(account_id.to_string(), password.clone());
         Ok(Some(password))
+    }
+
+    /// Drop the cached password for an account (issue #178).
+    ///
+    /// Called when a sync run proves the credential wrong (authentication
+    /// failure), so the next lookup re-reads the keyring instead of
+    /// replaying the stale secret.
+    pub fn invalidate(account_id: &str) {
+        cache_lock().remove(account_id);
     }
 
     /// Delete the stored password for an account, if any.
     pub fn delete(account_id: &str) -> Result<(), CredentialError> {
+        cache_lock().remove(account_id);
         let service = SecretService::connect(EncryptionType::Dh)?;
         let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
         // Only the unlocked items are reachable; items in a locked collection
@@ -168,6 +205,16 @@ impl CredentialsStore {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+pub(crate) fn seed_cache_for_tests(account_id: &str, password: &str) {
+    cache_lock().insert(account_id.to_string(), password.to_string());
+}
+
+#[cfg(test)]
+pub(crate) fn cached_for_tests(account_id: &str) -> Option<String> {
+    cache_lock().get(account_id).cloned()
 }
 
 #[cfg(test)]
@@ -307,5 +354,89 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("UTF-8"));
         assert!(!message.contains("0xFF"));
+    }
+
+    const TEST_CACHE_ACCOUNT: &str =
+        "7e3a9c1f5b28d4e6a0f2c8b1d3e5a7c9b0d2e4f6a8c0b2d4e6f8a0c2e4b6d8a0c2";
+    // Distinct id per cache test: the cache is process-global and tests run
+    // in parallel threads.
+    const TEST_CACHE_ACCOUNT_WT: &str =
+        "1a2b3c4d5e6f708192a3b4c5d6e7f80192a3b4c5d6e7f8091a2b3c4d5e6f7a8b9";
+
+    /// Issue #178: a seeded cache entry is served without touching the
+    /// Secret Service, and `invalidate` forces the next lookup back to the
+    /// keyring.
+    #[test]
+    fn cache_serves_until_invalidated() {
+        CredentialsStore::invalidate(TEST_CACHE_ACCOUNT);
+        seed_cache_for_tests(TEST_CACHE_ACCOUNT, TEST_PASSWORD);
+
+        // Served from memory: works even though nothing is stored under
+        // this account in any keyring.
+        let resolved = CredentialsStore::get_for_account(
+            TEST_CACHE_ACCOUNT,
+            "https://cache-unit-test.example.net",
+            "cache-unit-test@example.net",
+        )
+        .expect("cached lookup should succeed");
+        assert_eq!(resolved.as_deref(), Some(TEST_PASSWORD));
+
+        CredentialsStore::invalidate(TEST_CACHE_ACCOUNT);
+        assert!(cached_for_tests(TEST_CACHE_ACCOUNT).is_none());
+        // After invalidation the cache no longer answers: the result now
+        // depends on the real keyring (Ok(None) when available, an error
+        // when there is no session bus at all).
+        let after = CredentialsStore::get_for_account(
+            TEST_CACHE_ACCOUNT,
+            "https://cache-unit-test.example.net",
+            "cache-unit-test@example.net",
+        );
+        assert!(after.map(|password| password.is_none()).unwrap_or(true));
+    }
+
+    /// Issue #178: `set` writes through to the cache and `delete` evicts it.
+    #[test]
+    fn set_writes_through_and_delete_evicts() {
+        match SecretService::connect(EncryptionType::Dh) {
+            Ok(_) => {}
+            Err(_) => {
+                eprintln!("no Secret Service session bus available; skipping");
+                return;
+            }
+        }
+        struct CacheCleanup;
+        impl Drop for CacheCleanup {
+            fn drop(&mut self) {
+                let _ = CredentialsStore::delete(TEST_CACHE_ACCOUNT_WT);
+            }
+        }
+        let _guard = CacheCleanup;
+
+        let _ = CredentialsStore::delete(TEST_CACHE_ACCOUNT_WT);
+        CredentialsStore::set(TEST_CACHE_ACCOUNT_WT, TEST_PASSWORD).expect("set should succeed");
+        assert_eq!(
+            cached_for_tests(TEST_CACHE_ACCOUNT_WT).as_deref(),
+            Some(TEST_PASSWORD)
+        );
+
+        // Remove the keyring item directly, bypassing the store: the cache
+        // must keep serving the password regardless.
+        let service = SecretService::connect(EncryptionType::Dh).expect("connect");
+        let result = service
+            .search_items(HashMap::from([(ATTR_ACCOUNT_ID, TEST_CACHE_ACCOUNT_WT)]))
+            .expect("search");
+        for item in result.unlocked {
+            item.delete().expect("direct delete");
+        }
+        let resolved = CredentialsStore::get_for_account(
+            TEST_CACHE_ACCOUNT_WT,
+            "https://cache-unit-test.example.net",
+            "cache-unit-test@example.net",
+        )
+        .expect("cached lookup should succeed");
+        assert_eq!(resolved.as_deref(), Some(TEST_PASSWORD));
+
+        CredentialsStore::delete(TEST_CACHE_ACCOUNT_WT).expect("delete should succeed");
+        assert!(cached_for_tests(TEST_CACHE_ACCOUNT_WT).is_none());
     }
 }
