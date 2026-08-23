@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.4] - 2026-08-23
+
+### Cambiado
+- **Las contraseñas de las cuentas se cachean en memoria (#178)**: antes, cada consulta de credenciales abría una conexión nueva al servicio de secretos con su negociación cifrada completa (hasta 3 por consulta, por cada carpeta, cada pocos minutos). Ahora cada contraseña se lee del llavero una vez por proceso y se sirve desde memoria, siguiendo el patrón de los clientes de escritorio de referencia. La escritura (`set`) actualiza la caché al momento, el borrado la limpia, y si una sincronización demuestra que la contraseña ya no vale (autenticación rechazada), la caché se invalida sola para que la siguiente consulta relea el llavero después de "Iniciar sesión de nuevo". Efecto colateral deseado: mucha menos exposición a bloqueos transitorios del llavero a mitad de sesión.
+
 ## [0.2.2] - 2026-08-23
 
 ### Corregido

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.2",
+  "version": "0.2.4",
   "mandatory": false,
-  "summary": "Coherent waiting message and a self-healing retry for a transiently locked keyring.",
+  "summary": "Account passwords are now cached in memory: one Secret Service negotiation per account per process.",
   "changelog": [
-    "Only the folder at the head of the wait queue names the folder it is waiting on; the rest show the generic 'Waiting for another folder to finish…' (issue #169).",
-    "A transiently locked password keyring (the Secret Service not being ready right after login) now schedules a capped backoff retry and clears on its own once the service is ready, instead of staying locked until restart (issue #170)."
+    "Credential lookups serve an in-memory cache instead of opening a fresh encrypted Secret Service session every time (issue #178).",
+    "The cache is written through on sign-in, evicted on account removal, and invalidated automatically when a sync proves the password wrong, so signing in again re-reads the keyring."
   ],
   "released_at": "2026-08-23T00:00:00Z"
 }
