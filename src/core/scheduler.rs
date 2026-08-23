@@ -648,13 +648,17 @@ impl SchedulerInner {
         if self.stopped {
             return;
         }
-        let ran = match outcome {
+        // `conflicted` drives the post-run feedback handling: a run that ended
+        // with conflicted copies must not queue another reconciliation in a
+        // loop (issue #165); the row already carries the "review the log"
+        // message and the sync stays parked until the user addresses it.
+        let (ran, conflicted) = match outcome {
             SyncOutcome::Success => {
                 self.keyring_locked = false;
                 self.auth_required = false;
                 self.ever_synced = true;
                 self.set_idle_state();
-                true
+                (true, false)
             }
             SyncOutcome::Conflict => {
                 self.keyring_locked = false;
@@ -664,7 +668,7 @@ impl SchedulerInner {
                     AppState::IdleOk,
                     t("Synchronized with conflicts — review the log"),
                 );
-                true
+                (true, true)
             }
             SyncOutcome::AuthFailed => {
                 self.keyring_locked = false;
@@ -675,7 +679,7 @@ impl SchedulerInner {
                     AppState::AuthRequired,
                     t("Credentials rejected. Sign in again in Account settings."),
                 );
-                false
+                (false, false)
             }
             SyncOutcome::NoCredentials => {
                 self.keyring_locked = false;
@@ -686,19 +690,19 @@ impl SchedulerInner {
                     AppState::AuthRequired,
                     t("No saved credentials. Use Sign in again in Account settings."),
                 );
-                false
+                (false, false)
             }
             SyncOutcome::KeyringLocked => {
                 self.keyring_locked = true;
                 self.state
                     .set(AppState::KeyringLocked, t("Password keyring is locked"));
-                false
+                (false, false)
             }
             SyncOutcome::Failed => {
                 self.keyring_locked = false;
                 self.state
                     .set(AppState::Error, t("Synchronization failed — view the log"));
-                true
+                (true, false)
             }
             SyncOutcome::NetworkError => {
                 // Issue #162: the server itself is unreachable even though the
@@ -711,7 +715,7 @@ impl SchedulerInner {
                 self.keyring_locked = false;
                 self.state
                     .set(AppState::Offline, t("Waiting for a network connection"));
-                false
+                (false, false)
             }
         };
         // Fase 3: after a successful run the guard baseline is refreshed so
@@ -735,7 +739,15 @@ impl SchedulerInner {
             flag.set(false);
         }
         if ran {
-            if self.inotify_during_sync {
+            if conflicted {
+                // Issue #165: a conflicted run must not trigger a follow-up
+                // reconciliation from local feedback (that is what keeps a
+                // folder with unresolved conflicts bouncing). Drop any local
+                // feedback queued during the run and let the interval/remote
+                // triggers retry on their own cadence.
+                self.queue.discard(Trigger::LocalInotify);
+                self.feedback_followup_pending = false;
+            } else if self.inotify_during_sync {
                 if feedback_followup {
                     // Suppress only the local feedback from the reconciliation
                     // itself; manual/remote triggers stay queued.
@@ -1203,6 +1215,37 @@ mod tests {
         finish(&runner, SyncOutcome::Success);
         assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
         assert_eq!(scheduler.queue_len(), 1);
+    }
+
+    /// Issue #165: a run that ends with conflicted copies must not re-queue
+    /// the local feedback in a loop. The queue is left empty (only the
+    /// interval/remote triggers will retry later) and the folder stays in the
+    /// 'review the log' state until the user addresses the conflict.
+    #[test]
+    fn conflicted_run_does_not_requeue_local_feedback() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+        // A local change arrives during the run, exactly like the success case.
+        scheduler.request(Trigger::LocalInotify);
+        finish(&runner, SyncOutcome::Conflict);
+        assert_eq!(
+            scheduler.state().snapshot().state,
+            AppState::IdleOk,
+            "the folder stays IdleOk with the conflict message"
+        );
+        assert_eq!(
+            scheduler.state().snapshot().message,
+            "Synchronized with conflicts — review the log"
+        );
+        // Unlike the success case the local feedback is NOT re-enqueued, so the
+        // folder does not bounce back into a sync loop.
+        assert_eq!(
+            scheduler.queue_len(),
+            0,
+            "no feedback re-queued on conflict"
+        );
     }
 
     #[test]
