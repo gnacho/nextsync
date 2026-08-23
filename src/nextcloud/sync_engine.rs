@@ -87,7 +87,7 @@ pub struct KeyringCredentialSource;
 
 impl CredentialSource for KeyringCredentialSource {
     fn lookup(&self, account: &AccountConfig) -> CredentialLookup {
-        match CredentialsStore::get_for_account(
+        let result = match CredentialsStore::get_for_account(
             &account.id,
             &account.server_url,
             &account.login_name,
@@ -98,7 +98,14 @@ impl CredentialSource for KeyringCredentialSource {
                 secret_service::Error::Locked,
             )) => CredentialLookup::Locked,
             Err(_) => CredentialLookup::Unavailable,
-        }
+        };
+        // [DEBUG-keyring] track what the credential lookup returns per account
+        // so a stuck keyring_locked state can be traced to its cause.
+        eprintln!(
+            "[DEBUG-keyring] account={} server={} => {:?}",
+            account.id, account.server_url, result
+        );
+        result
     }
 }
 
