@@ -141,6 +141,20 @@ impl SyncPermit {
             .any(|active| paths_overlap(active, &canonical))
     }
 
+    /// The display name of the oldest tracked holder currently running, if
+    /// any. Returns the folder name (the last path component) so a queued
+    /// scheduler can say which folder it is waiting on (issue #165). `None`
+    /// when no holder is tracked (a plain `try_acquire` holder, or idle).
+    pub fn active_folder_name(&self) -> Option<String> {
+        let inner = self.inner.borrow();
+        inner
+            .roots
+            .first()
+            .and_then(|root| root.file_name())
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+    }
+
     /// Release one slot and wake the oldest waiter, if any.
     ///
     /// The woken callback runs synchronously (Python semantics); it must not

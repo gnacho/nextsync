@@ -553,6 +553,16 @@ fn render(
     ) && !snapshot.message.is_empty()
     {
         parts.push(snapshot.message.clone());
+    } else if snapshot.state == AppState::SyncQueued && !snapshot.message.is_empty() {
+        // Issue #165: surface the specific reason the run is queued (e.g.
+        // waiting behind the shared permit) instead of the generic
+        // "Waiting to synchronize" label. When the message is exactly the
+        // generic label the row keeps the label and does not repeat itself.
+        if snapshot.message != status {
+            parts.push(snapshot.message.clone());
+        } else {
+            parts.push(status.to_string());
+        }
     } else {
         parts.push(status.to_string());
     }
@@ -752,10 +762,20 @@ mod tests {
             assert!(!row.local_size.is_visible());
             // Outside the synchronized state the synced-in-local segment
             // disappears: queued and syncing rows show only the status.
-            state.set(AppState::SyncQueued, "queued");
+            state.set(AppState::SyncQueued, "Waiting to synchronize");
             assert_eq!(
                 row.row.subtitle().as_deref(),
                 Some("Waiting to synchronize")
+            );
+            // A specific blocking reason replaces the generic label (issue
+            // #165).
+            state.set(
+                AppState::SyncQueued,
+                "Waiting for another folder to finish…",
+            );
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Waiting for another folder to finish…")
             );
             state.set(AppState::IdleOk, "ok");
             assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
@@ -770,6 +790,45 @@ mod tests {
             assert_eq!(row.progress_label.label(), "downloading song.mp3 · 3 files");
             state.set_progress(None);
             assert!(!row.progress_label.is_visible());
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn queued_row_surfaces_the_blocking_reason() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let folder = FolderConfig {
+                id: "f1".to_string(),
+                local_root: "/tmp/a".to_string(),
+                remote_path: "/docs".to_string(),
+                space_id: None,
+                size_confirmed: false,
+            };
+            let state = StateController::new(AppState::SyncQueued);
+            let row = FolderStatusRow::new(
+                folder,
+                Some(state.clone()),
+                FolderRowCallbacks::default(),
+                None,
+                None,
+            );
+            // The generic wait shows the generic label when there is no
+            // more specific reason (no message).
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Waiting to synchronize")
+            );
+            // Issue #165: with a specific blocking reason present, the row
+            // shows it instead of the generic label.
+            state.set(
+                AppState::SyncQueued,
+                "Waiting for another folder to finish…",
+            );
+            assert_eq!(
+                row.row.subtitle().as_deref(),
+                Some("Waiting for another folder to finish…")
+            );
             reset_locale();
         });
     }
