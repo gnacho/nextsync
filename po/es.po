@@ -2541,6 +2541,10 @@ msgstr "Proveedor de sincronización"
 msgid "Synchronization blocked: password keyring is locked"
 msgstr "Sincronización bloqueada: el almacén de contraseñas está bloqueado"
 
+#: src/core/account_runtime.rs
+msgid "Synchronization blocked: the server is unreachable"
+msgstr "Sincronización bloqueada: el servidor no está disponible"
+
 #: src/core/scheduler.rs
 msgid "Waiting for local changes to settle"
 msgstr "Esperando a que los cambios locales se asienten"
@@ -2583,8 +2587,12 @@ msgid "Waiting for a network connection"
 msgstr "Esperando una conexión de red"
 
 #: src/core/scheduler.rs
-msgid "Waiting for another account to finish…"
-msgstr "Esperando a que otra cuenta termine…"
+msgid "Waiting for another folder to finish…"
+msgstr "Esperando a que termine otra carpeta…"
+
+#: src/core/scheduler.rs
+msgid "Waiting for {folder} to finish…"
+msgstr "Esperando a que termine {folder}…"
 
 #: src/core/scheduler.rs
 msgid "Will pause after the current synchronization"

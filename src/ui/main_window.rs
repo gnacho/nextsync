@@ -194,16 +194,11 @@ impl AccountView {
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(8)
             .build();
-        let connected = !matches!(
-            runtime.state().snapshot().state,
-            crate::state::AppState::Offline | crate::state::AppState::Error
-        );
         let light = gtk4::Image::builder().pixel_size(22).build();
-        light.set_icon_name(Some(if connected {
-            "nextsync-state-globe"
-        } else {
-            "nextsync-state-globe-off"
-        }));
+        // Issue #165: use the same severity mapping the live subscription
+        // applies (summary_light_for), so the initial render and the updates
+        // agree instead of flipping between globes and status icons.
+        light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
         line_one.append(&light);
         // The status label doubles as the anti-race guard for the
         // background quota fetch (detached rows keep their text).
@@ -1906,15 +1901,26 @@ pub fn summary_light_for(state: crate::state::AppState) -> &'static str {
     }
 }
 
-/// The connection text for the account summary card. Only `Offline` reads
-/// "Not connected"; every other state implies the server is reachable (the
-/// light already carries the severity, issue #129).
+/// The connection text for the account summary card, mirroring the severity
+/// the light already conveys (issue #129): not just "Connected", but a text
+/// that matches the state so the card is not contradictory (issue #165).
+///
+/// - Healthy/paused/queued/syncing states read "Connected" (or a specific
+///   positive/neutral status) — the server is reachable.
+/// - `Offline` reads "Not connected".
+/// - Problem states (error/auth/keyring/delete review) do not read
+///   "Connected": they surface a clear attention message instead of a lying
+///   green-ish label next to a red light.
 pub fn summary_connection_text(state: crate::state::AppState) -> &'static str {
     use crate::state::AppState;
-    if state == AppState::Offline {
-        t("Not connected")
-    } else {
-        t("Connected")
+    match state {
+        AppState::Offline => t("Not connected"),
+        AppState::Error => t("Synchronization failed"),
+        AppState::AuthRequired => t("Credentials rejected"),
+        AppState::KeyringLocked => t("Password keyring is locked"),
+        AppState::DeleteReview => t("Review deletions"),
+        AppState::Unconfigured => t("Not connected"),
+        _ => t("Connected"),
     }
 }
 
@@ -2237,6 +2243,34 @@ mod tests {
             summary_light_for(AppState::DeleteReview),
             "nextsync-status-error"
         );
+    }
+
+    #[test]
+    fn summary_connection_text_matches_the_light() {
+        // Issue #165: the text must not contradict the light. Problem states
+        // read a clear message (the red light), not a lying "Connected".
+        use crate::state::AppState;
+        set_locale(Locale::English);
+        assert_eq!(summary_connection_text(AppState::IdleOk), "Connected");
+        assert_eq!(summary_connection_text(AppState::Syncing), "Connected");
+        assert_eq!(summary_connection_text(AppState::Offline), "Not connected");
+        assert_eq!(
+            summary_connection_text(AppState::Error),
+            "Synchronization failed"
+        );
+        assert_eq!(
+            summary_connection_text(AppState::AuthRequired),
+            "Credentials rejected"
+        );
+        assert_eq!(
+            summary_connection_text(AppState::KeyringLocked),
+            "Password keyring is locked"
+        );
+        assert_eq!(
+            summary_connection_text(AppState::DeleteReview),
+            "Review deletions"
+        );
+        reset_locale();
     }
 
     #[test]

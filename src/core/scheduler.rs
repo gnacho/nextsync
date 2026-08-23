@@ -611,10 +611,15 @@ impl SchedulerInner {
             };
             if !acquired {
                 self.queue.extend(reasons.iter().copied());
-                self.state.set(
-                    AppState::SyncQueued,
-                    t("Waiting for another account to finish…"),
-                );
+                // Issue #165: name the folder the queue is waiting on (when it
+                // is a tracked holder), instead of the generic "another
+                // account" wording. Falls back to the generic message when no
+                // tracked folder is available.
+                let message = match permit.active_folder_name() {
+                    Some(name) => t("Waiting for {folder} to finish…").replace("{folder}", &name),
+                    None => t("Waiting for another folder to finish…").to_string(),
+                };
+                self.state.set(AppState::SyncQueued, message);
                 let source = self.source.clone();
                 let weak = self.self_ref.clone();
                 permit.wait_for_release(Box::new(move || {

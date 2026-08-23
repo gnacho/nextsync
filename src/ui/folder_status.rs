@@ -771,11 +771,11 @@ mod tests {
             // #165).
             state.set(
                 AppState::SyncQueued,
-                "Waiting for another account to finish…",
+                "Waiting for another folder to finish…",
             );
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Waiting for another account to finish…")
+                Some("Waiting for another folder to finish…")
             );
             state.set(AppState::IdleOk, "ok");
             assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
@@ -823,11 +823,11 @@ mod tests {
             // shows it instead of the generic label.
             state.set(
                 AppState::SyncQueued,
-                "Waiting for another account to finish…",
+                "Waiting for another folder to finish…",
             );
             assert_eq!(
                 row.row.subtitle().as_deref(),
-                Some("Waiting for another account to finish…")
+                Some("Waiting for another folder to finish…")
             );
             reset_locale();
         });
