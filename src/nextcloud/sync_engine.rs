@@ -248,6 +248,7 @@ impl SyncEngine {
 
 impl SyncRunner for SyncEngine {
     fn start(&mut self, _reasons: &[Trigger], on_finished: Box<dyn FnOnce(SyncOutcome) + 'static>) {
+        let account_id = self.account.id.clone();
         let account = self.account.clone();
         let folder = self.folder.clone();
         let network = self.network.clone();
@@ -274,8 +275,22 @@ impl SyncRunner for SyncEngine {
                 Err(_) => EngineRun::Direct(SyncOutcome::Failed),
             };
             match run {
-                EngineRun::Result(result) => on_finished(result.outcome()),
-                EngineRun::Direct(outcome) => on_finished(outcome),
+                EngineRun::Result(result) => {
+                    let outcome = result.outcome();
+                    // Issue #178: a proven-dead password must leave the
+                    // in-memory cache so the next lookup re-reads the
+                    // keyring (e.g. after the user signs in again).
+                    if matches!(outcome, SyncOutcome::AuthFailed) {
+                        CredentialsStore::invalidate(&account_id);
+                    }
+                    on_finished(outcome);
+                }
+                EngineRun::Direct(outcome) => {
+                    if matches!(outcome, SyncOutcome::AuthFailed) {
+                        CredentialsStore::invalidate(&account_id);
+                    }
+                    on_finished(outcome);
+                }
             }
         });
     }
@@ -939,6 +954,33 @@ mod tests {
         }));
         let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
         assert_eq!(outcome, SyncOutcome::AuthFailed);
+    }
+
+    /// Issue #178: when a run proves the password dead, the cached copy must
+    /// be dropped so the next lookup re-reads the keyring instead of
+    /// replaying the stale secret (e.g. after the user signs in again).
+    #[test]
+    fn auth_failed_outcome_invalidates_the_cached_password() {
+        let account = account();
+        crate::nextcloud::credentials::seed_cache_for_tests(&account.id, "stale-secret");
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account,
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(PathBuf::from("/bin/false")),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "stale-secret".to_string(),
+        ))))
+        .with_remote_ensurer(Arc::new(|_account, _folder, _password| {
+            Err(ApiError::AuthRejected)
+        }));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::AuthFailed);
+        assert!(crate::nextcloud::credentials::cached_for_tests("test-account").is_none());
     }
 
     /// Issue #162: a transport failure (the server itself does not answer)
