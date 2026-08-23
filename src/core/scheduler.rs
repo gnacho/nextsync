@@ -34,6 +34,14 @@ pub const DEBOUNCE_MS: u64 = 2000;
 /// Cooldown after a sync finishes before the next one may start (s).
 pub const COOLDOWN_SECONDS: u64 = 4;
 
+/// Issue #170: budget of back-to-back keyring retries before the folder parks
+/// in the keyring-locked state. A transiently-unavailable Secret Service (bus
+/// coming up after login) recovers within these, but a genuinely locked
+/// collection must not retry forever.
+pub const KEYRING_RETRY_MAX: u32 = 5;
+/// Starting retry delay for the keyring backoff (ms); each attempt doubles it.
+pub const KEYRING_RETRY_BASE_MS: u64 = 2000;
+
 /// How a finished reconciliation turned out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncOutcome {
@@ -118,6 +126,11 @@ struct SchedulerInner {
     inotify_during_sync: bool,
     feedback_followup_pending: bool,
     keyring_locked: bool,
+    /// Issue #170: how many times the keyring retry has run back-to-back.
+    /// A transient locked service recovers on its own, but a genuinely
+    /// locked collection must not retry forever: once the budget is spent the
+    /// folder parks in the keyring-locked state until a manual action.
+    keyring_retry_count: u32,
     delete_alert: Option<DeleteAlert>,
     delete_bypass_once: bool,
     /// Whether a synchronization has ever completed successfully. Drives the
@@ -186,6 +199,7 @@ impl Scheduler {
             inotify_during_sync: false,
             feedback_followup_pending: false,
             keyring_locked: false,
+            keyring_retry_count: 0,
             delete_alert: None,
             delete_bypass_once: false,
             ever_synced: false,
@@ -515,6 +529,36 @@ impl SchedulerInner {
         self.start_source = Some(id);
     }
 
+    /// Schedule a keyring retry with a capped exponential backoff (issue
+    /// #170). Once the retry budget is exhausted the folder stays in the
+    /// keyring-locked state and waits for a manual action instead of retrying
+    /// forever. The retry re-enters `start` on a timer WITHOUT changing the
+    /// visible state, so the informative keyring-locked label is preserved
+    /// while it re-attempts.
+    fn schedule_keyring_retry(&mut self) {
+        if self.stopped
+            || self.start_source.is_some()
+            || self.preparing
+            || self.running
+            || self.keyring_retry_count >= KEYRING_RETRY_MAX
+        {
+            return;
+        }
+        let attempt = self.keyring_retry_count;
+        self.keyring_retry_count += 1;
+        let delay = Duration::from_millis(KEYRING_RETRY_BASE_MS << attempt.min(4));
+        let weak = self.self_ref.clone();
+        let id = self.source.borrow_mut().add_timeout(
+            delay,
+            Box::new(move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.borrow_mut().start();
+                }
+            }),
+        );
+        self.start_source = Some(id);
+    }
+
     fn start(&mut self) {
         self.start_source = None;
         if self.stopped || self.preparing || self.running || self.queue.is_empty() || !self.online {
@@ -667,6 +711,7 @@ impl SchedulerInner {
         let (ran, conflicted) = match outcome {
             SyncOutcome::Success => {
                 self.keyring_locked = false;
+                self.keyring_retry_count = 0;
                 self.auth_required = false;
                 self.ever_synced = true;
                 self.set_idle_state();
@@ -674,6 +719,7 @@ impl SchedulerInner {
             }
             SyncOutcome::Conflict => {
                 self.keyring_locked = false;
+                self.keyring_retry_count = 0;
                 self.auth_required = false;
                 self.ever_synced = true;
                 self.state.set(
@@ -784,6 +830,17 @@ impl SchedulerInner {
             self.state.set_progress(None);
             if let Some(permit) = &self.permit {
                 permit.release();
+            }
+            // Issue #170: a keyring-locked outcome is often transient — the
+            // Secret Service may not be up right after login. Rather than
+            // waiting for the next external trigger (which may never come
+            // within the session), schedule a capped backoff retry so the next
+            // run re-reads the credentials and clears the flag once the
+            // service is ready. The retry does not touch the visible
+            // keyring-locked state.
+            if matches!(outcome, SyncOutcome::KeyringLocked) {
+                self.queue.add(Trigger::Retry);
+                self.schedule_keyring_retry();
             }
         }
     }
@@ -1285,16 +1342,68 @@ mod tests {
         assert!(scheduler.keyring_locked());
         assert_eq!(scheduler.state().snapshot().state, AppState::KeyringLocked);
 
-        // Issue #85: an automatic trigger retries the run instead of parking
-        // the folder in needs-attention; the keyring may have come up in the
-        // meantime and the lookup is cheap.
+        // An automatic trigger queues up (the keyring retry is already
+        // pending from the locked outcome), so it does not start a second,
+        // parallel run; the existing retry still re-enters the engine and
+        // recovers once the service is ready.
         scheduler.request(Trigger::LocalInotify);
-        assert_eq!(scheduler.queue_len(), 1);
-        run_idle(&source);
+        // The keyring retry (queued from the locked outcome) plus this trigger.
+        assert_eq!(scheduler.queue_len(), 2);
+        let retry_id = source.borrow().only_id();
+        fire_timer(&source, retry_id);
         assert_eq!(runner.0.borrow().start_calls, 2);
         finish(&runner, SyncOutcome::Success);
         assert!(!scheduler.keyring_locked());
         assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    /// Issue #170: a keyring-locked outcome schedules its own backoff retry,
+    /// so the folder recovers as soon as the Secret Service is ready even if
+    /// no external trigger arrives later in the session.
+    #[test]
+    fn keyring_locked_schedules_its_own_retry() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Startup);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+        finish(&runner, SyncOutcome::KeyringLocked);
+        assert!(scheduler.keyring_locked());
+        assert_eq!(scheduler.state().snapshot().state, AppState::KeyringLocked);
+
+        // A backoff retry is already pending without any new external trigger:
+        // firing it re-enters the engine (the visible state stays keyring
+        // locked while it re-attempts).
+        assert_eq!(source.borrow().pending(), 1);
+        let retry_id = source.borrow().only_id();
+        fire_timer(&source, retry_id);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        finish(&runner, SyncOutcome::Success);
+        assert!(!scheduler.keyring_locked());
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    /// Issue #170: the keyring retry has a capped budget, so a genuinely
+    /// locked collection does not retry forever.
+    #[test]
+    fn keyring_retry_budget_is_capped() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Startup);
+        run_idle(&source);
+        // Burn the whole retry budget with back-to-back locked outcomes.
+        let mut calls = 1;
+        loop {
+            finish(&runner, SyncOutcome::KeyringLocked);
+            if source.borrow().pending() == 0 {
+                break;
+            }
+            let retry_id = source.borrow().only_id();
+            fire_timer(&source, retry_id);
+            calls += 1;
+        }
+        assert_eq!(calls, 1 + KEYRING_RETRY_MAX as usize);
+        // No more retries are scheduled; the folder is parked keyring-locked.
+        assert_eq!(source.borrow().pending(), 0);
+        assert!(scheduler.keyring_locked());
     }
 
     #[test]
