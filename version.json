@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "version": "0.1.6",
+  "version": "0.1.8",
   "mandatory": false,
-  "summary": "Accounts whose server is unreachable now show as Not connected instead of staying Connected and spinning.",
+  "summary": "Folder rows explain why they are waiting, conflicts stop looping, and the account summary no longer contradicts its status light.",
   "changelog": [
-    "A folder whose server does not answer (for example a host that went down or a dynamic IP that stopped resolving) is now marked Offline instead of stuck in a waiting/syncing loop, and its account no longer reads as Connected (issue #162).",
-    "The engine does not launch nextcloudcmd against an unreachable server: the remote-folder ensure step detects the transport failure and the sync ends immediately with a clear Offline state.",
-    "The change is per account and per folder: accounts with a reachable server keep working untouched."
+    "A folder row that is queued behind the shared synchronization permit now names the folder it is waiting on ('Waiting for <folder> to finish…') instead of a generic wait (issue #165).",
+    "A run that ends with conflicted copies no longer re-queues the local feedback, so a folder with unresolved conflicts stops bouncing into a sync loop; it stays in the review-the-log state until the user addresses it (issue #165).",
+    "The account summary card no longer reads 'Connected' next to a red status light: the text now matches the severity (error, credentials rejected, keyring locked, delete review, not connected).",
+    "Spanish: the deletion-guard wording uses 'borrados masivos' instead of 'eliminaciones'."
   ],
   "released_at": "2026-08-23T00:00:00Z"
 }
