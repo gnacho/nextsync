@@ -97,7 +97,7 @@ msgstr "Restaurar desde Nextcloud"
 
 #: src/nextsync/application.py:634
 msgid "Approve These Deletions Once"
-msgstr "Aprobar estas eliminaciones una vez"
+msgstr "Aprobar estos borrados masivos una vez"
 
 #: src/nextsync/application.py:656
 msgid "Finishing synchronization"
@@ -950,11 +950,11 @@ msgstr "Llavero de contraseñas bloqueado"
 
 #: src/nextsync/ui/folder_status.py:29 src/nextsync/ui/main_window.py:148
 msgid "Review Deletions"
-msgstr "Revisar eliminaciones"
+msgstr "Revisar borrados masivos"
 
 #: src/ui/folder_status.rs
 msgid "Review deletions"
-msgstr "Revisar eliminaciones"
+msgstr "Revisar borrados masivos"
 
 #: src/nextsync/ui/folder_status.py:97
 msgid "Folder options"
@@ -2640,7 +2640,7 @@ msgstr "Estos borrados se propagarán al servidor al sincronizar."
 
 #: src/ui/main_window.rs
 msgid "No deletions are pending review."
-msgstr "No hay eliminaciones pendientes de revisión."
+msgstr "No hay borrados masivos pendientes de revisión."
 
 #: src/ui/conflict_resolver.rs
 msgid "Deletions"
