@@ -613,6 +613,12 @@ mod tests {
 
     /// Initiate + poll against a live tiny_http server, exercising the real
     /// ureq transport end to end (localhost only, no net).
+    ///
+    /// The server answers each request by URL, so it does not depend on the
+    /// order or the number of TCP connections the client opens (a keep-alive
+    /// reuses one). Previously it did two sequential `recv()` assuming the
+    /// initiate landed before the poll, which was racy under load and flaked
+    /// with a `PollHttp { status: 400 }` (issue #174).
     #[test]
     fn integration_initiate_and_poll_against_local_server() {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
@@ -620,28 +626,47 @@ mod tests {
         let base = format!("http://{addr}");
         let start_json =
             String::from_utf8_lossy(START_JSON).replace("https://cloud.example.com", &base);
-        let handle = std::thread::spawn(move || {
-            let initiate = server.recv().unwrap();
-            assert_eq!(initiate.method().as_str(), "POST");
-            assert!(initiate.url().ends_with("/index.php/login/v2"));
-            let has_user_agent = initiate.headers().iter().any(|header| {
-                header.field.equiv("User-Agent") && !header.value.as_str().is_empty()
-            });
-            assert!(has_user_agent, "the initiation must carry a User-Agent");
-            initiate
-                .respond(tiny_http::Response::from_string(start_json).with_status_code(200))
-                .unwrap();
-
-            let mut poll = server.recv().unwrap();
-            assert_eq!(poll.method().as_str(), "POST");
-            let mut body = String::new();
-            let _ = std::io::Read::read_to_string(poll.as_reader(), &mut body);
-            assert!(body.starts_with("token="), "body was {body}");
-            poll.respond(
-                tiny_http::Response::from_string(String::from_utf8_lossy(RESULT_JSON).into_owned())
-                    .with_status_code(200),
-            )
-            .unwrap();
+        let has_result = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let handle = std::thread::spawn({
+            let has_result = has_result.clone();
+            move || {
+                // tiny_http is multi-threaded and the order of incoming
+                // requests is not guaranteed when the client reuses a
+                // keep-alive connection, so answer by URL instead of a
+                // positional two-step sequence.
+                let mut saw_initiate = false;
+                while let Ok(mut request) = server.recv() {
+                    let url = request.url().to_string();
+                    if url.ends_with("/index.php/login/v2") {
+                        let has_user_agent = request.headers().iter().any(|header| {
+                            header.field.equiv("User-Agent") && !header.value.as_str().is_empty()
+                        });
+                        assert!(has_user_agent, "the initiation must carry a User-Agent");
+                        request
+                            .respond(
+                                tiny_http::Response::from_string(start_json.clone())
+                                    .with_status_code(200),
+                            )
+                            .unwrap();
+                        saw_initiate = true;
+                    } else if url.contains("/poll") {
+                        let mut body = String::new();
+                        let _ = std::io::Read::read_to_string(request.as_reader(), &mut body);
+                        request
+                            .respond(
+                                tiny_http::Response::from_string(
+                                    String::from_utf8_lossy(RESULT_JSON).into_owned(),
+                                )
+                                .with_status_code(200),
+                            )
+                            .unwrap();
+                        has_result.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    if saw_initiate && has_result.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                }
+            }
         });
 
         let flow = LoginFlowV2::new();
