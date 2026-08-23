@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.2.0",
+  "version": "0.2.2",
   "mandatory": false,
   "summary": "Coherent waiting message and a self-healing retry for a transiently locked keyring.",
   "changelog": [

@@ -2,7 +2,7 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
-## [0.2.0] - 2026-08-23
+## [0.2.2] - 2026-08-23
 
 ### Corregido
 - **Mensaje de espera coherente (#169)**: cuando varias carpetas estaban en cola tras el permiso global de sincronización, todas repetían "Esperando a que termine <carpeta>…" (y podían nombrar una carpeta que ya estaba sincronizada). Ahora solo la carpeta que está la primera en la cola nombra a la que espera; el resto muestran el genérico "Esperando a que termine otra carpeta…".
