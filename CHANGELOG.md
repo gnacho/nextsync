@@ -2,6 +2,16 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.1.8] - 2026-08-23
+
+### Corregido
+- **Las filas explican por qué esperan (#165)**: cuando una carpeta está en cola detrás del permiso global de sincronización, la fila ya no muestra solo "A la espera", sino el motivo con el nombre de la carpeta que está sincronizando ("Esperando a que termine <carpeta>…"). Antes era genérico y no se sabía a qué se esperaba.
+- **Un conflicto ya no entra en bucle (#165)**: si una sincronización termina con copias en conflicto, la app dejaba de re-encolar el feedback local y la carpeta entraba en un ciclo de re-sincronización (una carpeta grande con conflictos sin resolver rebotaba sin parar mientras las demás esperaban). Ahora se queda en "revisa el registro" hasta que lo resuelvas, y solo los disparos de intervalo/remoto reintentan.
+- **El resumen de cuenta es coherente con el icono (#165)**: antes podía decir "Conectado" junto a una luz roja, porque el texto solo distinguía "Sin conexión" mientras el icono marcaba la severidad. Ahora el texto acompaña a la luz: error de sincronización, credenciales rechazadas, almacén de contraseñas bloqueado, revisar borrados masivos o sin conexión.
+
+### Cambiado
+- **Terminología ES del guard de borrado**: "eliminaciones" pasa a "borrados masivos" en las cadenas del guard (review, aprobar, ninguna pendiente).
+
 ## [0.1.6] - 2026-08-23
 
 ### Corregido
