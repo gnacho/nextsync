@@ -479,6 +479,9 @@ pub fn outcome_log_line(outcome: &crate::core::scheduler::SyncOutcome) -> &'stat
             t("Synchronization blocked: password keyring is locked")
         }
         crate::core::scheduler::SyncOutcome::Failed => t("Synchronization failed — view the log"),
+        crate::core::scheduler::SyncOutcome::NetworkError => {
+            t("Synchronization blocked: the server is unreachable")
+        }
     }
 }
 
@@ -1941,8 +1944,10 @@ mod tests {
             SyncOutcome::Success,
             SyncOutcome::Conflict,
             SyncOutcome::AuthFailed,
+            SyncOutcome::NoCredentials,
             SyncOutcome::KeyringLocked,
             SyncOutcome::Failed,
+            SyncOutcome::NetworkError,
         ] {
             let line = outcome_log_line(&outcome);
             assert!(!line.is_empty(), "English label for {outcome:?}");

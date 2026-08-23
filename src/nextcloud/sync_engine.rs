@@ -340,9 +340,16 @@ fn engine_thread(
     // `nextcloudcmd` exits 1 with no output when the remote folder does not
     // exist; create it (and its parents) first. Auth rejection surfaces as
     // such; anything else falls through and lets nextcloudcmd report.
+    // Issue #162: a transport failure (the server itself does not answer)
+    // must not launch nextcloudcmd against an unreachable host. Return a
+    // NetworkError outcome so the scheduler marks this folder Offline and the
+    // account stops reading as Connected.
     if let Some(ensure) = inputs.remote_ensurer.as_ref() {
-        if let Err(ApiError::AuthRejected) = ensure(&inputs.account, &inputs.folder, &password) {
-            return EngineRun::Direct(SyncOutcome::AuthFailed);
+        match ensure(&inputs.account, &inputs.folder, &password) {
+            Ok(()) => {}
+            Err(ApiError::AuthRejected) => return EngineRun::Direct(SyncOutcome::AuthFailed),
+            Err(ApiError::Transport) => return EngineRun::Direct(SyncOutcome::NetworkError),
+            Err(_) => {}
         }
     }
     let driver = driver_for(inputs.account.provider);
@@ -932,6 +939,31 @@ mod tests {
         }));
         let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
         assert_eq!(outcome, SyncOutcome::AuthFailed);
+    }
+
+    /// Issue #162: a transport failure (the server itself does not answer)
+    /// must short-circuit to NetworkError without spawning nextcloudcmd. The
+    /// fake binary is /bin/false, so if the engine spawned it the run would
+    /// end Failed instead; Transport must prevent the spawn entirely.
+    #[test]
+    fn remote_ensurer_transport_failure_short_circuits_to_network_error() {
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(PathBuf::from("/bin/false")),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_remote_ensurer(Arc::new(|_account, _folder, _password| {
+            Err(ApiError::Transport)
+        }));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::NetworkError);
     }
 
     #[test]

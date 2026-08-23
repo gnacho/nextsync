@@ -49,6 +49,10 @@ pub enum SyncOutcome {
     NoCredentials,
     /// The synchronization failed (any other error).
     Failed,
+    /// The account's server is unreachable (transport failure). Treated as
+    /// Offline for that account only: the machine has a network link but the
+    /// specific server does not answer (issue #162).
+    NetworkError,
 }
 
 /// Executes a reconciliation. Implemented by the sync engine in Task 2.3.
@@ -695,6 +699,19 @@ impl SchedulerInner {
                 self.state
                     .set(AppState::Error, t("Synchronization failed — view the log"));
                 true
+            }
+            SyncOutcome::NetworkError => {
+                // Issue #162: the server itself is unreachable even though the
+                // machine has a network link. Mark this folder Offline (with
+                // its own message) so the account no longer reads as Connected
+                // and stops spinning in a wait loop. The periodic/module
+                // triggers retry on the next tick, so it clears once the
+                // server answers again. This only applies to the failing
+                // account/folder, never to other accounts.
+                self.keyring_locked = false;
+                self.state
+                    .set(AppState::Offline, t("Waiting for a network connection"));
+                false
             }
         };
         // Fase 3: after a successful run the guard baseline is refreshed so
@@ -1537,6 +1554,30 @@ mod tests {
         run_idle(&source);
         finish(&runner, SyncOutcome::Failed);
         assert_eq!(scheduler.state().snapshot().state, AppState::Error);
+    }
+
+    /// Issue #162: an unreachable server (transport failure) marks the folder
+    /// Offline instead of Connected, and does not arm the credential gate or
+    /// leave the account spinning. The scheduler keeps retrying on the next
+    /// automatic trigger, so it recovers once the server answers again.
+    #[test]
+    fn network_error_sets_offline_and_recovers_on_retry() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::NetworkError);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+        assert!(!scheduler.auth_required());
+        assert!(!scheduler.keyring_locked());
+
+        // A later automatic trigger retries (unlike the credential gate, which
+        // defers): the run starts again and, when the server answers, the
+        // folder is no longer Offline.
+        scheduler.request(Trigger::RemoteInterval);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
     }
 
     #[test]
