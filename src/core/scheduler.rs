@@ -611,13 +611,20 @@ impl SchedulerInner {
             };
             if !acquired {
                 self.queue.extend(reasons.iter().copied());
-                // Issue #165: name the folder the queue is waiting on (when it
-                // is a tracked holder), instead of the generic "another
-                // account" wording. Falls back to the generic message when no
-                // tracked folder is available.
-                let message = match permit.active_folder_name() {
-                    Some(name) => t("Waiting for {folder} to finish…").replace("{folder}", &name),
-                    None => t("Waiting for another folder to finish…").to_string(),
+                // Issue #165/#169: name the folder the queue is waiting on only
+                // when this scheduler is the next in line (no waiters ahead of
+                // it). Behind it the message stays generic, so a run of many
+                // queued folders does not repeat the same folder name on every
+                // row and does not name one that may already be done.
+                let message = if permit.waiter_count() == 0 {
+                    match permit.active_folder_name() {
+                        Some(name) => {
+                            t("Waiting for {folder} to finish…").replace("{folder}", &name)
+                        }
+                        None => t("Waiting for another folder to finish…").to_string(),
+                    }
+                } else {
+                    t("Waiting for another folder to finish…").to_string()
                 };
                 self.state.set(AppState::SyncQueued, message);
                 let source = self.source.clone();
@@ -1310,6 +1317,45 @@ mod tests {
         assert_eq!(source_second.borrow().pending(), 1);
         run_idle(&source_second);
         assert_eq!(runner_second.0.borrow().start_calls, 1);
+    }
+
+    /// Issue #169: only the head of the wait queue names the folder it is
+    /// waiting on; the schedulers behind it use the generic wording instead
+    /// of repeating the same folder name / naming one that may already finish.
+    #[test]
+    fn queued_schedulers_only_name_the_holder_at_the_head() {
+        let permit = SyncPermit::try_new(1).unwrap();
+        let root = tempfile::tempdir().expect("tempdir");
+        let (first, source_first, runner_first) = make_scheduler(Some(permit.clone()));
+        first.set_local_root(Some(std::path::PathBuf::from(root.path())));
+        let (second, source_second, _runner_second) = make_scheduler(Some(permit.clone()));
+        second.set_local_root(Some(root.path().join("a")));
+        let (third, source_third, _runner_third) = make_scheduler(Some(permit.clone()));
+        third.set_local_root(Some(root.path().join("b")));
+
+        // The holder runs; two schedulers queue behind it.
+        first.request(Trigger::Manual);
+        run_idle(&source_first);
+        assert_eq!(runner_first.0.borrow().start_calls, 1);
+        assert!(permit.active_folder_name().is_some());
+
+        second.request(Trigger::Manual);
+        run_idle(&source_second);
+        // Only one waiter so far: it is the head and names the folder.
+        let expected = format!(
+            "Waiting for {} to finish…",
+            root.path().file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(second.state().snapshot().message, expected);
+
+        third.request(Trigger::Manual);
+        run_idle(&source_third);
+        // The third is behind the second: it uses the generic wording, not the
+        // same folder name as the head.
+        assert_eq!(
+            third.state().snapshot().message,
+            "Waiting for another folder to finish…"
+        );
     }
 
     /// Issue #154: the startup backlog runs strictly one folder at a time in

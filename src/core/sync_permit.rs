@@ -155,6 +155,14 @@ impl SyncPermit {
             .map(str::to_owned)
     }
 
+    /// How many schedulers are currently waiting for a release (issue #169).
+    /// A scheduler with zero waiters ahead of it is the head of the queue and
+    /// can name the folder it is waiting on; anyone behind it should use the
+    /// generic wording instead of repeating the same folder name.
+    pub fn waiter_count(&self) -> usize {
+        self.inner.borrow().waiters.len()
+    }
+
     /// Release one slot and wake the oldest waiter, if any.
     ///
     /// The woken callback runs synchronously (Python semantics); it must not
