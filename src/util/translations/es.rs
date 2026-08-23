@@ -391,6 +391,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Synchronization blocked", "Sincronización bloqueada"),
     ("Synchronization blocked: no saved credentials", "Sincronización bloqueada: no hay credenciales guardadas"),
     ("Synchronization blocked: password keyring is locked", "Sincronización bloqueada: el almacén de contraseñas está bloqueado"),
+    ("Synchronization blocked: the server is unreachable", "Sincronización bloqueada: el servidor no está disponible"),
     ("Synchronization completed", "Sincronización completada"),
     ("Synchronization completed with conflicts", "Sincronización completada con conflictos"),
     ("Synchronization failed", "Error de sincronización"),
