@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.1.6] - 2026-08-23
+
+### Corregido
+- **Cuenta sin conexión cuando el servidor no responde (#162)**: antes el estado "sin conexión" solo venía del monitor de red de la máquina, así que con la red en orden pero el servidor caído (un host que se apaga o un IP dinámica que deja de resolver) la cuenta seguía mostrando "Conectado" y las carpetas se quedaban en un bucle de "sincronizando/a la espera" mientras el motor colgaba contra el servidor inaccesible. Ahora un fallo de transporte en el paso de preparación del directorio remoto marca esa carpeta como "Sin conexión", la cuenta deja de decir "Conectado" y no se lanza el motor contra un servidor inaccesible.
+- **El cambio es por cuenta y por carpeta**: una cuenta con el servidor inalcanzable pasa a "Sin conexión", mientras las cuentas con servidor accesible siguen sincronizando sin afectarse.
+- **Recuperación automática**: en el siguiente disparo automático, si el servidor ya responde, la carpeta vuelve a sincronizar sola.
+
 ## [0.1.4] - 2026-08-22
 
 ### Nota de versionado
