@@ -1278,24 +1278,77 @@ impl MainWindow {
 
         // List the files the guard detected as missing (issue #115), capped so
         // a very large deletion stays readable; the count above stays exact.
+        // Issue #182: paths are grouped by their top-level directory so a
+        // mass cleanup (a removed SDK, virtualenv or build cache) shows a
+        // handful of expandable groups instead of a wall of paths.
         if !missing.is_empty() {
-            const CAP: usize = 100;
+            const GROUP_ROW_CAP: usize = 100;
+            const GROUP_CHILD_CAP: usize = 25;
+            const TOTAL_CHILD_CAP: usize = 200;
             let list = gtk4::ListBox::builder()
                 .css_classes(["boxed-list"])
                 .selection_mode(gtk4::SelectionMode::None)
                 .build();
-            for path in missing.iter().take(CAP) {
-                let row = libadwaita::ActionRow::builder()
-                    .title(path)
-                    .activatable(false)
-                    .selectable(false)
-                    .build();
-                list.append(&row);
+            let review_rows = crate::core::delete_guard::deletion_review_rows(&missing);
+            let mut shown_rows = 0usize;
+            let mut shown_children = 0usize;
+            let mut truncated = false;
+            for review_row in &review_rows {
+                if shown_rows >= GROUP_ROW_CAP {
+                    truncated = true;
+                    break;
+                }
+                match review_row {
+                    crate::core::delete_guard::DeletionReviewRow::Group {
+                        prefix,
+                        count,
+                        paths,
+                    } => {
+                        let group_row = libadwaita::ExpanderRow::builder()
+                            .title(prefix)
+                            .subtitle(t("{count} files").replace("{count}", &count.to_string()))
+                            .build();
+                        group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
+                        for path in paths.iter().take(GROUP_CHILD_CAP) {
+                            if shown_children >= TOTAL_CHILD_CAP {
+                                truncated = true;
+                                break;
+                            }
+                            let child = libadwaita::ActionRow::builder()
+                                .title(path)
+                                .activatable(false)
+                                .selectable(false)
+                                .build();
+                            group_row.add_row(&child);
+                            shown_children += 1;
+                        }
+                        if paths.len() > GROUP_CHILD_CAP {
+                            let more = libadwaita::ActionRow::builder()
+                                .title(t("{count} more…").replace(
+                                    "{count}",
+                                    &(paths.len() - GROUP_CHILD_CAP).to_string(),
+                                ))
+                                .activatable(false)
+                                .selectable(false)
+                                .build();
+                            group_row.add_row(&more);
+                        }
+                        list.append(&group_row);
+                        shown_rows += 1;
+                    }
+                    crate::core::delete_guard::DeletionReviewRow::File(path) => {
+                        let row = libadwaita::ActionRow::builder()
+                            .title(path)
+                            .activatable(false)
+                            .selectable(false)
+                            .build();
+                        list.append(&row);
+                        shown_rows += 1;
+                    }
+                }
             }
-            let note = if missing_len > CAP {
-                t("Showing {count} of {total} files.")
-                    .replace("{count}", &CAP.to_string())
-                    .replace("{total}", &missing_len.to_string())
+            let note = if truncated {
+                t("{count} more…").replace("{count}", &(review_rows.len() - shown_rows).to_string())
             } else {
                 t("These deletions will be propagated to the server when it synchronizes.")
                     .to_string()
