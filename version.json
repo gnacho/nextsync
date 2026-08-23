@@ -1,14 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.1.4",
+  "version": "0.1.6",
   "mandatory": false,
-  "summary": "Sequential startup syncs in a stable folder order, an About entry in the tray, and tray menu icons that stay readable on dark themes.",
+  "summary": "Accounts whose server is unreachable now show as Not connected instead of staying Connected and spinning.",
   "changelog": [
-    "Startup no longer hops between folders in a random order: the boot backlog runs one folder at a time in the configured order (issue #154).",
-    "The tray menu gains an About entry, last in the menu, showing the same dialog as the window (issue #155).",
-    "Tray menu icons use a theme-neutral gray so they read on dark themes, and Log/About no longer share or lose their glyphs (issue #157).",
-    "The project gains AppStream metainfo, community files and issue templates (issue #156).",
-    "New versioning scheme: numbering restarts at 0.1.4 and grows +0.0.2 per release."
+    "A folder whose server does not answer (for example a host that went down or a dynamic IP that stopped resolving) is now marked Offline instead of stuck in a waiting/syncing loop, and its account no longer reads as Connected (issue #162).",
+    "The engine does not launch nextcloudcmd against an unreachable server: the remote-folder ensure step detects the transport failure and the sync ends immediately with a clear Offline state.",
+    "The change is per account and per folder: accounts with a reachable server keep working untouched."
   ],
-  "released_at": "2026-08-22T00:00:00Z"
+  "released_at": "2026-08-23T00:00:00Z"
 }
