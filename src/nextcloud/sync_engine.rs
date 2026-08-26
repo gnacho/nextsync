@@ -140,6 +140,33 @@ impl SyncResult {
 pub type RemoteEnsurer =
     Arc<dyn Fn(&AccountConfig, &FolderConfig, &str) -> Result<(), ApiError> + Send + Sync>;
 
+/// Confirms the account server is alive and answering HTTP.
+///
+/// Issue #179: a `Failed` outcome alone cannot distinguish a broken folder
+/// from an unreachable server (a reverse proxy answering 502, a backend that
+/// stopped responding). When a run fails, the engine asks this probe "is the
+/// server actually up?"; a dead answer upgrades the outcome to
+/// [`SyncOutcome::NetworkError`] so the scheduler parks the account Offline
+/// instead of retrying a dead server forever.
+pub type HealthProbe = Arc<dyn Fn(&AccountConfig, &str) -> Result<(), ApiError> + Send + Sync>;
+
+/// Production [`HealthProbe`]: a short GET to the server's status endpoint.
+///
+/// Nextcloud answers `/status.php`; OpenCloud answers `/` with a status
+/// payload. Any 2xx/3xx means the server is up; a 5xx (proxy dead, backend
+/// down) or a transport error means it is not. Auth responses (401/403) are
+/// not part of the health probe - the account's own credential flow reports
+/// those.
+#[derive(Default)]
+pub struct ProductionHealthProbe;
+
+impl ProductionHealthProbe {
+    /// Run the health check for one account.
+    pub fn run(account: &AccountConfig) -> Result<(), ApiError> {
+        NextcloudApi::new().server_status(&account.server_url)
+    }
+}
+
 /// Production [`RemoteEnsurer`]: MKCOL the folder's remote path before the
 /// engine runs. Nextcloud creates it under the per-user files tree; OpenCloud
 /// under the folder's space (issue #55; both verified against real
@@ -196,6 +223,7 @@ pub struct SyncEngine {
     credentials: Arc<dyn CredentialSource>,
     process: Arc<Mutex<Option<Child>>>,
     remote_ensurer: Option<RemoteEnsurer>,
+    health_probe: Option<HealthProbe>,
 }
 
 impl SyncEngine {
@@ -222,6 +250,7 @@ impl SyncEngine {
             credentials: Arc::new(KeyringCredentialSource),
             process: Arc::new(Mutex::new(None)),
             remote_ensurer: None,
+            health_probe: None,
         }
     }
 
@@ -234,6 +263,13 @@ impl SyncEngine {
     /// Install the remote-folder ensure step (production wiring).
     pub fn with_remote_ensurer(mut self, ensurer: RemoteEnsurer) -> Self {
         self.remote_ensurer = Some(ensurer);
+        self
+    }
+
+    /// Install the server health probe (issue #179). Without it a Failed run
+    /// is never upgraded to NetworkError.
+    pub fn with_health_probe(mut self, probe: HealthProbe) -> Self {
+        self.health_probe = Some(probe);
         self
     }
 
@@ -258,6 +294,7 @@ impl SyncRunner for SyncEngine {
         let credentials = Arc::clone(&self.credentials);
         let process = Arc::clone(&self.process);
         let remote_ensurer = self.remote_ensurer.clone();
+        let health_probe = self.health_probe.clone();
         let inputs = EngineInputs {
             account,
             folder,
@@ -265,6 +302,7 @@ impl SyncRunner for SyncEngine {
             exclude_file,
             executable,
             remote_ensurer,
+            health_probe,
         };
         glib::spawn_future_local(async move {
             let run =
@@ -326,6 +364,7 @@ struct EngineInputs {
     exclude_file: Option<PathBuf>,
     executable: Option<PathBuf>,
     remote_ensurer: Option<RemoteEnsurer>,
+    health_probe: Option<HealthProbe>,
 }
 
 /// Run the whole reconciliation on the blocking thread pool.
@@ -364,6 +403,18 @@ fn engine_thread(
             Ok(()) => {}
             Err(ApiError::AuthRejected) => return EngineRun::Direct(SyncOutcome::AuthFailed),
             Err(ApiError::Transport) => return EngineRun::Direct(SyncOutcome::NetworkError),
+            // Issue #179: a 5xx from the server/proxy (a reverse proxy
+            // answering 502 because the backend is down) is not a folder
+            // problem - it is the account being unreachable. Confirm with a
+            // health probe before launching nextcloudcmd; a dead probe means
+            // the server is not answering and the run must not proceed.
+            Err(ApiError::Http { status }) if (500..600).contains(&status) => {
+                if let Some(probe) = inputs.health_probe.as_ref() {
+                    if probe(&inputs.account, &password).is_err() {
+                        return EngineRun::Direct(SyncOutcome::NetworkError);
+                    }
+                }
+            }
             Err(_) => {}
         }
     }
@@ -372,7 +423,7 @@ fn engine_thread(
         &inputs.account,
         &inputs.folder,
         &inputs.network,
-        password,
+        password.clone(),
         inputs.exclude_file.clone(),
         inputs.executable.clone(),
     );
@@ -445,6 +496,18 @@ fn engine_thread(
         output,
         classification,
     };
+    // Issue #179: a run that failed while the server does not answer a health
+    // probe means the account is unreachable (a proxy answering 502, the
+    // backend gone), not that the folder is broken. Upgrade to NetworkError so
+    // the scheduler parks the folder Offline and stops retrying a dead server
+    // on every trigger. A live probe keeps the folder-level Failed.
+    if result.classification == Classification::SyncError {
+        if let Some(probe) = inputs.health_probe.as_ref() {
+            if probe(&inputs.account, &password).is_err() {
+                return EngineRun::Direct(SyncOutcome::NetworkError);
+            }
+        }
+    }
     EngineRun::Result(result)
 }
 
@@ -1029,6 +1092,113 @@ mod tests {
         }));
         let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
         assert_eq!(outcome, SyncOutcome::Success);
+    }
+
+    /// Issue #179: a 5xx from the remote ensurer with a server that does not
+    /// answer a health probe must short-circuit to NetworkError WITHOUT
+    /// launching nextcloudcmd (a dead server should not be spawned against).
+    /// The fake binary writes a marker file, so its presence would prove the
+    /// engine ran; a dead health probe must prevent the spawn entirely.
+    #[test]
+    fn ensurer_http_5xx_with_dead_health_probe_short_circuits_to_network_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("engine-ran");
+        let script = write_script(
+            dir.path(),
+            "fake-engine-5xx-dead",
+            &format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+        );
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_remote_ensurer(Arc::new(|_account, _folder, _password| {
+            Err(ApiError::Http { status: 502 })
+        }))
+        .with_health_probe(Arc::new(|_account, _password| Err(ApiError::Transport)));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::NetworkError);
+        assert!(!marker.exists(), "nextcloudcmd must not be spawned");
+    }
+
+    /// Issue #179: a 5xx from the ensurer with a live health probe is a
+    /// folder-specific error, not a connectivity failure - the run proceeds.
+    #[test]
+    fn ensurer_http_5xx_with_live_health_probe_keeps_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(dir.path(), "fake-ensure-5xx-live", "#!/bin/sh\nexit 0\n");
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_remote_ensurer(Arc::new(|_account, _folder, _password| {
+            Err(ApiError::Http { status: 500 })
+        }))
+        .with_health_probe(Arc::new(|_account, _password| Ok(())));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::Success);
+    }
+
+    /// Issue #179: a run that ends Failed while the server does not answer a
+    /// health probe must be reported as NetworkError (the account is
+    /// unreachable, not the folder broken).
+    #[test]
+    fn failed_run_with_dead_health_probe_becomes_network_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(dir.path(), "fake-fail", "#!/bin/sh\nexit 1\n");
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_health_probe(Arc::new(|_account, _password| Err(ApiError::Transport)));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::NetworkError);
+    }
+
+    /// Issue #179: a Failed run with a live server stays a folder error.
+    #[test]
+    fn failed_run_with_live_health_probe_stays_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_script(dir.path(), "fake-fail-live", "#!/bin/sh\nexit 1\n");
+        let (progress_tx, _progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_health_probe(Arc::new(|_account, _password| Ok(())));
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::Failed);
     }
 
     #[test]

@@ -275,6 +275,23 @@ impl NextcloudApi {
         Ok(display_name)
     }
 
+    /// Server health probe (issue #179): a short GET to the server root.
+    ///
+    /// Any HTTP response (2xx/3xx/4xx) means the server is up and answering;
+    /// a transport failure or a 5xx (a reverse proxy whose backend is down,
+    /// a dead upstream) means it is not. Used by the engine to tell "the
+    /// folder broke" from "the account is unreachable".
+    pub fn server_status(&self, server: &str) -> Result<(), ApiError> {
+        let url = format!("{}/", server.trim_end_matches('/'));
+        let response = self.http.request("GET", &url, &[], None)?;
+        if (500..600).contains(&response.status) {
+            return Err(ApiError::Http {
+                status: response.status,
+            });
+        }
+        Ok(())
+    }
+
     /// Account summary from the OCS user endpoint: display name plus quota.
     ///
     /// `used`/`total` are bytes; servers with no quota report negative

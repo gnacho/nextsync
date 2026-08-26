@@ -41,6 +41,10 @@ pub const COOLDOWN_SECONDS: u64 = 4;
 pub const KEYRING_RETRY_MAX: u32 = 5;
 /// Starting retry delay for the keyring backoff (ms); each attempt doubles it.
 pub const KEYRING_RETRY_BASE_MS: u64 = 2000;
+/// Interval (ms) between server health probes while a folder is parked as
+/// server-unreachable (issue #179). Kept short so recovery is noticed quickly
+/// without hammering the network.
+pub const SERVER_PROBE_INTERVAL_MS: u64 = 30_000;
 
 /// How a finished reconciliation turned out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +162,13 @@ struct SchedulerInner {
     /// automatic triggers stay queued until the user signs in again, so a
     /// revoked password cannot hammer the server into a brute-force lockout.
     auth_required: bool,
+    /// The account server is unreachable (issue #179): the last run failed
+    /// and a health probe confirmed the server is not answering (a reverse
+    /// proxy 502, a dead backend). Automatic triggers stay queued so the
+    /// folder stops occupying the global permit (the other account keeps
+    /// syncing); a recovery probe periodically re-checks the server and
+    /// clears the gate on the first success.
+    server_unreachable: bool,
     /// Shared flag: true while a run is in flight, false the moment it
     /// finishes. The progress forwarder reads it so stale events drained
     /// after the run's `set_progress(None)` cannot repaint the label
@@ -211,6 +222,7 @@ impl Scheduler {
             active_ssid: None,
             quiet_hours: None,
             auth_required: false,
+            server_unreachable: false,
             run_active: None,
         };
         let inner = Rc::new(RefCell::new(inner));
@@ -376,6 +388,12 @@ impl Scheduler {
         self.inner.borrow().auth_required
     }
 
+    /// Whether automatic syncs are suspended because the account server is
+    /// unreachable (issue #179).
+    pub fn server_unreachable(&self) -> bool {
+        self.inner.borrow().server_unreachable
+    }
+
     /// Clear the credential-rejection gate and reconcile immediately
     /// (issue #72). Called after the user re-enters credentials ("Sign in
     /// again"); the manual reconciliation verifies them right away and
@@ -397,6 +415,11 @@ impl Scheduler {
     /// Number of pending trigger reasons.
     pub fn queue_len(&self) -> usize {
         self.inner.borrow().queue.len()
+    }
+
+    /// Whether a given trigger reason is currently pending in the queue.
+    pub fn queue_contains(&self, trigger: Trigger) -> bool {
+        self.inner.borrow().queue.contains(trigger)
     }
 
     /// Periodic interval timers wired to this scheduler's `request`.
@@ -467,6 +490,19 @@ impl SchedulerInner {
             self.state.set(
                 AppState::AuthRequired,
                 t("Credentials rejected. Sign in again in Account settings."),
+            );
+            return;
+        }
+        // Issue #179: while the account server is unreachable, automatic
+        // triggers only queue up. The folder stops occupying the global
+        // permit, so the other account keeps syncing, and a periodic probe
+        // clears the gate when the server answers again. Manual syncs still
+        // go through so the user can retry explicitly.
+        if self.server_unreachable && trigger != Trigger::Manual {
+            self.queue.add(trigger);
+            self.state.set(
+                AppState::Offline,
+                t("Synchronization blocked: the server is unreachable"),
             );
             return;
         }
@@ -550,6 +586,33 @@ impl SchedulerInner {
         let weak = self.self_ref.clone();
         let id = self.source.borrow_mut().add_timeout(
             delay,
+            Box::new(move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.borrow_mut().start();
+                }
+            }),
+        );
+        self.start_source = Some(id);
+    }
+
+    /// Schedule a periodic probe while the account server is unreachable
+    /// (issue #179). Unlike the keyring retry this has no budget cap: it keeps
+    /// re-checking the server every [`SERVER_PROBE_INTERVAL_MS`] until a run
+    /// succeeds and clears the gate. The probe re-enters `start` on a timer
+    /// WITHOUT changing the visible state, so the Offline label is preserved
+    /// while it re-attempts.
+    fn schedule_server_probe(&mut self) {
+        if self.stopped
+            || self.start_source.is_some()
+            || self.preparing
+            || self.running
+            || !self.server_unreachable
+        {
+            return;
+        }
+        let weak = self.self_ref.clone();
+        let id = self.source.borrow_mut().add_timeout(
+            Duration::from_millis(SERVER_PROBE_INTERVAL_MS),
             Box::new(move || {
                 if let Some(inner) = weak.upgrade() {
                     inner.borrow_mut().start();
@@ -713,6 +776,7 @@ impl SchedulerInner {
                 self.keyring_locked = false;
                 self.keyring_retry_count = 0;
                 self.auth_required = false;
+                self.server_unreachable = false;
                 self.ever_synced = true;
                 self.set_idle_state();
                 (true, false)
@@ -721,6 +785,7 @@ impl SchedulerInner {
                 self.keyring_locked = false;
                 self.keyring_retry_count = 0;
                 self.auth_required = false;
+                self.server_unreachable = false;
                 self.ever_synced = true;
                 self.state.set(
                     AppState::IdleOk,
@@ -763,16 +828,19 @@ impl SchedulerInner {
                 (true, false)
             }
             SyncOutcome::NetworkError => {
-                // Issue #162: the server itself is unreachable even though the
-                // machine has a network link. Mark this folder Offline (with
-                // its own message) so the account no longer reads as Connected
-                // and stops spinning in a wait loop. The periodic/module
-                // triggers retry on the next tick, so it clears once the
-                // server answers again. This only applies to the failing
+                // Issue #162/#179: the account server is unreachable (a
+                // transport failure, or a 5xx confirmed by the health probe).
+                // Mark this folder Offline with its own message so the account
+                // no longer reads as Connected and stops spinning in a wait
+                // loop; a periodic probe clears the gate once the server
+                // answers again. This only applies to the failing
                 // account/folder, never to other accounts.
                 self.keyring_locked = false;
-                self.state
-                    .set(AppState::Offline, t("Waiting for a network connection"));
+                self.server_unreachable = true;
+                self.state.set(
+                    AppState::Offline,
+                    t("Synchronization blocked: the server is unreachable"),
+                );
                 (false, false)
             }
         };
@@ -841,6 +909,15 @@ impl SchedulerInner {
             if matches!(outcome, SyncOutcome::KeyringLocked) {
                 self.queue.add(Trigger::Retry);
                 self.schedule_keyring_retry();
+            }
+            // Issue #179: while the account server is unreachable, schedule a
+            // periodic probe that re-checks it without waiting for the next
+            // external trigger. Each probe runs the engine (which cuts on the
+            // health probe if the server is still down, or reconciles once it
+            // answers again); the first success clears the gate.
+            if matches!(outcome, SyncOutcome::NetworkError) {
+                self.queue.add(Trigger::Retry);
+                self.schedule_server_probe();
             }
         }
     }
@@ -1404,6 +1481,68 @@ mod tests {
         // No more retries are scheduled; the folder is parked keyring-locked.
         assert_eq!(source.borrow().pending(), 0);
         assert!(scheduler.keyring_locked());
+    }
+
+    /// Issue #179: a NetworkError outcome arms the server-unreachable gate:
+    /// automatic triggers only queue up (they stop occupying the global permit
+    /// so the other account keeps syncing) and a recovery probe is scheduled
+    /// to re-check the server without waiting for the next interval tick.
+    #[test]
+    fn network_error_arms_server_unreachable_and_schedules_a_recovery_probe() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Startup);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+
+        finish(&runner, SyncOutcome::NetworkError);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+        assert!(scheduler.server_unreachable());
+        // A recovery probe is already pending without any new external trigger.
+        assert_eq!(source.borrow().pending(), 1);
+        let probe_id = source.borrow().only_id();
+
+        // Automatic triggers no longer launch the engine while the server is
+        // down: they queue (the Retry probe trigger is already there) and the
+        // folder stays Offline (the global permit stays free for the healthy
+        // account).
+        scheduler.request(Trigger::RemoteInterval);
+        assert_eq!(runner.0.borrow().start_calls, 1);
+        assert_eq!(scheduler.queue_len(), 2);
+        assert!(scheduler.queue_contains(Trigger::RemoteInterval));
+        assert_eq!(scheduler.state().snapshot().state, AppState::Offline);
+
+        // Firing the probe re-enters the engine; a Success clears the gate.
+        fire_timer(&source, probe_id);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        finish(&runner, SyncOutcome::Success);
+        assert!(!scheduler.server_unreachable());
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    /// Issue #179: after the server recovers (Success clears the gate), a
+    /// fresh automatic trigger runs the engine again.
+    #[test]
+    fn server_recovery_allows_automatic_triggers_again() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Startup);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::NetworkError);
+        assert!(scheduler.server_unreachable());
+        // Clear the pending recovery probe without firing it (the server came
+        // back on its own); simulate that by resolving it as a Success run.
+        let probe_id = source.borrow().only_id();
+        fire_timer(&source, probe_id);
+        finish(&runner, SyncOutcome::Success);
+        assert!(!scheduler.server_unreachable());
+
+        scheduler.request(Trigger::RemoteInterval);
+        // The previous Success left the folder in its 4s cooldown: the first
+        // idle consumption fires cooldown_finished (which schedules the start
+        // because the queue is non-empty), the second runs the engine.
+        run_idle(&source);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 3);
+        assert_eq!(scheduler.state().snapshot().state, AppState::Syncing);
     }
 
     #[test]
