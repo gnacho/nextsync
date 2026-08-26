@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.6] - 2026-08-26
+
+### Añadido
+- **La cuenta pasa a estar sin conexión cuando su servidor no responde (#179)**: si una sincronización falla y una comprobación rápida de salud contra el servidor no responde (o devuelve un 5xx), la cuenta ya no muestra "Conectado" ni sigue reintentando en cada disparo: queda marcada como sin conexión y la carpeta muestra "Sincronización bloqueada: el servidor no está disponible". Una comprobación de recuperación cada 30 segundos detecta cuándo el servidor vuelve y reanuda la sincronización sola, sin esperar al siguiente intervalo.
+- **Las demás cuentas siguen sincronizando**: una cuenta sin conexión deja de ocupar el permiso global de sincronización, así que las carpetas de otras cuentas no se quedan "Esperando..." detrás de un servidor caído.
+
 ## [0.2.4] - 2026-08-23
 
 ### Cambiado

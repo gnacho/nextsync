@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.2.4",
+  "version": "0.2.6",
   "mandatory": false,
-  "summary": "Account passwords are now cached in memory: one Secret Service negotiation per account per process.",
+  "summary": "An account whose server is unreachable now goes offline and stops retrying, instead of showing as connected and failing every sync.",
   "changelog": [
-    "Credential lookups serve an in-memory cache instead of opening a fresh encrypted Secret Service session every time (issue #178).",
-    "The cache is written through on sign-in, evicted on account removal, and invalidated automatically when a sync proves the password wrong, so signing in again re-reads the keyring."
+    "When a folder fails and a health probe against the server fails, the account is marked offline (issue #179).",
+    "A recovery probe every 30s detects when the server comes back and resumes syncing automatically.",
+    "An unreachable account stops occupying the global sync permit, so healthy folders keep syncing."
   ],
-  "released_at": "2026-08-23T00:00:00Z"
+  "released_at": "2026-08-26T00:00:00Z"
 }
