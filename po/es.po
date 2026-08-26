@@ -2631,6 +2631,14 @@ msgid "{count} files disappeared from the local folder."
 msgstr "{count} archivos desaparecieron de la carpeta local."
 
 #: src/ui/main_window.rs
+msgid "{count} files"
+msgstr "{count} archivos"
+
+#: src/ui/main_window.rs
+msgid "{count} more…"
+msgstr "{count} más…"
+
+#: src/ui/main_window.rs
 msgid "Showing {count} of {total} files."
 msgstr "Mostrando {count} de {total} archivos."
 

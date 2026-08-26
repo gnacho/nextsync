@@ -391,10 +391,166 @@ fn absolute_root(path: &Path) -> PathBuf {
     std::path::absolute(&expanded).unwrap_or(expanded)
 }
 
+/// Groups of missing paths for the deletion-review dialog (issue #182).
+///
+/// A mass deletion (a removed vendored SDK, a virtualenv, build caches)
+/// disappears as thousands of paths under a handful of top-level
+/// directories; a flat list of individual paths is unreadable in a small
+/// dialog. Grouping by the first path component surfaces *what* is being
+/// deleted at a glance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeletionReviewRow {
+    /// A top-level directory with its missing-path count and the paths
+    /// themselves (the UI caps how many it expands).
+    Group {
+        /// First path component shared by every path in the group.
+        prefix: String,
+        /// Missing paths under the prefix.
+        count: usize,
+        /// The grouped paths, sorted.
+        paths: Vec<String>,
+    },
+    /// A single missing path shown on its own (loose root files and
+    /// directories too small to be worth a group).
+    File(String),
+}
+
+/// Groups with at most this many paths are flattened to individual rows
+/// instead of getting a group row (issue #182).
+pub const DELETION_GROUP_MIN: usize = 5;
+
+/// Build the row model for the deletion-review dialog (issue #182):
+/// one [`DeletionReviewRow::Group`] per top-level directory with more than
+/// [`DELETION_GROUP_MIN`] missing paths, individual
+/// [`DeletionReviewRow::File`] rows for everything else. Groups come first,
+/// largest first (ties by name); files last, sorted.
+pub fn deletion_review_rows(paths: &[String]) -> Vec<DeletionReviewRow> {
+    let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut loose: Vec<String> = Vec::new();
+    for path in paths {
+        match path.split_once('/') {
+            Some((prefix, _)) if !prefix.is_empty() => groups
+                .entry(prefix.to_string())
+                .or_default()
+                .push(path.clone()),
+            _ => loose.push(path.clone()),
+        }
+    }
+    let mut grouped: Vec<DeletionReviewRow> = Vec::new();
+    let mut small: Vec<String> = Vec::new();
+    for (prefix, mut members) in groups {
+        members.sort();
+        if members.len() > DELETION_GROUP_MIN {
+            grouped.push(DeletionReviewRow::Group {
+                prefix,
+                count: members.len(),
+                paths: members,
+            });
+        } else {
+            small.extend(members);
+        }
+    }
+    grouped.sort_by(|a, b| {
+        let (
+            DeletionReviewRow::Group {
+                prefix: pa,
+                count: ca,
+                ..
+            },
+            DeletionReviewRow::Group {
+                prefix: pb,
+                count: cb,
+                ..
+            },
+        ) = (a, b)
+        else {
+            unreachable!("only groups are collected here");
+        };
+        cb.cmp(ca).then_with(|| pa.cmp(pb))
+    });
+    small.extend(loose);
+    small.sort();
+    grouped.extend(small.into_iter().map(DeletionReviewRow::File));
+    grouped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::{tempdir, TempDir};
+
+    fn paths_of(row: &DeletionReviewRow) -> usize {
+        match row {
+            DeletionReviewRow::Group { count, .. } => *count,
+            DeletionReviewRow::File(_) => 1,
+        }
+    }
+
+    #[test]
+    fn deletion_review_groups_by_top_level_directory() {
+        let mut paths: Vec<String> = (0..10).map(|i| format!("sdk/src/file{i}.go")).collect();
+        paths.extend((0..3).map(|i| format!("cache/build/obj{i}.o")));
+        paths.push("notes.md".to_string());
+        paths.push("cache/loose.txt".to_string());
+        let rows = deletion_review_rows(&paths);
+        // sdk/ has 10 paths -> group; cache/ has 4 -> flattened; loose file.
+        let groups: Vec<&DeletionReviewRow> = rows
+            .iter()
+            .filter(|row| matches!(row, DeletionReviewRow::Group { .. }))
+            .collect();
+        assert_eq!(groups.len(), 1);
+        let DeletionReviewRow::Group {
+            prefix,
+            count,
+            paths,
+        } = groups[0]
+        else {
+            unreachable!();
+        };
+        assert_eq!(prefix, "sdk");
+        assert_eq!(count, &10);
+        assert!(paths.iter().all(|path| path.starts_with("sdk/")));
+        // Small group and the loose file appear as individual rows, sorted.
+        let files: Vec<&String> = rows
+            .iter()
+            .filter_map(|row| match row {
+                DeletionReviewRow::File(path) => Some(path),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(files.len(), 5);
+        assert!(files.contains(&&"notes.md".to_string()));
+        assert!(files.contains(&&"cache/loose.txt".to_string()));
+        // Totals are preserved.
+        assert_eq!(rows.iter().map(paths_of).sum::<usize>(), 15);
+    }
+
+    #[test]
+    fn deletion_review_sorts_groups_by_count_then_name() {
+        let mut paths: Vec<String> = (0..9).map(|i| format!("bbb/{i}")).collect();
+        paths.extend((0..20).map(|i| format!("aaa/{i}")));
+        paths.extend((0..9).map(|i| format!("ccc/{i}")));
+        let rows = deletion_review_rows(&paths);
+        let prefixes: Vec<&str> = rows
+            .iter()
+            .filter_map(|row| match row {
+                DeletionReviewRow::Group { prefix, .. } => Some(prefix.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(prefixes, vec!["aaa", "bbb", "ccc"]);
+    }
+
+    #[test]
+    fn deletion_review_handles_empty_and_deep_paths() {
+        assert!(deletion_review_rows(&[]).is_empty());
+        let rows = deletion_review_rows(&["a/b/c/d/e.txt".to_string()]);
+        assert_eq!(
+            rows,
+            vec![DeletionReviewRow::File("a/b/c/d/e.txt".to_string())]
+        );
+    }
 
     fn root() -> TempDir {
         tempdir().expect("tempdir works")
