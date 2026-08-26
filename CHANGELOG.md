@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.10] - 2026-08-26
+
+### Cambiado
+- **El sondeo periódico remoto ya no re-rastrea la carpeta si no ha cambiado nada (#189)**: antes, cada intervalo remoto (por defecto cada 10 minutos) lanzaba una reconciliación completa de la carpeta, re-descubriendo todo el árbol y generando decenas de miles de eventos aunque no hubiera ningún cambio en el servidor (visible como "sigue sincronizando sin tocar archivos"). Ahora, antes de reconciliar en un disparo puramente periódico, la app consulta el ETag de la raíz de la carpeta con una petición ligera (un solo PROPFIND); si el ETag no ha cambiado, salta la reconciliación completa y la carpeta se queda al día. Solo los disparos manuales, de inotify, de arranque, de push, de reanudación y de recuperación fuerzan siempre la reconciliación.
+- **En el mismo sondeo, si el ETag no se puede leer**: se reconcilia (no se salta) para no perderse un cambio real.
+
 ## [0.2.8] - 2026-08-26
 
 ### Añadido

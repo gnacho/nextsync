@@ -1,13 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.8",
+  "version": "0.2.10",
   "mandatory": false,
-  "summary": "Remote changes are routed to the exact folder that owns the file; repeated failures back off, and the push heartbeat keeps the connection honest.",
+  "summary": "The periodic remote-interval poll is gated on a cheap root ETag check, so a folder with no remote changes is not re-scanned every interval.",
   "changelog": [
-    "A notify_file_id push hint is resolved against each folder's sync journal, so only the folder that owns the file re-syncs instead of every folder of the account (issue #183).",
-    "A folder that keeps failing backs off (10/30/60s) before re-running instead of hammering the server (issue #184).",
-    "While the account's push channel is connected, the periodic remote-interval poll is skipped - push is already real-time (issue #185).",
-    "The push WebSocket detects dead connections via a heartbeat (no activity for 75s reconnects) and stops retrying after 3 failed auth attempts, parking in AuthRequired (issue #186)."
+    "A root ETag check (single PROPFIND Depth: 0) runs before a pure periodic remote-interval reconciliation; if the ETag is unchanged, the full nextcloudcmd scan is skipped instead of re-discovering the whole tree (issue #189).",
+    "Manual, inotify, startup, push, resume and recovery runs always reconcile - only the periodic interval benefits from the gate."
   ],
   "released_at": "2026-08-26T00:00:00Z"
 }
