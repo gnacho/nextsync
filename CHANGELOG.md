@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.8] - 2026-08-26
+
+### Añadido
+- **Cada cambio remoto sincroniza solo la carpeta que lo contiene (#183)**: ahora se resuelve el identificador de archivo que manda el servidor (`notify_file_id`) contra el registro de sincronización de cada carpeta, y solo la carpeta que realmente contiene el archivo se vuelve a sincronizar. Antes, un cambio en una carpeta re-rastreaba las carpetas de la cuenta. Si el servidor aún no manda el identificador, se mantiene el comportamiento anterior (sincronizar todas) por seguridad.
+- **Una carpeta que falla repetidamente se retrasa en vez de machacar el servidor (#184)**: tras 3-4 fallos seguidos espera 10 segundos, 5-6 fallos espera 30 y a partir de 7 espera 60, antes de volver a intentarlo (igual que el cliente oficial). Se limpia en cuanto la carpeta sincroniza bien.
+- **El intervalo de sondeo remoto se salta cuando el push está activo (#185)**: mientras el canal de notificaciones push de la cuenta está conectado (que ya avisa de cambios en tiempo real), el sondeo periódico de intervalo remoto se omite para no hacer una reconciliación completa encima.
+- **El push detecta conexiones muertas y no reintenta credenciales sin límite (#186)**: el canal de notificaciones rastrea la actividad; si el servidor deja de responder durante 75 segundos, se reconecta (evita quedarse mudo en una conexión a medias). Además, si la autenticación del push falla 3 veces seguidas, deja de reintentar en bucle y espera a que se restaure la red o la configuración.
+
 ## [0.2.6] - 2026-08-26
 
 ### Añadido

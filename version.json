@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "version": "0.2.6",
+  "version": "0.2.8",
   "mandatory": false,
-  "summary": "An account whose server is unreachable now goes offline and stops retrying, instead of showing as connected and failing every sync.",
+  "summary": "Remote changes are routed to the exact folder that owns the file; repeated failures back off, and the push heartbeat keeps the connection honest.",
   "changelog": [
-    "When a folder fails and a health probe against the server fails, the account is marked offline (issue #179).",
-    "A recovery probe every 30s detects when the server comes back and resumes syncing automatically.",
-    "An unreachable account stops occupying the global sync permit, so healthy folders keep syncing."
+    "A notify_file_id push hint is resolved against each folder's sync journal, so only the folder that owns the file re-syncs instead of every folder of the account (issue #183).",
+    "A folder that keeps failing backs off (10/30/60s) before re-running instead of hammering the server (issue #184).",
+    "While the account's push channel is connected, the periodic remote-interval poll is skipped - push is already real-time (issue #185).",
+    "The push WebSocket detects dead connections via a heartbeat (no activity for 75s reconnects) and stops retrying after 3 failed auth attempts, parking in AuthRequired (issue #186)."
   ],
   "released_at": "2026-08-26T00:00:00Z"
 }
