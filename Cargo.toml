@@ -18,6 +18,7 @@ libadwaita = { version = "0.9", features = ["v1_5"] }
 notify = "8"
 rand = "0.10"
 roxmltree = "0.21"
+rusqlite = { version = "0.32", features = ["bundled"] }
 rustls = "0.23"
 rustls-native-certs = "0.8"
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }

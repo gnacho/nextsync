@@ -32,6 +32,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
@@ -52,6 +53,20 @@ type PushStream = MaybeTlsStream<TcpStream>;
 
 /// Reconnect delays in seconds, mirroring `NotifyPushClient.BACKOFF_SECONDS`.
 pub const BACKOFF_SECONDS: [u64; 6] = [2, 5, 10, 30, 60, 300];
+
+/// How long (ms) the push worker tolerates total connection inactivity
+/// (no inbound text/ping/pong) before declaring the WebSocket dead and
+/// reconnecting (issue #186). The official client keeps a 30s ping/pong
+/// heartbeat; a half-dead TCP connection (e.g. a stuck proxy) otherwise sits
+/// silently with no notifications flowing and no reconnect. 75s leaves room
+/// for a normal idle server and a slow pong while still catching zombies.
+pub const PUSH_HEARTBEAT_TIMEOUT_MS: u64 = 75_000;
+
+/// Maximum consecutive failed push authentication attempts before the client
+/// stops retrying on its own and parks in `AuthRequired` (issue #186),
+/// mirroring the official client's `MAX_ALLOWED_FAILED_AUTHENTICATION_ATTEMPTS`
+/// (3). Prevents an invalid credential from retrying forever on a timer.
+pub const MAX_PUSH_AUTH_ATTEMPTS: u32 = 3;
 
 /// The backoff delay for a given failed-attempt index (capped at the last
 /// value, exactly like `BACKOFF_SECONDS[min(index, len - 1)]` in Python).
@@ -92,8 +107,10 @@ enum PushEventKind {
     Unsupported,
     /// The WebSocket sent `authenticated`.
     Authenticated,
-    /// The WebSocket sent a `notify_file*` hint.
-    FileNotification,
+    /// The WebSocket sent a `notify_file*` hint. Carries the numeric file ids
+    /// from a `notify_file_id <json-array>` hint (issue #183); empty for a
+    /// legacy `notify_file` hint (no ids), meaning an unknown location.
+    FileNotification(Vec<i64>),
     /// The WebSocket sent a `notify_notification` hint (new server
     /// notification, issue #31).
     Notification,
@@ -122,11 +139,15 @@ struct PushInner {
     generation: u64,
     backoff_index: usize,
     force_password_auth: bool,
+    /// Issue #186: consecutive failed authentication attempts. Mirrors the
+    /// official client's cap (3); once exceeded the client parks in
+    /// `AuthRequired` instead of reconnecting in a loop on a bad credential.
+    auth_failure_count: u32,
     connection: Option<PushConnection>,
     reconnect: Option<glib::JoinHandle<()>>,
     tls: Option<Arc<ClientConfig>>,
     backoff_scale: f64,
-    on_file_notification: Rc<dyn Fn()>,
+    on_file_notification: Rc<dyn Fn(Vec<i64>)>,
     on_notification: Rc<dyn Fn()>,
     on_state: Rc<dyn Fn(PushState, String)>,
 }
@@ -143,13 +164,15 @@ pub struct NotifyPushClient {
 impl NotifyPushClient {
     /// Create a client for an account bound to `provider`.
     ///
-    /// `on_file_notification` fires on every remote file hint, `on_notification`
+    /// `on_file_notification` fires on every remote file hint, carrying the
+    /// notified file ids (empty for a legacy `notify_file` hint),
+    /// `on_notification`
     /// on every `notify_notification` server hint, `on_state` on every
     /// [`PushState`] transition (message included). All three run on the main
     /// thread.
     pub fn new(
         provider: Provider,
-        on_file_notification: impl Fn() + 'static,
+        on_file_notification: impl Fn(Vec<i64>) + 'static,
         on_notification: impl Fn() + 'static,
         on_state: impl Fn(PushState, String) + 'static,
     ) -> Self {
@@ -164,6 +187,7 @@ impl NotifyPushClient {
                 generation: 0,
                 backoff_index: 0,
                 force_password_auth: false,
+                auth_failure_count: 0,
                 connection: None,
                 reconnect: None,
                 tls: None,
@@ -213,7 +237,16 @@ impl NotifyPushClient {
     /// Reflect the network status; disconnects (keeping the config) when
     /// going offline and reconnects when back online.
     pub fn set_online(&self, online: bool) {
-        self.inner.borrow_mut().online = online;
+        {
+            let mut inner = self.inner.borrow_mut();
+            inner.online = online;
+            if online {
+                // Issue #186: coming back online (or an explicit re-enable) is
+                // a fresh start — clear the auth-failure streak so a channel
+                // parked after repeated auth failures can retry.
+                inner.auth_failure_count = 0;
+            }
+        }
         if !online {
             self.disconnect(true);
         } else if self.inner.borrow().enabled {
@@ -334,12 +367,13 @@ impl NotifyPushClient {
                 let mut inner = self.inner.borrow_mut();
                 inner.force_password_auth = false;
                 inner.backoff_index = 0;
+                inner.auth_failure_count = 0;
                 drop(inner);
                 self.on_state(PushState::Connected, "Connected");
             }
-            PushEventKind::FileNotification => {
+            PushEventKind::FileNotification(file_ids) => {
                 let callback = self.inner.borrow().on_file_notification.clone();
-                callback();
+                callback(file_ids);
             }
             PushEventKind::Notification => {
                 let callback = self.inner.borrow().on_notification.clone();
@@ -368,7 +402,25 @@ impl NotifyPushClient {
                         Some(details)
                     }
                 };
-                if let Some(details) = details {
+                // Issue #186: a connection that keeps closing before it
+                // authenticates is burning credentials on a loop. Mirror the
+                // official client's cap: after MAX_PUSH_AUTH_ATTEMPTS failed
+                // attempts, stop reconnecting and park the channel in
+                // AuthRequired until an explicit action (network restored /
+                // settings change) restarts it.
+                let exhausted = {
+                    let mut inner = self.inner.borrow_mut();
+                    if !authenticated {
+                        inner.auth_failure_count += 1;
+                    }
+                    inner.auth_failure_count >= MAX_PUSH_AUTH_ATTEMPTS
+                };
+                if exhausted {
+                    self.on_state(
+                        PushState::AuthRequired,
+                        "Push authentication failed after several attempts.",
+                    );
+                } else if let Some(details) = details {
                     self.schedule_reconnect(details);
                 }
             }
@@ -584,27 +636,62 @@ fn push_worker_main(inputs: WorkerInputs) {
     }
 
     let mut authenticated = false;
+    // Issue #186: track the last inbound activity (any text/ping/pong) so a
+    // half-dead connection (no pongs, no server pings) is detected and
+    // torn down; the main side reconnects through the existing backoff.
+    let mut last_activity = Instant::now();
     loop {
         if stop.load(Ordering::SeqCst) {
             graceful_close(&mut websocket);
             return;
         }
+        // Heartbeat: if nothing has arrived for the timeout, the connection is
+        // dead (or the server stopped sending pings). Close so the main side
+        // reconnects rather than silently missing all notifications.
+        if last_activity.elapsed().as_millis() as u64 > PUSH_HEARTBEAT_TIMEOUT_MS {
+            let _ = tx.send_blocking(PushEvent {
+                generation,
+                kind: PushEventKind::Closed {
+                    reason: "Push heartbeat timed out: no activity from the server.".to_string(),
+                    auth_mode,
+                    authenticated,
+                },
+            });
+            graceful_close(&mut websocket);
+            return;
+        }
         match websocket.read() {
             Ok(Message::Text(text)) => {
+                last_activity = Instant::now();
                 let text = text.as_str().trim();
                 if text == "authenticated" {
                     authenticated = true;
+                    // Issue #183: opt in to the modern file-id notifications so
+                    // a change can be routed to the exact folder (the official
+                    // client sends `listen n_id` right after authenticating).
+                    let _ = websocket.send(Message::text("listen n_id"));
                     let _ = tx.send_blocking(PushEvent {
                         generation,
                         kind: PushEventKind::Authenticated,
                     });
-                } else if text == "notify_file"
-                    || text == "notify_file_id"
-                    || text.starts_with("notify_file_id ")
-                {
+                } else if text == "notify_file" {
                     let _ = tx.send_blocking(PushEvent {
                         generation,
-                        kind: PushEventKind::FileNotification,
+                        kind: PushEventKind::FileNotification(Vec::new()),
+                    });
+                } else if text == "notify_file_id" || text.starts_with("notify_file_id ") {
+                    // Issue #183: the modern hint carries a JSON array of
+                    // numeric file ids (`notify_file_id [141, 142]`). Parse it
+                    // so the event can be routed to the folder that contains
+                    // the file; an empty or unparsable list falls back to the
+                    // legacy fan-out (empty ids).
+                    let ids = text
+                        .strip_prefix("notify_file_id")
+                        .map(parse_file_id_list)
+                        .unwrap_or_default();
+                    let _ = tx.send_blocking(PushEvent {
+                        generation,
+                        kind: PushEventKind::FileNotification(ids),
                     });
                 } else if text == "notify_notification" {
                     let _ = tx.send_blocking(PushEvent {
@@ -619,9 +706,12 @@ fn push_worker_main(inputs: WorkerInputs) {
                 }
             }
             Ok(Message::Ping(_)) => {
+                last_activity = Instant::now();
                 let _ = websocket.flush();
             }
-            Ok(Message::Pong(_)) | Ok(Message::Frame(_)) | Ok(Message::Binary(_)) => {}
+            Ok(Message::Pong(_)) | Ok(Message::Frame(_)) | Ok(Message::Binary(_)) => {
+                last_activity = Instant::now();
+            }
             Ok(Message::Close(_)) => break,
             Err(tungstenite::Error::ConnectionClosed) => break,
             Err(tungstenite::Error::Io(error)) if is_would_block(&error) => continue,
@@ -696,6 +786,25 @@ fn parse_capabilities(body: &[u8]) -> Result<Option<PushEndpoints>, String> {
     let payload: Value =
         serde_json::from_slice(body).map_err(|e| format!("Invalid capabilities response: {e}"))?;
     parse_push_capability(&payload)
+}
+
+/// Parse the id list trailing a `notify_file_id` hint.
+///
+/// The server sends `notify_file_id [141, 142]` (a JSON array of numeric
+/// file ids). Anything that is not a JSON array of integers yields an empty
+/// list, which the caller treats as the legacy "unknown file" fan-out.
+fn parse_file_id_list(trailing: &str) -> Vec<i64> {
+    let trimmed = trailing.trim();
+    if !trimmed.starts_with('[') {
+        return Vec::new();
+    }
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return Vec::new();
+    };
+    let Some(array) = value.as_array() else {
+        return Vec::new();
+    };
+    array.iter().filter_map(|entry| entry.as_i64()).collect()
 }
 
 /// Extract the pre-auth token from the response body (plain text or JSON).
@@ -1073,7 +1182,7 @@ mod tests {
         let notifications_clone = Rc::clone(&notifications);
         let client = NotifyPushClient::new(
             provider,
-            move || {
+            move |_file_ids| {
                 notifications_clone.set(notifications_clone.get() + 1);
             },
             || {},
@@ -1409,7 +1518,7 @@ mod tests {
             .iter()
             .map(|event| match &event.kind {
                 PushEventKind::Authenticated => "authenticated",
-                PushEventKind::FileNotification => "file_notification",
+                PushEventKind::FileNotification(_) => "file_notification",
                 PushEventKind::Closed { .. } => "closed",
                 other => panic!("unexpected event: {other:?}"),
             })
@@ -1445,7 +1554,7 @@ mod tests {
             .iter()
             .map(|event| match &event.kind {
                 PushEventKind::Authenticated => "authenticated",
-                PushEventKind::FileNotification => "file_notification",
+                PushEventKind::FileNotification(_) => "file_notification",
                 PushEventKind::Notification => "notification",
                 PushEventKind::Closed { .. } => "closed",
                 other => panic!("unexpected event: {other:?}"),
@@ -1687,5 +1796,21 @@ mod tests {
                 client.disconnect(false);
             })
             .expect("the test main context is available");
+    }
+
+    #[test]
+    fn parse_file_id_list_reads_a_json_array_of_ints() {
+        assert_eq!(parse_file_id_list(" [141, 142]"), vec![141, 142]);
+    }
+
+    #[test]
+    fn parse_file_id_list_returns_empty_for_non_array_or_non_int() {
+        assert!(parse_file_id_list("").is_empty());
+        assert!(parse_file_id_list("not a list").is_empty());
+        assert!(parse_file_id_list("{}").is_empty());
+        // Non-numeric entries are dropped but numeric ones are kept (the
+        // official client ignores non-integer array entries).
+        assert_eq!(parse_file_id_list("[141, \"two\"]"), vec![141]);
+        assert!(parse_file_id_list("[\"a\",\"b\"]").is_empty());
     }
 }

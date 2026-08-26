@@ -8,6 +8,7 @@ pub mod debounce;
 pub mod delete_guard;
 pub mod desktop_integration;
 pub mod exclusions;
+pub mod files_journal;
 pub mod log;
 pub mod network;
 pub mod notifications;

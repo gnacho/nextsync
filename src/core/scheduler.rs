@@ -46,6 +46,20 @@ pub const KEYRING_RETRY_BASE_MS: u64 = 2000;
 /// without hammering the network.
 pub const SERVER_PROBE_INTERVAL_MS: u64 = 30_000;
 
+/// Return the delay (seconds) before the next run after `consecutive`
+/// failing syncs, mirroring the official client's `scheduleFolder` backoff
+/// (issue #184): a folder that fails repeatedly is not re-run on every
+/// trigger in a tight loop (3-4 fails -> 10s, 5-6 -> 30s, more -> 60s).
+/// Runs with fewer than three consecutive failures are scheduled normally.
+pub fn failure_backoff_seconds(consecutive: u32) -> u64 {
+    match consecutive {
+        0..=2 => 0,
+        3..=4 => 10,
+        5..=6 => 30,
+        _ => 60,
+    }
+}
+
 /// How a finished reconciliation turned out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncOutcome {
@@ -135,6 +149,18 @@ struct SchedulerInner {
     /// locked collection must not retry forever: once the budget is spent the
     /// folder parks in the keyring-locked state until a manual action.
     keyring_retry_count: u32,
+    /// Issue #184: how many consecutive failed syncs this folder has had.
+    /// Mirrors the official client's `consecutiveFailingSyncs`: a run that
+    /// fails backs off (10/30/60s) instead of re-running on every trigger in a
+    /// tight loop. Reset on any successful/conflicted run.
+    consecutive_failing_syncs: u32,
+    /// Issue #185: whether this account's notify_push channel is delivering
+    /// change notifications (see [`Scheduler::set_remote_push_ready`]). When
+    /// it is, the periodic remote-interval poll is dropped: push is the
+    /// real-time source of truth and the interval would only re-run a full
+    /// reconciliation on top of it (the official client skips the ETag poll
+    /// for accounts whose push is ready).
+    remote_push_ready: bool,
     delete_alert: Option<DeleteAlert>,
     delete_bypass_once: bool,
     /// Whether a synchronization has ever completed successfully. Drives the
@@ -224,6 +250,8 @@ impl Scheduler {
             auth_required: false,
             server_unreachable: false,
             run_active: None,
+            consecutive_failing_syncs: 0,
+            remote_push_ready: false,
         };
         let inner = Rc::new(RefCell::new(inner));
         {
@@ -309,6 +337,27 @@ impl Scheduler {
     /// external-engine scan before every run.
     pub fn set_local_root(&self, local_root: Option<std::path::PathBuf>) {
         self.inner.borrow_mut().local_root = local_root;
+    }
+
+    /// Tell the scheduler whether the account's notify_push channel is ready
+    /// (issue #185). When it is, periodic remote-interval polls are dropped:
+    /// push already surfaces remote changes in real time, and the interval
+    /// would only run a full reconciliation on top of them.
+    pub fn set_remote_push_ready(&self, ready: bool) {
+        self.inner.borrow_mut().remote_push_ready = ready;
+    }
+
+    /// Whether this folder's external sync journal knows any of `file_ids`.
+    ///
+    /// Used to route a `notify_file_id` push hint to exactly the folder that
+    /// contains the notified file, instead of re-syncing every folder of the
+    /// account (issue #183). Returns `false` when the folder has no local
+    /// root yet or the journal is unavailable; the caller then falls back to
+    /// the conservative fan-out.
+    pub fn has_file_ids(&self, file_ids: &[i64]) -> bool {
+        let root = self.inner.borrow().local_root.clone();
+        root.map(|root| crate::core::files_journal::contains_file_ids(&root, file_ids))
+            .unwrap_or(false)
     }
 
     /// Share the run-active flag with the progress forwarder (issue #145):
@@ -454,6 +503,13 @@ impl SchedulerInner {
 
     fn request(&mut self, trigger: Trigger) {
         if self.stopped {
+            return;
+        }
+        // Issue #185: while the account's push channel is ready, a periodic
+        // remote-interval poll is redundant (push delivers changes in real
+        // time) and would only force a full reconciliation. Drop it; the remote
+        // Interval timer stays armed and is skipped until push is unready.
+        if trigger == Trigger::RemoteInterval && self.remote_push_ready {
             return;
         }
         if self.delete_alert.is_some() && !self.delete_bypass_once {
@@ -622,6 +678,36 @@ impl SchedulerInner {
         self.start_source = Some(id);
     }
 
+    /// Seconds to wait before re-running after repeated failures (issue
+    /// #184), mirroring the official client's delay from
+    /// `consecutiveFailingSyncs`. Zero means no backoff (schedule now).
+    fn failure_backoff(&self) -> u64 {
+        failure_backoff_seconds(self.consecutive_failing_syncs)
+    }
+
+    /// Re-arm `start` after `seconds`, using the same timeout source as the
+    /// server probe and keyring retry. Guards against double-arming.
+    fn schedule_after(&mut self, seconds: u64) {
+        if self.stopped
+            || self.start_source.is_some()
+            || self.preparing
+            || self.running
+            || seconds == 0
+        {
+            return;
+        }
+        let weak = self.self_ref.clone();
+        let id = self.source.borrow_mut().add_timeout(
+            Duration::from_secs(seconds),
+            Box::new(move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.borrow_mut().start();
+                }
+            }),
+        );
+        self.start_source = Some(id);
+    }
+
     fn start(&mut self) {
         self.start_source = None;
         if self.stopped || self.preparing || self.running || self.queue.is_empty() || !self.online {
@@ -777,6 +863,7 @@ impl SchedulerInner {
                 self.keyring_retry_count = 0;
                 self.auth_required = false;
                 self.server_unreachable = false;
+                self.consecutive_failing_syncs = 0;
                 self.ever_synced = true;
                 self.set_idle_state();
                 (true, false)
@@ -786,6 +873,7 @@ impl SchedulerInner {
                 self.keyring_retry_count = 0;
                 self.auth_required = false;
                 self.server_unreachable = false;
+                self.consecutive_failing_syncs = 0;
                 self.ever_synced = true;
                 self.state.set(
                     AppState::IdleOk,
@@ -798,6 +886,7 @@ impl SchedulerInner {
                 // Issue #72: arm the credential gate so the periodic and
                 // inotify triggers stop retrying a dead password.
                 self.auth_required = true;
+                self.consecutive_failing_syncs += 1;
                 self.state.set(
                     AppState::AuthRequired,
                     t("Credentials rejected. Sign in again in Account settings."),
@@ -809,6 +898,7 @@ impl SchedulerInner {
                 // No stored credentials: park the folder like a rejection so
                 // the triggers do not hammer the server (issue #95).
                 self.auth_required = true;
+                self.consecutive_failing_syncs += 1;
                 self.state.set(
                     AppState::AuthRequired,
                     t("No saved credentials. Use Sign in again in Account settings."),
@@ -817,12 +907,14 @@ impl SchedulerInner {
             }
             SyncOutcome::KeyringLocked => {
                 self.keyring_locked = true;
+                self.consecutive_failing_syncs += 1;
                 self.state
                     .set(AppState::KeyringLocked, t("Password keyring is locked"));
                 (false, false)
             }
             SyncOutcome::Failed => {
                 self.keyring_locked = false;
+                self.consecutive_failing_syncs += 1;
                 self.state
                     .set(AppState::Error, t("Synchronization failed — view the log"));
                 (true, false)
@@ -837,6 +929,7 @@ impl SchedulerInner {
                 // account/folder, never to other accounts.
                 self.keyring_locked = false;
                 self.server_unreachable = true;
+                self.consecutive_failing_syncs += 1;
                 self.state.set(
                     AppState::Offline,
                     t("Synchronization blocked: the server is unreachable"),
@@ -931,7 +1024,15 @@ impl SchedulerInner {
         // (schedule_start aborts on in_cooldown) and must start now
         // (issue #127).
         if !self.queue.is_empty() && self.online && !self.paused() {
-            self.schedule_start();
+            let delay = self.failure_backoff();
+            if delay == 0 {
+                self.schedule_start();
+            } else {
+                // Issue #184: a folder that keeps failing backs off instead of
+                // re-running on every trigger in a tight loop (this mirrors the
+                // official client's delay tied to consecutiveFailingSyncs).
+                self.schedule_after(delay);
+            }
         } else if !self.paused() {
             self.set_idle_state();
         }
@@ -2409,5 +2510,37 @@ mod tests {
         assert!(!time_in_window("12:00", "22:00", "06:30"));
         // Degenerate values never match.
         assert!(!time_in_window("12:00", "bad", "06:30"));
+    }
+
+    /// Issue #184: the backoff table mirrors the official client's
+    /// `scheduleFolder` delays (10/30/60s) based on consecutive failures.
+    #[test]
+    fn failure_backoff_seconds_matches_the_terminal_delays() {
+        assert_eq!(failure_backoff_seconds(0), 0);
+        assert_eq!(failure_backoff_seconds(2), 0);
+        assert_eq!(failure_backoff_seconds(3), 10);
+        assert_eq!(failure_backoff_seconds(4), 10);
+        assert_eq!(failure_backoff_seconds(5), 30);
+        assert_eq!(failure_backoff_seconds(6), 30);
+        assert_eq!(failure_backoff_seconds(7), 60);
+        assert_eq!(failure_backoff_seconds(100), 60);
+    }
+
+    /// Issue #185: when the account's push channel is ready, a periodic
+    /// remote-interval poll is dropped instead of queuing a full sync.
+    #[test]
+    fn remote_interval_is_dropped_while_push_is_ready() {
+        let (scheduler, source, _runner) = make_scheduler(None);
+        scheduler.set_remote_push_ready(true);
+        scheduler.request(Trigger::RemoteInterval);
+        assert!(source.borrow().pending() == 0, "no start was scheduled");
+        assert_eq!(scheduler.queue_len(), 0, "the interval was not queued");
+        // Disabling push readiness lets the interval through again.
+        scheduler.set_remote_push_ready(false);
+        scheduler.request(Trigger::RemoteInterval);
+        assert!(
+            source.borrow().pending() >= 1,
+            "interval now schedules a run"
+        );
     }
 }
