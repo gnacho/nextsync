@@ -63,7 +63,7 @@ use libadwaita::prelude::*;
 use crate::core::sync_safety::local_folder_is_empty;
 use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::command::find_binary;
-use crate::nextcloud::credentials::CredentialsStore;
+use crate::nextcloud::credentials::{CredentialError, CredentialsStore};
 use crate::nextcloud::driver::{opencloud_list_spaces, Provider};
 use crate::nextcloud::login_flow::{
     LoginFlowError, LoginFlowResult, LoginFlowStart, LoginFlowV2, PollOutcome, MAX_POLLS,
@@ -1753,11 +1753,47 @@ fn provider_from_combo(row: &libadwaita::ComboRow) -> Provider {
     }
 }
 
+/// Resolve the password the wizard should use to list remote folders.
+///
+/// After a successful sign-in (browser or manual) the wizard clears the
+/// password field and stores the secret in the credential store, so the
+/// picker must read it back from there (issue #147, the same source the
+/// Settings remote picker uses) and never from the now-empty field. Returns
+/// `Ok(Some(password))` when credentials are available, `Ok(None)` when they
+/// are simply absent, and `Err` when the store is locked or unreachable.
+fn wizard_remote_picker_password(
+    server: &str,
+    username: &str,
+) -> Result<Option<String>, CredentialError> {
+    if server.is_empty() || username.is_empty() {
+        return Ok(None);
+    }
+    CredentialsStore::get_for_account(&account_id(server, username), server, username)
+}
+
+/// List the remote folders for the wizard's picker (issue #82), resolving the
+/// password from the credential store (issue #147).
+///
+/// Kept synchronous and API-injectable so tests can drive it with a fake
+/// transport without a live server: it is exactly the logic the async
+/// [`populate_wizard_remote_picker`] runs off the main loop.
+fn fetch_wizard_remote_folders(
+    api: &NextcloudApi,
+    server: &str,
+    username: &str,
+) -> Option<Vec<String>> {
+    let password = wizard_remote_picker_password(server, username)
+        .ok()
+        .flatten()?;
+    api.list_remote_folders(server, username, &password).ok()
+}
+
 /// Fill the wizard's remote-folder dropdown with the server's existing
 /// folders (issue #82). The credentials come from the wizard itself: the
 /// user signed in on the previous page but the account is not persisted
-/// yet, so there is nothing in the keyring to look up. Nextcloud only; the
-/// OpenCloud wizard keeps the manual entry until its listing lands.
+/// yet, so the secret is read back from the keyring (issue #147). Nextcloud
+/// only; the OpenCloud wizard keeps the manual entry until its listing
+/// lands.
 fn populate_wizard_remote_picker(
     ctx: &SetupContext,
     list: &gtk4::StringList,
@@ -1767,16 +1803,10 @@ fn populate_wizard_remote_picker(
         let state = ctx.state.borrow();
         (state.server.clone(), state.username.clone())
     };
-    let password = ctx.widgets.password_entry.text().to_string();
     let list = list.clone();
     let status = status.clone();
     let handle = gio::spawn_blocking(move || {
-        if server.is_empty() || username.is_empty() || password.is_empty() {
-            return None;
-        }
-        crate::nextcloud::api::NextcloudApi::new()
-            .list_remote_folders(&server, &username, &password)
-            .ok()
+        fetch_wizard_remote_folders(&NextcloudApi::new(), &server, &username)
     });
     glib::spawn_future_local(async move {
         let Ok(folders) = handle.await else {
@@ -1833,7 +1863,10 @@ fn persist_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nextcloud::credentials::seed_cache_for_tests;
     use crate::util::i18n::{reset_locale, set_locale, Locale};
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use tempfile::tempdir;
 
     // ---- pure helpers ------------------------------------------------------
@@ -2287,5 +2320,135 @@ mod tests {
             assert_eq!(label.text().as_str(), url);
             reset_locale();
         });
+    }
+
+    // ---- remote-folder picker (issue #147) --------------------------------
+
+    /// One recorded request: the `METHOD URL` line plus the headers.
+    type RecordedRequest = (String, Vec<(String, String)>);
+
+    /// A fake WebDAV transport serving a `207` multistatus (like the real
+    /// server) and recording the requests, so the picker can be exercised
+    /// without a live Nextcloud instance.
+    struct FakeWebDav {
+        status: u16,
+        body: Vec<u8>,
+        requests: Rc<RefCell<Vec<RecordedRequest>>>,
+    }
+
+    impl FakeWebDav {
+        fn new(status: u16, body: &[u8]) -> Self {
+            Self {
+                status,
+                body: body.to_vec(),
+                requests: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+    }
+
+    impl crate::nextcloud::api::HttpClient for FakeWebDav {
+        fn request(
+            &self,
+            method: &str,
+            url: &str,
+            headers: &[(&str, &str)],
+            _body: Option<&[u8]>,
+        ) -> Result<crate::nextcloud::api::HttpResponse, crate::nextcloud::api::ApiError> {
+            self.requests.borrow_mut().push((
+                format!("{method} {url}"),
+                headers
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect(),
+            ));
+            Ok(crate::nextcloud::api::HttpResponse {
+                status: self.status,
+                body: self.body.clone(),
+            })
+        }
+    }
+
+    /// A root listing with two real folders (plus the root itself), so the
+    /// picker has something to offer.
+    const WIZARD_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/nacho/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/nacho/Documents/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/nacho/Photos/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    /// Issue #147: after a browser (or manual) sign-in the wizard clears the
+    /// password field and keeps the secret only in the credential store, so
+    /// the picker must resolve the password from there, not from the widget,
+    /// or the folder listing is never even attempted. This seeds the store
+    /// (what `CredentialsStore::set` does on a successful sign-in) and proves
+    /// the listing is reached and returned.
+    #[test]
+    fn wizard_picker_lists_remote_folders_from_stored_credentials() {
+        let server = "https://wizard.example.net";
+        let username = "nacho";
+        let password = "app-password";
+        seed_cache_for_tests(&account_id(server, username), password);
+
+        let webdav = FakeWebDav::new(207, WIZARD_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(webdav));
+        let folders = fetch_wizard_remote_folders(&api, server, username)
+            .expect("stored credentials must resolve the picker password");
+        assert_eq!(
+            folders,
+            vec!["/Documents".to_string(), "/Photos".to_string()]
+        );
+    }
+
+    /// The pre-fix symptom, pinned: when the picker cannot resolve any
+    /// password (the cleared widget field, or a store without a secret), it
+    /// never calls the server and the dropdown stays empty. The dialog keeps
+    /// working because the manual entry remains the source of truth.
+    #[test]
+    fn wizard_picker_without_credentials_never_lists_and_stays_empty() {
+        let server = "https://wizard-no-creds.example.net";
+        let username = "nobody";
+        let webdav = FakeWebDav::new(207, WIZARD_PROPFIND);
+        let requests = webdav.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(webdav));
+        let folders = fetch_wizard_remote_folders(&api, server, username);
+        assert!(
+            folders.is_none(),
+            "no password in the store → no listing, dropdown stays empty"
+        );
+        assert!(
+            !requests.borrow().iter().any(|(request, _)| {
+                request == "PROPFIND https://wizard-no-creds.example.net/remote.php/dav/files/nobody/"
+            }),
+            "without a password the picker must not even reach the server"
+        );
+    }
+
+    /// The store lookup short-circuits on a blank server or login, so the
+    /// picker never attempts a keyring call with garbage.
+    #[test]
+    fn wizard_picker_password_returns_none_for_blank_server_or_login() {
+        let resolved = wizard_remote_picker_password("", "nacho").unwrap();
+        assert!(resolved.is_none());
+        let resolved = wizard_remote_picker_password("https://x.example.net", "").unwrap();
+        assert!(resolved.is_none());
     }
 }
