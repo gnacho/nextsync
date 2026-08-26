@@ -367,6 +367,9 @@ impl FolderRuntime {
         )
         .with_remote_ensurer(Arc::new(|account, folder, password| {
             crate::nextcloud::sync_engine::ProductionRemoteEnsurer::run(account, folder, password)
+        }))
+        .with_health_probe(Arc::new(|account, _password| {
+            crate::nextcloud::sync_engine::ProductionHealthProbe::run(account)
         }));
         (Box::new(engine), rx)
     }
