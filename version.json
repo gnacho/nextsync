@@ -1,15 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.12",
+  "version": "0.2.14",
   "mandatory": false,
-  "summary": "Queue discipline, wizard folder picker fix, GTK crash fix and deletion-review grouping.",
+  "summary": "The per-folder root ETag is persisted across restarts, so a launch no longer re-scans folders whose remote tree did not change.",
   "changelog": [
-    "A folder no longer re-runs immediately from its own engine-generated file events: the journal nextcloudcmd writes inside the synced folder no longer triggers a requeue (issue #181).",
-    "The account setup wizard loads the remote folder list from the stored credentials instead of a cleared password field (issue #147).",
-    "Conflict/Recent/Deletion lists are emptied with remove_all() instead of unparent(), fixing an intermittent GTK crash during sync (issue #153).",
-    "The mass-deletion review groups paths by top-level folder with expanders, so a large cleanup is readable at a glance (issue #182).",
-    "The flaky login-flow integration test is stable: requests are answered by URL, verified 60/60 runs (issue #174).",
-    "The heavy-folder re-discovery issue is closed as superseded: the ETag gate (#189) + queue discipline (#181) stop the no-change re-scan (issue #166)."
+    "The root ETag recorded by the interval gate is saved per folder in the app state directory and re-seeded on startup (issue #195).",
+    "Consequence: after a restart, the first remote-interval run skips the reconciliation when nothing changed remotely, instead of re-scanning the full tree."
   ],
   "released_at": "2026-08-26T00:00:00Z"
 }

@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.14] - 2026-08-26
+
+### Cambiado
+- **El ETag de cada carpeta se guarda entre reinicios (#195)**: el ETag que el sondeo periódico usa para saber si algo cambió en el servidor (del #189) ahora se persiste en el directorio de estado de la app y se restaura al arrancar. Antes, al reiniciar la app, el primer sondeo de cada carpeta re-escaneaba el árbol completo aunque no hubiera cambios remotos; ahora ese primer sondeo salta la reconciliación si el servidor no ha cambiado, como el resto de sondeos.
+
 ## [0.2.12] - 2026-08-26
 
 ### Corregido
