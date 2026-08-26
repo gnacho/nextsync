@@ -150,6 +150,38 @@ pub type RemoteEnsurer =
 /// instead of retrying a dead server forever.
 pub type HealthProbe = Arc<dyn Fn(&AccountConfig, &str) -> Result<(), ApiError> + Send + Sync>;
 
+/// Reads the root ETag of a folder to decide whether a periodic interval
+/// reconciliation can be skipped (issue #189).
+///
+/// Returns `Ok(Some(etag))` when the server reported the folder's ETag,
+/// `Ok(None)` when it is absent, and `Err` on transport/auth problems. A
+/// mismatch against the recorded value means the remote tree changed; an
+/// error means "do not skip" (a real change might go unseen).
+pub type EtagProbe = Arc<
+    dyn Fn(&AccountConfig, &FolderConfig, &str) -> Result<Option<String>, ApiError> + Send + Sync,
+>;
+
+/// Production [`EtagProbe`]: a `PROPFIND Depth:0` for `<getetag/>` on the
+/// folder root (mirrors the official client's `RequestEtagJob`).
+#[derive(Default)]
+pub struct ProductionEtagProbe;
+
+impl ProductionEtagProbe {
+    /// Read the folder root ETag for one folder pair.
+    pub fn run(
+        account: &AccountConfig,
+        folder: &FolderConfig,
+        password: &str,
+    ) -> Result<Option<String>, ApiError> {
+        NextcloudApi::new().root_etag(
+            &account.server_url,
+            &account.login_name,
+            password,
+            &folder.remote_path,
+        )
+    }
+}
+
 /// Production [`HealthProbe`]: a short GET to the server's status endpoint.
 ///
 /// Nextcloud answers `/status.php`; OpenCloud answers `/` with a status
@@ -224,6 +256,13 @@ pub struct SyncEngine {
     process: Arc<Mutex<Option<Child>>>,
     remote_ensurer: Option<RemoteEnsurer>,
     health_probe: Option<HealthProbe>,
+    /// Issue #189: last observed root ETag of this folder, shared between the
+    /// main thread (captured when a run starts) and the worker. Comparing it
+    /// against a fresh `PROPFIND` lets the periodic remote-interval skip a
+    /// full `nextcloudcmd` reconciliation when nothing changed.
+    etag_slot: Arc<Mutex<Option<String>>>,
+    /// Issue #189: reads the folder root ETag before a periodic interval run.
+    etag_probe: Option<EtagProbe>,
 }
 
 impl SyncEngine {
@@ -251,6 +290,8 @@ impl SyncEngine {
             process: Arc::new(Mutex::new(None)),
             remote_ensurer: None,
             health_probe: None,
+            etag_slot: Arc::new(Mutex::new(None)),
+            etag_probe: None,
         }
     }
 
@@ -273,6 +314,13 @@ impl SyncEngine {
         self
     }
 
+    /// Install the folder ETag probe (issue #189). Without it the periodic
+    /// remote-interval always reconciles (no skip).
+    pub fn with_etag_probe(mut self, probe: EtagProbe) -> Self {
+        self.etag_probe = Some(probe);
+        self
+    }
+
     /// Whether a reconciliation is currently running.
     pub fn is_running(&self) -> bool {
         self.process
@@ -283,7 +331,7 @@ impl SyncEngine {
 }
 
 impl SyncRunner for SyncEngine {
-    fn start(&mut self, _reasons: &[Trigger], on_finished: Box<dyn FnOnce(SyncOutcome) + 'static>) {
+    fn start(&mut self, reasons: &[Trigger], on_finished: Box<dyn FnOnce(SyncOutcome) + 'static>) {
         let account_id = self.account.id.clone();
         let account = self.account.clone();
         let folder = self.folder.clone();
@@ -295,6 +343,8 @@ impl SyncRunner for SyncEngine {
         let process = Arc::clone(&self.process);
         let remote_ensurer = self.remote_ensurer.clone();
         let health_probe = self.health_probe.clone();
+        let etag_slot = Arc::clone(&self.etag_slot);
+        let etag_probe = self.etag_probe.clone();
         let inputs = EngineInputs {
             account,
             folder,
@@ -303,6 +353,9 @@ impl SyncRunner for SyncEngine {
             executable,
             remote_ensurer,
             health_probe,
+            reasons: reasons.to_vec(),
+            etag_slot,
+            etag_probe,
         };
         glib::spawn_future_local(async move {
             let run =
@@ -365,6 +418,13 @@ struct EngineInputs {
     executable: Option<PathBuf>,
     remote_ensurer: Option<RemoteEnsurer>,
     health_probe: Option<HealthProbe>,
+    /// Issue #189: the triggers that requested this run (used to decide whether
+    /// the ETag gate applies, i.e. a periodic interval that may be skipped).
+    reasons: Vec<Trigger>,
+    /// Issue #189: shared last-observed root ETag (see [`SyncEngine::etag_slot`]).
+    etag_slot: Arc<Mutex<Option<String>>>,
+    /// Issue #189: reads the folder root ETag before a periodic interval run.
+    etag_probe: Option<EtagProbe>,
 }
 
 /// Run the whole reconciliation on the blocking thread pool.
@@ -416,6 +476,32 @@ fn engine_thread(
                 }
             }
             Err(_) => {}
+        }
+    }
+    // Issue #189: for a pure periodic remote-interval run, a cheap root-ETag
+    // check tells us whether the remote tree changed at all. If it has not,
+    // skip the whole `nextcloudcmd` reconciliation (it scans the trees and
+    // emits a huge number of progress events for nothing). This is exactly
+    // what the official client does with `RequestEtagJob`/`Folder::etagRetrieved`:
+    // only a changed ETag triggers a full sync. Non-interval runs (manual,
+    // inotify, startup, remote push, network-restored, resume, retry, local
+    // recovery) always reconcile.
+    if etag_gate_applies(&inputs.reasons) {
+        if let Some(probe) = inputs.etag_probe.as_ref() {
+            let fresh = probe(&inputs.account, &inputs.folder, &password);
+            if let Ok(Some(fresh_etag)) = fresh {
+                let previous = inputs.etag_slot.lock().unwrap().clone();
+                if previous.as_deref() == Some(fresh_etag.as_str()) {
+                    // Nothing changed remotely: report a clean success and keep
+                    // the recorded ETag so the next interval also skips.
+                    return EngineRun::Direct(SyncOutcome::Success);
+                }
+                // Changed (or first run): record the new ETag and reconcile.
+                *inputs.etag_slot.lock().unwrap() = Some(fresh_etag);
+            }
+            // Ok(None) or Err(_): the server did not answer or the ETag is
+            // unavailable - do NOT skip the reconciliation (a real change
+            // might be missed).
         }
     }
     let driver = driver_for(inputs.account.provider);
@@ -509,6 +595,14 @@ fn engine_thread(
         }
     }
     EngineRun::Result(result)
+}
+
+/// Whether the request reasons consist solely of the periodic remote interval
+/// (issue #189). Only then is the root-ETag gate applied; user-triggered and
+/// change-driven runs (inotify, startup, remote push, manual, recovery) must
+/// always reconcile, otherwise a real change could be missed.
+fn etag_gate_applies(reasons: &[Trigger]) -> bool {
+    matches!(reasons, [Trigger::RemoteInterval])
 }
 
 /// Drain one process stream: redact, retain the tail and emit parsed
@@ -670,6 +764,30 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         panic!("timed out waiting for the engine outcome");
+    }
+
+    /// Run an engine with a periodic remote-interval reason (the only trigger
+    /// the ETag gate applies to), returning the outcome. A skipped run still
+    /// resolves (success) without ever spawning `nextcloudcmd`.
+    fn run_engine_interval(
+        mut engine: SyncEngine,
+        progress_rx: &async_channel::Receiver<SyncProgress>,
+    ) -> SyncOutcome {
+        let context = glib::MainContext::new();
+        let (outcome_tx, outcome_rx) = std::sync::mpsc::channel();
+        let outcome = context
+            .with_thread_default(|| {
+                engine.start(
+                    &[Trigger::RemoteInterval],
+                    Box::new(move |outcome| {
+                        let _ = outcome_tx.send(outcome);
+                    }),
+                );
+                pump_outcome(&context, &outcome_rx)
+            })
+            .expect("the test main context is available");
+        while progress_rx.try_recv().is_ok() {}
+        outcome
     }
 
     #[test]
@@ -1153,6 +1271,106 @@ mod tests {
         .with_health_probe(Arc::new(|_account, _password| Ok(())));
         let (outcome, _) = run_engine(engine, &async_channel::unbounded().1);
         assert_eq!(outcome, SyncOutcome::Success);
+    }
+
+    /// Issue #189: an unchanged root ETag on a periodic interval skips the
+    /// reconciliation - `nextcloudcmd` is never spawned and the run reports a
+    /// clean success (the folder is already up to date).
+    #[test]
+    fn unchanged_etag_skips_the_interval_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("engine-ran");
+        let script = write_script(
+            dir.path(),
+            "fake-engine-etag-skip",
+            &format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+        );
+        let (etag_tx, _etag_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            etag_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_etag_probe(Arc::new(|_account, _folder, _password| {
+            Ok(Some("\"abc\"".to_string()))
+        }));
+        // Seed the slot with the same ETag the probe returns (a prior run
+        // recorded it), then a pure interval must not reconcile.
+        *engine.etag_slot.lock().unwrap() = Some("\"abc\"".to_string());
+        let outcome = run_engine_interval(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::Success);
+        assert!(!marker.exists(), "nextcloudcmd must not be spawned");
+    }
+
+    /// Issue #189: a changed root ETag (or no recorded ETag yet, e.g. first
+    /// run) must reconcile.
+    #[test]
+    fn changed_etag_reconciles_the_interval_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("engine-ran");
+        let script = write_script(
+            dir.path(),
+            "fake-engine-etag-changed",
+            &format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+        );
+        let (etag_tx, _etag_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            etag_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_etag_probe(Arc::new(|_account, _folder, _password| {
+            Ok(Some("\"new-etag\"".to_string()))
+        }));
+        // Previous recorded ETag differs from the fresh one -> must sync.
+        *engine.etag_slot.lock().unwrap() = Some("\"old-etag\"".to_string());
+        let outcome = run_engine_interval(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::Success);
+        assert!(marker.exists(), "nextcloudcmd must be spawned");
+    }
+
+    /// Issue #189: the gate only applies to a pure remote-interval run; a
+    /// manual run must always reconcile even if the ETag is unchanged.
+    #[test]
+    fn manual_run_ignores_the_etag_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("engine-ran");
+        let script = write_script(
+            dir.path(),
+            "fake-engine-etag-manual",
+            &format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+        );
+        let (etag_tx, _etag_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(script),
+            etag_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_etag_probe(Arc::new(|_account, _folder, _password| {
+            Ok(Some("\"abc\"".to_string()))
+        }));
+        *engine.etag_slot.lock().unwrap() = Some("\"abc\"".to_string());
+        let (outcome, _) = run_engine(engine, &async_channel::unbounded().1); // Manual
+        assert_eq!(outcome, SyncOutcome::Success);
+        assert!(marker.exists(), "manual run must reconcile");
     }
 
     /// Issue #179: a run that ends Failed while the server does not answer a

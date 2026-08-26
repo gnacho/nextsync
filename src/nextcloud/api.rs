@@ -72,6 +72,12 @@ use roxmltree::{Document, Node};
 /// bodies are ever downloaded).
 const PROPFIND_BODY: &[u8] = b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>";
 
+/// PROPFIND body requesting only `<getetag/>`, used for the cheap root ETag
+/// poll that gates the periodic remote reconciliation (issue #189). Unlike
+/// [`PROPFIND_BODY`] it asks for a single property so the response is small
+/// and the comparison is just the folder's own ETag.
+const PROPFIND_ETAG_BODY: &[u8] = b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:getetag/></d:prop></d:propfind>";
+
 /// PROPFIND body for the trashbin listing (issue #38): the Nextcloud
 /// trash properties plus the resource type.
 const TRASH_PROPFIND_BODY: &[u8] = b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\" xmlns:nc=\"http://nextcloud.org/ns\"><d:prop><d:resourcetype/><nc:trashbin-filename/><nc:trashbin-original-location/><nc:trashbin-deletion-time/></d:prop></d:propfind>";
@@ -456,6 +462,42 @@ impl NextcloudApi {
             .filter(|entry| entry.href_path != folder_path)
             .count();
         Ok(children > 0)
+    }
+
+    /// Return the WebDAV ETag of a folder root, used to gate a periodic
+    /// reconciliation (issue #189).
+    ///
+    /// A single `PROPFIND` with `Depth: 0` asking for `<getetag/>` returns the
+    /// folder's own ETag cheaply (mirrors the official client's `RequestEtagJob`).
+    /// The app compares this against the last value it recorded: when it is
+    /// unchanged, the folder's remote tree has not changed, so the full
+    /// `nextcloudcmd` reconciliation can be skipped. Returned `trimmed`; an
+    /// absent/empty `<getetag>` yields `Ok(None)`. Transport/auth errors keep
+    /// their [`ApiError`] so the caller can decide (e.g. treat an unreachable
+    /// server as "changed" to avoid skipping a real change).
+    pub fn root_etag(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+        remote_path: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let base = dav_base(server, username);
+        let folder = format!(
+            "{base}{}/",
+            percent_encode_path(remote_path.trim_end_matches('/'))
+        );
+        let authorization = basic_authorization(username, password);
+        let headers = [
+            ("Depth", "0"),
+            ("Content-Type", "application/xml; charset=utf-8"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response =
+            self.http
+                .request("PROPFIND", &folder, &headers, Some(PROPFIND_ETAG_BODY))?;
+        map_status(response.status)?;
+        Ok(parse_root_etag(&response.body))
     }
 
     /// Estimate the total size in bytes of a remote folder (issue #36).
@@ -1100,6 +1142,20 @@ fn href_path_of(value: &str) -> &str {
     path.trim_end_matches('/')
 }
 
+/// Parse the `<getetag>` of a root PROPFIND (issue #189).
+///
+/// Takes the first `<d:getetag>` in the response and returns its trimmed text.
+/// An absent or empty value yields `None` (the folder reports no ETag).
+fn parse_root_etag(body: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(body).ok()?;
+    let doc = Document::parse(text).ok()?;
+    doc.descendants()
+        .find(|node| node.has_tag_name((DAV_NS, "getetag")))
+        .and_then(|node| node.text())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
 /// Parse a PROPFIND multistatus body into normalized entries.
 fn parse_multistatus(body: &[u8]) -> Result<Vec<PropfindEntry>, ApiError> {
     let text = std::str::from_utf8(body).map_err(|_| ApiError::InvalidResponse)?;
@@ -1247,6 +1303,17 @@ mod tests {
     <d:href>/remote.php/dav/files/alice/</d:href>
     <d:propstat>
       <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    const ROOT_ETAG_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>&quot;cafebabe-0123456789&quot;</d:getetag></d:prop>
       <d:status>HTTP/1.1 200 OK</d:status>
     </d:propstat>
   </d:response>
@@ -1642,6 +1709,42 @@ mod tests {
             .unwrap();
         let request = &requests.borrow()[0];
         assert!(request.url.ends_with("/Documents/"));
+    }
+
+    #[test]
+    fn root_etag_reads_the_etag_with_depth_zero() {
+        let http = FakeHttp::new(207, ROOT_ETAG_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        let etag = api
+            .root_etag("https://cloud.example.com", "alice", "secret", "/")
+            .unwrap();
+        assert_eq!(etag.as_deref(), Some("\"cafebabe-0123456789\""));
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "PROPFIND");
+        assert_eq!(header_value(request, "Depth"), Some("0"));
+        assert!(request.body.is_some());
+    }
+
+    #[test]
+    fn root_etag_absent_body_yields_none() {
+        let http = FakeHttp::new(207, EMPTY_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.root_etag("https://cloud.example.com", "alice", "secret", "/")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_root_etag_returns_trimmed_text() {
+        let body = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:propstat><d:prop><d:getetag>  &quot;abc&quot;  </d:getetag></d:prop></d:propstat></d:response>
+</d:multistatus>"#;
+        assert_eq!(parse_root_etag(body).as_deref(), Some("\"abc\""));
+        assert_eq!(parse_root_etag(br#"<xx/>"#), None);
     }
 
     #[test]
