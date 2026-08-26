@@ -167,12 +167,19 @@ impl WatcherTargets {
         }
     }
 
-    /// A remote file hint triggers a remote-push sync on every folder, like the
-    /// Python `NotifyPushClient` callback `scheduler.request(REMOTE_PUSH)`.
-    fn apply_remote_push(targets: &Rc<RefCell<WatcherTargets>>) {
+    /// Route a remote file hint to the folders that contain the notified files.
+    ///
+    /// With `notify_file_id` (issue #183) each notified id maps to the folder
+    /// whose external journal knows that file (`has_file_ids`), so only those
+    /// folders get a remote-push sync instead of re-syncing every folder of
+    /// the account. A legacy `notify_file` (empty ids) fans out to every
+    /// folder, preserving the original `NotifyPushClient` behaviour.
+    fn apply_remote_push(targets: &Rc<RefCell<WatcherTargets>>, file_ids: Vec<i64>) {
         let schedulers = targets.borrow().schedulers.clone();
         for scheduler in &schedulers {
-            scheduler.request(Trigger::RemotePush);
+            if file_ids.is_empty() || scheduler.has_file_ids(&file_ids) {
+                scheduler.request(Trigger::RemotePush);
+            }
         }
     }
 
@@ -180,6 +187,13 @@ impl WatcherTargets {
     fn store_push_state(targets: &Rc<RefCell<WatcherTargets>>, state: PushState, message: String) {
         if let Ok(mut current) = targets.try_borrow_mut() {
             current.push_state = Some((state, message));
+            // Issue #185: while push is connected it is the real-time source of
+            // truth, so the periodic remote-interval poll can be skipped. Tell
+            // every folder scheduler whether to drop `RemoteInterval`.
+            let ready = state == PushState::Connected;
+            for scheduler in &current.schedulers {
+                scheduler.set_remote_push_ready(ready);
+            }
         }
     }
 
@@ -876,7 +890,7 @@ impl AccountRuntime {
         let state_targets = Rc::clone(&self.targets);
         Some(NotifyPushClient::new(
             self.account.provider,
-            move || WatcherTargets::apply_remote_push(&file_targets),
+            move |file_ids| WatcherTargets::apply_remote_push(&file_targets, file_ids),
             move || WatcherTargets::apply_server_notification(&notification_targets),
             move |state, message| WatcherTargets::store_push_state(&state_targets, state, message),
         ))
@@ -1213,9 +1227,11 @@ impl AccountRuntime {
     }
 
     /// Drive the notify_push file-notification fan-out (what the client's
-    /// `on_file_notification` callback runs in production).
-    pub(crate) fn simulate_remote_push(&self) {
-        WatcherTargets::apply_remote_push(&self.targets);
+    /// `on_file_notification` callback runs in production). An empty list is
+    /// the legacy `notify_file` fan-out; non-empty ids route to the folders
+    /// that contain them (issue #183).
+    pub(crate) fn simulate_remote_push(&self, file_ids: Vec<i64>) {
+        WatcherTargets::apply_remote_push(&self.targets, file_ids);
     }
 
     /// Build the push client for the current account (test mirror of
@@ -1933,7 +1949,7 @@ mod tests {
 
         // `simulate_remote_push` runs exactly what the NotifyPushClient
         // `on_file_notification` callback runs in production.
-        runtime.simulate_remote_push();
+        runtime.simulate_remote_push(Vec::new());
         assert!(source.borrow().pending() >= 1);
     }
 
