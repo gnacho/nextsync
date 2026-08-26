@@ -212,6 +212,11 @@ impl Default for DeleteGuardConfig {
 pub struct RuntimeConfig {
     pub last_successful_sync: Option<String>,
     pub last_exit_code: Option<i64>,
+    /// Issue #195: last observed root ETag per folder, keyed by the folder's
+    /// `remote_path`. Persisted so a restart can skip the first no-change
+    /// reconciliation (the ETag gate #189). Best-effort runtime data.
+    #[serde(default)]
+    pub remote_etags: std::collections::HashMap<String, String>,
 }
 
 /// General (non-account) settings.
@@ -1145,6 +1150,18 @@ fn validate_runtime(raw: Option<&Value>) -> RuntimeConfig {
             .and_then(Value::as_str)
             .map(str::to_string),
         last_exit_code: merged.get("last_exit_code").and_then(Value::as_i64),
+        remote_etags: merged
+            .get("remote_etags")
+            .and_then(Value::as_object)
+            .map(|object| {
+                object
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        value.as_str().map(|text| (key.clone(), text.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
