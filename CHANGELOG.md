@@ -2,6 +2,17 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.12] - 2026-08-26
+
+### Corregido
+- **Una carpeta ya no se re-ejecuta por sus propios eventos de archivo (#181)**: el motor `nextcloudcmd` escribe su registro de sincronización dentro de la carpeta sincronizada, y ese árbol lo vigila el watcher de inotify; cada ejecución generaba eventos locales que re-encolaban la carpeta (8 ejecuciones del motor en 27 segundos, "la carpeta salta"). Ahora, durante la ejecución y el enfriamiento, el feedback local autogenerado se descarta: una carpeta solo vuelve a sincronizar por un cambio real, no por su propio trabajo.
+- **El asistente de configuración ya carga las carpetas remotas (#147)**: tras iniciar sesión (navegador o manual), el campo de contraseña se vacía y el secreto vive en el llavero; el selector de carpetas del asistente leía el campo vacío y se abría sin lista. Ahora resuelve la credencial del llavero.
+- **Crashes GTK intermitentes durante la sincronización (#153)**: las listas de Conflictos, Recientes y Borrados se vaciaban con `unparent()`, dejando filas fantasma en el `GtkListBox` que terminaban en SIGSEGV (el crash que llevabas semanas viendo). Ahora se vacían con `remove_all()`.
+- **El test flaky del login_flow ya no falla (#174)**: el servidor de prueba responde cada petición por URL en vez de una secuencia posicional; verificado 60/60 ejecuciones sin el `PollHttp 400` (antes ~1/143).
+
+### Cambiado
+- **La revisión de borrado masivo se agrupa por carpeta de nivel superior (#182)**: en vez de una lista plana de hasta 100 rutas, una limpieza grande (SDK vendored, virtualenvs, cachés) se muestra agrupada por directorio con contador y filas expandibles, para que se vea de un vistazo qué se va a borrar.
+
 ## [0.2.10] - 2026-08-26
 
 ### Cambiado
