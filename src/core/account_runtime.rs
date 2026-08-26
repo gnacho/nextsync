@@ -384,6 +384,9 @@ impl FolderRuntime {
         }))
         .with_health_probe(Arc::new(|account, _password| {
             crate::nextcloud::sync_engine::ProductionHealthProbe::run(account)
+        }))
+        .with_etag_probe(Arc::new(|account, folder, password| {
+            crate::nextcloud::sync_engine::ProductionEtagProbe::run(account, folder, password)
         }));
         (Box::new(engine), rx)
     }
