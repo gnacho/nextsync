@@ -263,6 +263,11 @@ pub struct SyncEngine {
     etag_slot: Arc<Mutex<Option<String>>>,
     /// Issue #189: reads the folder root ETag before a periodic interval run.
     etag_probe: Option<EtagProbe>,
+    /// Issue #195: called on the main thread when a periodic interval run
+    /// records a new root ETag for this folder, so the caller can persist it
+    /// across restarts (avoiding the first-run re-scan). Best-effort: the
+    /// engine never blocks on this.
+    on_etag_change: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
 impl SyncEngine {
@@ -279,6 +284,11 @@ impl SyncEngine {
         executable: Option<PathBuf>,
         progress: async_channel::Sender<SyncProgress>,
     ) -> Self {
+        // Issue #195: seed the ETag slot from the persisted value so the first
+        // periodic interval after a restart skips the reconciliation when the
+        // remote tree is unchanged (avoids the full re-scan).
+        let folder_id = folder.id.clone();
+        let seeded_etag = crate::core::etag_store::read_etag(&folder_id);
         Self {
             account,
             folder,
@@ -290,8 +300,9 @@ impl SyncEngine {
             process: Arc::new(Mutex::new(None)),
             remote_ensurer: None,
             health_probe: None,
-            etag_slot: Arc::new(Mutex::new(None)),
+            etag_slot: Arc::new(Mutex::new(seeded_etag)),
             etag_probe: None,
+            on_etag_change: None,
         }
     }
 
@@ -321,6 +332,14 @@ impl SyncEngine {
         self
     }
 
+    /// Install a callback invoked (best-effort) when a periodic interval run
+    /// records a new root ETag (issue #195). The caller persists it so a
+    /// restart does not re-scan a folder whose remote tree is unchanged.
+    pub fn with_on_etag_change(mut self, callback: Arc<dyn Fn(String) + Send + Sync>) -> Self {
+        self.on_etag_change = Some(callback);
+        self
+    }
+
     /// Whether a reconciliation is currently running.
     pub fn is_running(&self) -> bool {
         self.process
@@ -345,6 +364,7 @@ impl SyncRunner for SyncEngine {
         let health_probe = self.health_probe.clone();
         let etag_slot = Arc::clone(&self.etag_slot);
         let etag_probe = self.etag_probe.clone();
+        let on_etag_change = self.on_etag_change.clone();
         let inputs = EngineInputs {
             account,
             folder,
@@ -356,6 +376,7 @@ impl SyncRunner for SyncEngine {
             reasons: reasons.to_vec(),
             etag_slot,
             etag_probe,
+            on_etag_change,
         };
         glib::spawn_future_local(async move {
             let run =
@@ -425,6 +446,8 @@ struct EngineInputs {
     etag_slot: Arc<Mutex<Option<String>>>,
     /// Issue #189: reads the folder root ETag before a periodic interval run.
     etag_probe: Option<EtagProbe>,
+    /// Issue #195: best-effort callback to persist a newly recorded ETag.
+    on_etag_change: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
 /// Run the whole reconciliation on the blocking thread pool.
@@ -497,7 +520,14 @@ fn engine_thread(
                     return EngineRun::Direct(SyncOutcome::Success);
                 }
                 // Changed (or first run): record the new ETag and reconcile.
-                *inputs.etag_slot.lock().unwrap() = Some(fresh_etag);
+                *inputs.etag_slot.lock().unwrap() = Some(fresh_etag.clone());
+                // Issue #195: persist best-effort so the next restart can skip
+                // the first no-change reconciliation.
+                crate::core::etag_store::write_etag(&inputs.folder.id, &fresh_etag);
+                // Issue #195: also surface the change to an optional callback.
+                if let Some(callback) = inputs.on_etag_change.as_ref() {
+                    callback(fresh_etag);
+                }
             }
             // Ok(None) or Err(_): the server did not answer or the ETag is
             // unavailable - do NOT skip the reconciliation (a real change
