@@ -404,9 +404,11 @@ fn wire_deletion_actions(
 
 /// Rebuild the deletion-review tab from the folder's current deletion alert.
 fn reload_deletions(target: &DeletionTarget) {
-    while let Some(child) = target.list.first_child() {
-        child.unparent();
-    }
+    // Issue #153: `GtkListBox` must be emptied with `remove_all()` (or
+    // `remove(&child)`); unparenting children leaves them in the box's
+    // internal children list, producing stale rows that crash GTK later
+    // (SIGSEGV in widget-tree code during a rebuild, e.g. mid-sync).
+    target.list.remove_all();
     let Some(alert) = target.scheduler.delete_alert() else {
         target.empty_state.set_visible(true);
         target.list_clamp.set_visible(false);
@@ -511,9 +513,9 @@ fn reload_conflicts(target: &ReloadTarget) {
         &target.local_root,
         &target.matcher,
     );
-    while let Some(child) = list.first_child() {
-        child.unparent();
-    }
+    // Issue #153: use `remove_all()` (see `reload_deletions`); unparenting
+    // leaves stale children in the ListBox's internal list and can crash GTK.
+    list.remove_all();
     let conflicts = find_conflicts(local_root, matcher);
     if conflicts.is_empty() {
         empty_state.set_visible(true);
@@ -654,9 +656,9 @@ fn reload_recent_if_changed(
 
 /// Rebuild the Recent list from the parsed log lines.
 fn rebuild_recent(list: &gtk4::ListBox, lines: &[String]) {
-    while let Some(child) = list.first_child() {
-        child.unparent();
-    }
+    // Issue #153: use `remove_all()` (see `reload_deletions`); unparenting
+    // leaves stale children in the ListBox's internal list and can crash GTK.
+    list.remove_all();
     let start = lines.len().saturating_sub(RECENT_VISIBLE_LINES);
     for line in lines.iter().skip(start) {
         list.append(&recent_row(&parse_activity_line(line)));
@@ -747,6 +749,34 @@ mod tests {
             // No conflicted copies were found in the empty temp folder.
             assert!(!window._conflict_list.first_child().is_some());
             reset_locale();
+        });
+    }
+
+    /// Issue #153: rebuilding the Recent list must drop the previous rows
+    /// (via `remove_all`, not `unparent`) so no stale children linger.
+    #[test]
+    fn rebuild_recent_replaces_the_rows_cleanly() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let list = gtk4::ListBox::new();
+            rebuild_recent(
+                &list,
+                &[
+                    "2026-08-07 14:12:41 INFO    A.".to_string(),
+                    "2026-08-07 14:13:41 INFO    B.".to_string(),
+                    "2026-08-07 14:14:41 INFO    C.".to_string(),
+                    "2026-08-07 14:15:41 INFO    D.".to_string(),
+                ],
+            );
+            assert!(list.first_child().is_some(), "the list should be populated");
+            // Rebuild with a single line: the previous rows must be gone.
+            rebuild_recent(&list, &["2026-08-07 15:00:00 INFO    E.".to_string()]);
+            let mut count = 0;
+            let mut child = list.first_child();
+            while let Some(row) = child {
+                count += 1;
+                child = row.next_sibling();
+            }
+            assert_eq!(count, 1, "only the new row must remain");
         });
     }
 }
