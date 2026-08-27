@@ -37,9 +37,9 @@ It is deliberately boring engineering. The reconciliation logic stays in the off
 
 ## Why it exists
 
-I started with a Python fork of PyNextCloud-Sync, a small GNOME app by ehstbr that had already figured out the right idea: do not invent another synchronization algorithm, wrap the official engine and make it pleasant to live with. I used that app, learned from it, and agreed with most of its choices.
+NextSync started as [nextsync-py](https://github.com/gnacho/nextsync-py), a small Python and GTK app that wrapped the official Nextcloud command line engine in a proper desktop experience. It worked well enough to run every day, but everything paid the Python tax: an interpreter to ship, a startup to wait for, and dynamic typing that turned GObject lifetime mistakes into runtime surprises instead of compiler errors.
 
-The rewrite in Rust happened for practical reasons: I wanted several accounts and several providers in a single app, one binary without a Python runtime, and a codebase where async callbacks and GObject lifetimes could not bite me at runtime. The wrapper philosophy carried over intact, the desktop layer was rebuilt, and the project grew into something of its own. Thank you, ehstbr, for releasing the original under GPL-3.0-or-later and making all of this possible.
+The rewrite in Rust happened for practical reasons: several accounts and several providers in a single app, one small binary, and a codebase where async callbacks and GObject lifetimes cannot bite at runtime. The wrapper philosophy carried over intact and the desktop layer was rebuilt along the way.
 
 ## What it does
 
@@ -131,10 +131,6 @@ cargo fmt --check
 The suite covers configuration, credentials, the scheduler, the sync engine, the push protocol, the deletion review, and the interface logic, with GTK smoke tests that tolerate headless environments. CI runs the same checks plus an i18n parity test that fails if any interface string lacks its Spanish translation, and a coverage job.
 
 More in [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and the [CHANGELOG](CHANGELOG.md).
-
-## Credits
-
-NextSync began life as a fork of [PyNextCloud-Sync](https://github.com/ehstbr/PyNextCloud-Sync) by ehstbr. The code has since been rewritten in Rust and the project has grown into something of its own, but the core idea and the original good judgment are inherited. Like the original, it is released under [GPL-3.0-or-later](LICENSE).
 
 ---
 

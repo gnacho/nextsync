@@ -37,9 +37,9 @@ Es ingeniería aburrida a propósito. La lógica de reconciliación se queda en 
 
 ## Por qué existe
 
-Empecé con un fork en Python de PyNextCloud-Sync, una pequeña app de GNOME de ehstbr que ya había entendido la idea correcta: no inventar otro algoritmo de sincronización, envolver el motor oficial y hacer que vivir con él sea agradable. Usé esa app, aprendí de ella y compartía la mayoría de sus decisiones.
+NextSync empezó siendo [nextsync-py](https://github.com/gnacho/nextsync-py), una pequeña app en Python y GTK que envolvía el motor oficial de línea de comandos de Nextcloud en una experiencia de escritorio de verdad. Funcionaba lo bastante bien como para correr cada día, pero todo pagaba el peaje de Python: un intérprete que llevar encima, un arranque que esperar y tipado dinámico que convertía los errores de lifetime de GObject en sorpresas en tiempo de ejecución en vez de en errores de compilación.
 
-La reescritura en Rust llegó por razones prácticas: quería varias cuentas y varios proveedores en una sola app, un único binario sin runtime de Python y un código donde los callbacks asíncronos y los lifetimes de GObject no pudieran morderme en tiempo de ejecución. La filosofía del envoltorio siguió intacta, la capa de escritorio se reconstruyó y el proyecto creció hasta tener vida propia. Gracias, ehstbr, por publicar el original bajo GPL-3.0-or-later y hacer posible todo esto.
+La reescritura en Rust llegó por razones prácticas: varias cuentas y varios proveedores en una sola app, un único binario pequeño y un código donde los callbacks asíncronos y los lifetimes de GObject no pueden morder en tiempo de ejecución. La filosofía del envoltorio siguió intacta y la capa de escritorio se reconstruyó por el camino.
 
 ## Qué hace
 
@@ -131,10 +131,6 @@ cargo fmt --check
 La batería cubre configuración, credenciales, planificador, motor de sincronización, protocolo push, revisión de borrados y lógica de interfaz, con tests de humo GTK que toleran entornos sin pantalla. CI ejecuta las mismas comprobaciones más un test de paridad i18n que falla si a alguna cadena de la interfaz le falta su traducción al español, y un job de cobertura.
 
 Más en [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) y el [CHANGELOG](CHANGELOG.md).
-
-## Créditos
-
-NextSync empezó siendo un fork de [PyNextCloud-Sync](https://github.com/ehstbr/PyNextCloud-Sync) de ehstbr. El código se ha reescrito en Rust desde entonces y el proyecto ha crecido hasta tener vida propia, pero la idea central y el buen criterio original son herencia. Como el original, se publica bajo [GPL-3.0-or-later](LICENSE).
 
 ---
 
