@@ -1,121 +1,139 @@
 <div align="center">
+  <img src="landing/assets/icon.svg" width="96" alt="NextSync icon">
   <h1>NextSync</h1>
-  <p><strong>Your files, local. Any server, in sync.</strong></p>
-  <p>A GNOME-native desktop companion for keeping complete local mirrors of your accounts. Server agnostic, built with Rust, GTK 4, and Libadwaita.</p>
+  <p><strong>Your files, local.<br>Any server, in sync.</strong></p>
+  <p>A GNOME desktop client that keeps a complete local mirror of your Nextcloud and OpenCloud accounts.<br>One small Rust binary. No telemetry, no subscriptions.</p>
   <p>
     <a href="https://nextsync.cloudless.club/">Website</a>
     ·
-    <a href="https://github.com/gnacho/nextsync/issues">Report an issue</a>
+    <a href="https://github.com/gnacho/nextsync/releases">Releases</a>
+    ·
+    <a href="https://github.com/gnacho/nextsync/issues">Issues</a>
   </p>
-  <p align="center">
-    <a href="README.md">English</a> |
+  <p>
+    <a href="README.md">English</a>
+    ·
     <a href="README.es.md">Español</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.2.16-6557e8?style=flat-square" alt="Version 0.2.16">
-    <a href="https://nextsync.cloudless.club/"><img src="https://img.shields.io/badge/web-nextsync.cloudless.club-26a269?style=flat-square" alt="Website"></a>
-    <img src="https://img.shields.io/badge/platform-Linux-f0c674?style=flat-square&logo=linux&logoColor=111" alt="Linux">
-    <img src="https://img.shields.io/badge/desktop-GNOME-4a86cf?style=flat-square&logo=gnome&logoColor=white" alt="GNOME">
-    <img src="https://img.shields.io/badge/GTK-4-4a86cf?style=flat-square&logo=gtk&logoColor=white" alt="GTK 4">
-    <img src="https://img.shields.io/badge/language-Rust-e57321?style=flat-square&logo=rust&logoColor=white" alt="Rust">
-    <img src="https://img.shields.io/badge/license-GPLv3%2B-2da44e?style=flat-square" alt="GNU GPLv3 or later">
+    <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+    <img src="https://img.shields.io/badge/version-0.2.16-blue?style=flat-square" alt="Version 0.2.16">
+    <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 or later">
   </p>
 </div>
 
-## A GNOME companion that does not care what server you run
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="landing/assets/shots/main-en-dark.webp">
+    <img src="landing/assets/shots/main-en-light.webp" width="820" alt="NextSync main window: accounts on the left, folder status rows with live sync progress on the right">
+  </picture>
+</p>
 
-NextSync is a GNOME desktop application that keeps one or more accounts mirrored to one or more local folders. It is **server agnostic by design**: it does not speak a vendor protocol, it delegates the synchronization itself to a command line sync tool, and it builds the desktop experience around that tool.
+## What it is
 
-Today that means two providers:
+You keep your files on your disk. When your computer and your server need to agree on what changed, NextSync calls the official command line engine for your platform and wraps it in a real desktop experience: accounts, per-folder configuration, live progress, conflict resolution, and a tray icon that reflects what is actually going on.
 
-- **Nextcloud**, through the official `nextcloudcmd` engine.
-- **OpenCloud**, through the official `opencloudcmd` engine.
+It is deliberately boring engineering. The reconciliation logic stays in the official engines, which carry years of edge cases behind them. Everything NextSync adds is desktop glue: when to run, what to show, and what to do when something goes wrong.
 
-Any platform that ships a synchronization CLI can be added later behind the same abstraction. The desktop layer (accounts, credentials, scheduling, filesystem monitoring, tray, windows, logs, conflict resolution) stays the same; only the command builder changes.
+## Why it exists
 
-The engine is the part that does the real work. NextSync is the part that makes it live nicely on the desktop: secure login, automatic triggers, a compact status window, GNOME integration, logs, and a tray menu.
+NextSync started as [nextsync-py](https://github.com/gnacho/nextsync-py), a small Python and GTK app that wrapped the official Nextcloud command line engine in a proper desktop experience. It worked well enough to run every day, but everything paid the Python tax: an interpreter to ship, a startup to wait for, and dynamic typing that turned GObject lifetime mistakes into runtime surprises instead of compiler errors.
 
-### A fork, with thanks
+The rewrite in Rust happened for practical reasons: several accounts and several providers in a single app, one small binary, and a codebase where async callbacks and GObject lifetimes cannot bite at runtime. The wrapper philosophy carried over intact and the desktop layer was rebuilt along the way.
 
-NextSync inherits its identity and much of its design from [**PyNextCloud-Sync**](https://github.com/ehstbr/PyNextCloud-Sync) by **ehstbr**. That project is a beautiful piece of work, and every good decision it made about the desktop experience carried over here.
+## What it does
 
-We took a different direction under the hood. PyNextCloud-Sync wraps one Nextcloud engine in Python and GTK 4 via PyGObject. NextSync is a Rust rewrite that generalizes the idea: instead of a companion for one specific Nextcloud account, it is a companion for **any sync tool** your server ships.
+**Synchronization**
 
-A big thank you to ehstbr for starting something so good, for making the right choices that we inherited, and for releasing it under the GPL-3.0-or-later license, which makes this project possible.
+- Multiple accounts, and multiple folders per account, each mapped to its own remote path or OpenCloud space.
+- Bidirectional reconciliation through the official engines, with delta transfers and conflicted copies.
+- A remote poll that checks the folder ETag first and skips the scan when the server did not change. The ETag survives restarts.
+- A scheduler that coalesces triggers into one queue, never runs two engines on the same folder, and never re-runs a folder because of its own sync events.
 
-## Why a Rust rewrite
+**Desktop**
 
-- **A single static binary.** No Python runtime, no site-packages layout. Distribution and autostart are trivial.
-- **Small idle footprint.** A tray and windows companion sits far below the Python interpreter baseline, and startup is near instant.
-- **Type safety across the app.** GObject lifetimes, async callbacks, and the state machine are exactly where Rust helps most.
-- **Server agnostic by construction.** The sync engine is behind a small trait, so adding a third provider is a command builder, not an architecture change.
+- A libadwaita interface with per-folder status rows and file-by-file progress while a sync runs.
+- A tray icon that reflects the global state (synced, syncing, paused, offline, needs attention) plus a menu to open the app or quit it. Closing the window keeps everything running.
+- Conflict resolution from the app: keep local, keep remote, per file or in bulk.
+- English and Spanish interface.
 
-## Highlights
+**Safety rails**
 
-- **Multi-account.** Each account keeps its own synchronization and runtime settings.
-- **Multi-folder.** Each account can mirror several local folders, each with its own remote path (or OpenCloud space), its own status, and its own triggers.
-- **Multi-provider.** Nextcloud and OpenCloud today, anything with a sync CLI tomorrow, all in one app.
-- **Built for large accounts.** No staging copies, no pre-transfer analysis. The engine's delta detection downloads only what differs.
-- **Resources optimized, not duplicated.** All triggers funnel into a single coalescing queue per account, and the app never starts two sync processes for the same folder. A remote change and a local change arriving together produce one run, not two.
-- **Official engine.** The CLI tool owns synchronization, conflict resolution, and safety. NextSync adds the desktop experience and the gaps the CLI leaves open.
-- **GNOME-native interface.** Rust, GTK 4, and Libadwaita.
-- **Secure credentials.** Stored through Secret Service / GNOME Keyring.
-- **Fast local detection.** Recursive Linux `inotify` monitoring with event coalescing.
-- **Tray menu.** Open, Settings, Log and Quit straight from the tray; closing the window keeps the app running in the background (the tray Quit item is the only way to fully exit).
-- **Deletion guard.** A mass local deletion blocks sync before the engine can propagate it, because the CLI engines do not ask for confirmation in non-interactive mode.
-- **Private by design.** No telemetry, no analytics, no remote crash reporting.
+- Before a mass local deletion is propagated, sync stops and the review groups what disappeared by top-level folder, with expandable details. You approve once, restore from the server, or stay paused.
+- If the server stops answering, the account goes offline instead of looping errors, and NextSync keeps probing until it is back.
+- Rejected credentials pause automatic syncs for that account instead of hammering the server with retries. A locked keyring retries on its own with a capped backoff.
 
-## How synchronization works
+**Privacy**
 
-Every trigger asks the same scheduler for a bidirectional reconciliation. Requests that arrive together are coalesced into a single queue, and the app never intentionally starts two engine processes for the same account.
-
-```mermaid
-flowchart LR
-    A["Local changes<br>inotify / interval"] --> Q["Single<br>sync queue"]
-    B["Remote hints<br>notify_push / interval"] --> Q
-    C["Manual sync<br>network / resume"] --> Q
-    Q --> E["Sync CLI<br>nextcloudcmd / opencloudcmd"]
-    E <--> F["Local mirror"]
-    E <--> S["Your server"]
-```
-
-> [!IMPORTANT]
-> Synchronization is bidirectional. Local and remote changes, including deletions, can be propagated to the other side. Keep an independent backup of important data and do not run another synchronization engine against the same local folder.
+- No telemetry, no analytics, no crash reporting. Nothing leaves your machine except sync traffic with your own server.
+- Credentials live in the Secret Service (GNOME Keyring). Logs are local files, one per day.
 
 ## Providers
 
-| Provider | Engine | Authentication |
+| Provider | Engine | Sign in |
 |---|---|---|
-| Nextcloud | `nextcloudcmd` | Login Flow v2 (browser) or credentials via Secret Service |
-| OpenCloud | `opencloudcmd` | App password created in the server web UI, stored in Secret Service |
+| Nextcloud | `nextcloudcmd` | Login Flow v2 in your browser, or app password |
+| OpenCloud | `opencloudcmd` | App password from the server web UI |
 
-Push notifications via `notify_push` apply to Nextcloud. OpenCloud has no `notify_push`, so that account relies on the remote interval trigger instead.
+Both engines sit behind the same small trait, so a new provider is a command builder, not an architecture change. Server push notifications (`notify_push`) apply to Nextcloud; accounts without push fall back to a polling interval.
 
-## Project status
+## Install
 
-This is an early development release. The architecture is in place: configuration, credentials, state machine, scheduler, sync engine with live progress, filesystem monitoring, deletion guard, and the provider abstraction. The GTK interface is being built next.
+### Arch, CachyOS and derivatives
 
-Test it with non-critical data before relying on it for regular synchronization, and always keep independent backups of important files.
-
-## Development and tests
+Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/nextsync/releases/latest) and install it:
 
 ```bash
-cargo check
-cargo test
-cargo clippy --all-targets -- -D warnings
+sudo pacman -U nextsync-0.2.16-1-x86_64.pkg.tar.zst
 ```
 
-The suite covers configuration, credentials, the state machine, the scheduler, the sync command builders for both providers, the live progress parser, filesystem monitoring, the deletion guard, and the notify_push protocol including a tolerant WebSocket handshake.
+The package depends on `gtk4` and `libadwaita`. For Nextcloud accounts install `nextcloud-client` (it provides `nextcloudcmd`); for OpenCloud accounts, the official `opencloudcmd`.
 
-Real-account tests require an actual server and a desktop session and are marked `#[ignore]`.
+### From source
 
-## Documentation
+You need Rust (cargo) plus the GTK 4 and libadwaita development packages:
 
-- [Implementation plan](plans/2026-08-13-rust-rewrite.md)
-- [GNU General Public License v3 or later](LICENSE)
+```bash
+git clone https://github.com/gnacho/nextsync
+cd nextsync
+cargo build --release
+```
+
+The binary lands in `target/release/nextsync`. A `PKGBUILD` is included if you prefer to build the full package with `makepkg` on an Arch-like distribution.
+
+## First run
+
+1. Add an account: server address, then sign in with the browser (Nextcloud Login Flow v2) or an app password (OpenCloud).
+2. Add folders: pick a local folder and where it maps on the server. For Nextcloud accounts the remote picker lists your existing folders; for OpenCloud you type the path.
+3. If the local folder already had files or a previous synchronization, NextSync shows what is about to happen before it starts touching anything.
+4. From there it syncs on changes, on schedule, and on server push events. Close the window; the tray keeps working.
+
+## Deletions travel both ways
+
+Sync mirrors deletions too. If a folder disappears locally, it disappears on the server, and the other way around. Keep an independent backup of anything important, and never point a second sync engine at the same local folder. The deletion review stops obvious disasters, but a review is not a backup.
+
+## Files on disk
+
+| What | Where |
+|---|---|
+| Configuration | `~/.config/nextsync/` |
+| State, logs, avatars | `~/.local/state/nextsync/` |
+| Credentials | GNOME Keyring (Secret Service) |
+
+## Development
+
+```bash
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+```
+
+The suite covers configuration, credentials, the scheduler, the sync engine, the push protocol, the deletion review, and the interface logic, with GTK smoke tests that tolerate headless environments. CI runs the same checks plus an i18n parity test that fails if any interface string lacks its Spanish translation, and a coverage job.
+
+More in [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and the [CHANGELOG](CHANGELOG.md).
 
 ---
 
 <p align="center"><sub>
-Nextcloud is a registered trademark of Nextcloud GmbH. OpenCloud is a product of the Heinlein Group. NextSync is an independent, unofficial project and is not affiliated with, sponsored by, endorsed by, or otherwise connected to either company. Use is subject to the GNU General Public License version 3 or later.
+Nextcloud is a registered trademark of Nextcloud GmbH. OpenCloud is a product of the Heinlein Group. NextSync is an independent, unofficial project and is not affiliated with, sponsored by, or endorsed by either company.
 </sub></p>
