@@ -60,6 +60,21 @@ pub fn failure_backoff_seconds(consecutive: u32) -> u64 {
     }
 }
 
+/// How a scheduler [`start`](SchedulerInner::start) attempt ended (issue #197).
+///
+/// A shared-permit waiter that wakes up but aborts must pass the turn on
+/// (`SyncPermit::release`), or the release is swallowed and every other
+/// waiter stays asleep forever with the permit free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartAttempt {
+    /// A run is in flight (the permit was taken).
+    Ran,
+    /// The scheduler registered a permit waiter and stays queued.
+    Waiting,
+    /// Nothing launched and nothing is waiting: the attempt is over.
+    Aborted,
+}
+
 /// How a finished reconciliation turned out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncOutcome {
@@ -713,21 +728,21 @@ impl SchedulerInner {
         self.start_source = Some(id);
     }
 
-    fn start(&mut self) {
+    fn start(&mut self) -> StartAttempt {
         self.start_source = None;
         if self.stopped || self.preparing || self.running || self.queue.is_empty() || !self.online {
-            return;
+            return StartAttempt::Aborted;
         }
         let reasons = self.queue.take();
         if let Some((_reason, message)) = self.environment_gate(reasons.contains(&Trigger::Manual))
         {
             self.queue.extend(reasons.iter().copied());
             self.state.set(AppState::Offline, message);
-            return;
+            return StartAttempt::Aborted;
         }
         if self.paused() && !reasons.contains(&Trigger::Manual) {
             self.local_dirty = true;
-            return;
+            return StartAttempt::Aborted;
         }
         // Issue #72: re-check the credential gate here too — automatic
         // reasons may reach `start` through paths that bypass `request`
@@ -738,14 +753,14 @@ impl SchedulerInner {
                 AppState::AuthRequired,
                 t("Credentials rejected. Sign in again in Account settings."),
             );
-            return;
+            return StartAttempt::Aborted;
         }
         if let Some(alert) = &self.delete_alert {
             if !self.delete_bypass_once {
                 self.queue.extend(reasons.iter().copied());
                 self.state
                     .set(AppState::DeleteReview, alert.message.clone());
-                return;
+                return StartAttempt::Aborted;
             }
         }
         // Fase 3: the deletion guard runs before every reconciliation. When it
@@ -758,25 +773,25 @@ impl SchedulerInner {
                 if let Some(alert) = guard.check() {
                     self.queue.extend(reasons.iter().copied());
                     self.set_delete_alert(alert);
-                    return;
+                    return StartAttempt::Aborted;
                 }
             }
         }
         self.delete_bypass_once = false;
-        self.prepare_sync(reasons);
+        self.prepare_sync(reasons)
     }
 
-    fn prepare_sync(&mut self, reasons: Vec<Trigger>) {
+    fn prepare_sync(&mut self, reasons: Vec<Trigger>) -> StartAttempt {
         if let Some(flag) = &self.run_active {
             flag.set(true);
         }
         self.state.set(AppState::Syncing, t("Synchronizing files…"));
         self.state.set_progress(None);
         self.preparing = true;
-        self.begin_run(reasons);
+        self.begin_run(reasons)
     }
 
-    fn begin_run(&mut self, reasons: Vec<Trigger>) {
+    fn begin_run(&mut self, reasons: Vec<Trigger>) -> StartAttempt {
         self.preparing = false;
         // Issue #35: never race an external engine over the same tree. The
         // scan is a cheap /proc walk; on a hit the run aborts with a clear
@@ -797,7 +812,7 @@ impl SchedulerInner {
                 )
                 .replacen("{name}", &engine, 1);
                 self.state.set(AppState::Error, message);
-                return;
+                return StartAttempt::Aborted;
             }
         }
         if let Some(permit) = &self.permit {
@@ -833,11 +848,24 @@ impl SchedulerInner {
                     // `start` directly, like Python's `idle_add(self._start)`.
                     let _ = source.borrow_mut().add_idle(Box::new(move || {
                         if let Some(inner) = weak.upgrade() {
-                            inner.borrow_mut().start();
+                            let attempt = inner.borrow_mut().start();
+                            if attempt == StartAttempt::Aborted {
+                                // Issue #197: this waiter was woken by a
+                                // release but could not start (empty queue,
+                                // already running, paused, ...). Pass the turn
+                                // on: without this, the release is swallowed
+                                // and every other waiter stays asleep forever
+                                // while the permit sits free (the tray then
+                                // shows syncing with nothing running).
+                                let permit = inner.borrow().permit.clone();
+                                if let Some(permit) = permit {
+                                    permit.release();
+                                }
+                            }
                         }
                     }));
                 }));
-                return;
+                return StartAttempt::Waiting;
             }
         }
         self.running = true;
@@ -850,6 +878,7 @@ impl SchedulerInner {
                 }
             }),
         );
+        StartAttempt::Ran
     }
 
     fn finished(&mut self, outcome: SyncOutcome) {
@@ -2621,5 +2650,67 @@ mod tests {
             source.borrow().pending() >= 1,
             "interval now schedules a run"
         );
+    }
+
+    /// Issue #197: a permit waiter that wakes up but cannot start must pass
+    /// the turn on. Reproduction: `first` holds the permit; `second` queues
+    /// behind it and registers a SECOND waiter (a new trigger while queued
+    /// re-enters `schedule_start` -> `begin_run`); `third` waits behind both.
+    /// When `first` releases, `second` runs and finishes; its release wakes
+    /// `second`'s leftover waiter, whose start finds an empty queue. Without
+    /// the propagation that release is swallowed and `third` stays queued
+    /// forever (the tray shows syncing with nothing running).
+    #[test]
+    fn aborted_permit_waiter_passes_the_turn_to_the_next_folder() {
+        let permit = SyncPermit::try_new(1).unwrap();
+        let (first, source_first, runner_first) = make_scheduler(Some(permit.clone()));
+        let (second, source_second, runner_second) = make_scheduler(Some(permit.clone()));
+        let (third, source_third, runner_third) = make_scheduler(Some(permit.clone()));
+
+        // `first` holds the permit.
+        first.request(Trigger::Manual);
+        run_idle(&source_first);
+        assert_eq!(runner_first.0.borrow().start_calls, 1);
+
+        // `second` queues behind it (first waiter registered).
+        second.request(Trigger::Manual);
+        run_idle(&source_second);
+        assert_eq!(second.state().snapshot().state, AppState::SyncQueued);
+
+        // A second trigger while queued registers another waiter for
+        // `second` (the queue coalesces, but begin_run runs again).
+        second.request(Trigger::Manual);
+        run_idle(&source_second);
+
+        // `third` waits behind `second`.
+        third.request(Trigger::Manual);
+        run_idle(&source_third);
+        assert_eq!(third.state().snapshot().state, AppState::SyncQueued);
+
+        // `first` finishes: the release wakes `second`'s first waiter, which
+        // runs and finishes.
+        finish(&runner_first, SyncOutcome::Success);
+        run_idle(&source_second);
+        assert_eq!(runner_second.0.borrow().start_calls, 1);
+        finish(&runner_second, SyncOutcome::Success);
+
+        // The leftover waiter of `second` wakes, cannot start (empty queue)
+        // and must pass the turn to `third`.
+        let second_ids = source_second.borrow().ids();
+        for id in second_ids {
+            fire_timer(&source_second, id);
+        }
+        run_idle(&source_third);
+        assert_eq!(
+            runner_third.0.borrow().start_calls,
+            1,
+            "third must start on the propagated release"
+        );
+        finish(&runner_third, SyncOutcome::Success);
+
+        // Nobody stays queued forever.
+        assert_eq!(first.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(second.state().snapshot().state, AppState::IdleOk);
+        assert_eq!(third.state().snapshot().state, AppState::IdleOk);
     }
 }
