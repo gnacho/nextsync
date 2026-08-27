@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.16] - 2026-08-27
+
+### Corregido
+- **El icono de la bandeja ya no se queda clavado en "sincronizando" (#197)**: al liberar el permiso global de sincronización se despertaba a una sola carpeta en espera; si esa carpeta no podía arrancar (p. ej. un aviso sobrante con la cola ya vacía), el turno se perdía y las demás carpetas quedaban en cola para siempre sin que nada corriera - el estado agregado leía "sincronizando" perpetuo aunque todo estuviera en reposo. Ahora el turno se pasa a la siguiente carpeta en espera. La carrera se volvió visible con la puerta ETag (#189), que hace las ejecuciones milisegundos largas.
+
 ## [0.2.14] - 2026-08-26
 
 ### Cambiado

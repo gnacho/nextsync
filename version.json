@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.14",
+  "version": "0.2.16",
   "mandatory": false,
-  "summary": "The per-folder root ETag is persisted across restarts, so a launch no longer re-scans folders whose remote tree did not change.",
+  "summary": "Fixed a race where a waiting folder swallowed the sync turn, leaving the tray icon stuck on syncing forever.",
   "changelog": [
-    "The root ETag recorded by the interval gate is saved per folder in the app state directory and re-seeded on startup (issue #195).",
-    "Consequence: after a restart, the first remote-interval run skips the reconciliation when nothing changed remotely, instead of re-scanning the full tree."
+    "When the shared sync permit woke a waiting folder that then could not start (for example a leftover waiter with an empty queue), the turn was swallowed and every other waiting folder stayed queued forever with nothing running - the tray icon stayed on cloud-sync. The turn is now passed on to the next waiter (issue #197).",
+    "This became visible with the ETag gate making runs milliseconds long; the regression test covers the exact double-waiter interleaving."
   ],
-  "released_at": "2026-08-26T00:00:00Z"
+  "released_at": "2026-08-27T00:00:00Z"
 }
