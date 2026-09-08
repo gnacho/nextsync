@@ -1367,8 +1367,7 @@ impl MainWindow {
                 .selection_mode(gtk4::SelectionMode::None)
                 .build();
             let review_rows = crate::core::delete_guard::deletion_review_rows(&missing);
-            let note;
-            if missing_len > DELETION_LIST_MAX {
+            let note = if missing_len > DELETION_LIST_MAX {
                 // Summary mode (issue #203 UX feedback): a mass deletion hides
                 // the per-file wall. Show folder-level counters only (the alert
                 // body already carries the exact total), so several hundred
@@ -1401,8 +1400,8 @@ impl MainWindow {
                         .build();
                     list.append(&loose_row);
                 }
-                note = t("These deletions will be propagated to the server when it synchronizes.")
-                    .to_string();
+                t("These deletions will be propagated to the server when it synchronizes.")
+                    .to_string()
             } else {
                 const GROUP_ROW_CAP: usize = 100;
                 const GROUP_CHILD_CAP: usize = 25;
@@ -1464,14 +1463,14 @@ impl MainWindow {
                         }
                     }
                 }
-                note = if truncated {
+                if truncated {
                     t("{count} more…")
                         .replace("{count}", &(review_rows.len() - shown_rows).to_string())
                 } else {
                     t("These deletions will be propagated to the server when it synchronizes.")
                         .to_string()
-                };
-            }
+                }
+            };
             let label = gtk4::Label::builder()
                 .label(&note)
                 .css_classes(["dim-label", "caption"])
