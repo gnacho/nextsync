@@ -1296,6 +1296,26 @@ impl MainWindow {
     /// Nextcloud re-downloads the folder; Approve These Deletions Once lets a
     /// single run proceed. Nextcloud accounts additionally get the server
     /// trash browser.
+    /// Present an `AlertDialog` transient for `window`, making sure the window
+    /// is presented/mapped first. When the app runs only in the tray the main
+    /// window is hidden (not mapped), and a dialog with `set_transient_for` a
+    /// non-mapped parent is not shown by GTK; deferring the dialog by one idle
+    /// lets the window map first (issue #203, upstream release 0.1.32).
+    fn present_modal_dialog(
+        dialog: &libadwaita::AlertDialog,
+        window: &libadwaita::ApplicationWindow,
+    ) {
+        if !window.is_visible() {
+            window.present();
+        }
+        let dialog = dialog.clone();
+        let window = window.clone();
+        glib::idle_add_local_once(move || {
+            window.present();
+            dialog.present(Some(window.upcast_ref::<gtk4::Widget>()));
+        });
+    }
+
     pub(crate) fn present_delete_review(&self, account_id: &str, folder_id: &str) {
         let Some(account) = self
             .config
@@ -1320,7 +1340,7 @@ impl MainWindow {
                 Some(t("No deletions are pending review.")),
             );
             dialog.add_response("close", t("Close"));
-            dialog.present(Some(self.window.upcast_ref::<gtk4::Widget>()));
+            MainWindow::present_modal_dialog(&dialog, &self.window);
             return;
         };
         let missing = alert.missing_paths.clone();
@@ -1461,7 +1481,7 @@ impl MainWindow {
             ),
             _ => {}
         });
-        dialog.present(Some(self.window.upcast_ref::<gtk4::Widget>()));
+        MainWindow::present_modal_dialog(&dialog, &self.window);
     }
 
     /// Build the Settings callbacks against this window's shared cell.
