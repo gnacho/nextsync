@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.18",
+  "version": "0.2.20",
   "mandatory": false,
-  "summary": "Added a proactive desktop notification when the deletion guard pauses synchronization for a mass local deletion.",
+  "summary": "Improved the mass-deletion review summary for a large number of flat files.",
   "changelog": [
-    "The deletion guard now raises a critical desktop notification when it detects an abnormal number of missing local files and pauses synchronization to protect them before they can be deleted from Nextcloud. The notification explains the pause and offers a Review Now button that opens the deletion review directly, even when the app is running only in the tray.",
-    "Deletions originating from the server, the web interface or a mobile client continue to be handled by the sync engine and never require local confirmation."
+    "When the deletion guard pauses for many files sitting at the top level of a folder, the review now shows a preview of the first files and a 'N more' note instead of just a bare counter, so you can see what was removed without scrolling a hundreds-row list.",
+    "Files inside subfolders keep the folder grouping; individual rows are only listed when the number of missing files is small."
   ],
   "released_at": "2026-09-08T00:00:00Z"
 }

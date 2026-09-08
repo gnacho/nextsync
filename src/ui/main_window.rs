@@ -1372,7 +1372,9 @@ impl MainWindow {
                 // the per-file wall. Show folder-level counters only (the alert
                 // body already carries the exact total), so several hundred
                 // flat files stay readable instead of a 200-row list.
+                const LOOSE_PREVIEW_CAP: usize = 15;
                 let mut loose_count = 0usize;
+                let mut loose_preview: Vec<String> = Vec::new();
                 for row in &review_rows {
                     match row {
                         crate::core::delete_guard::DeletionReviewRow::Group {
@@ -1388,16 +1390,39 @@ impl MainWindow {
                             group_row.set_enable_expansion(false);
                             list.append(&group_row);
                         }
-                        crate::core::delete_guard::DeletionReviewRow::File(_) => loose_count += 1,
+                        crate::core::delete_guard::DeletionReviewRow::File(path) => {
+                            if loose_preview.len() < LOOSE_PREVIEW_CAP {
+                                loose_preview.push(path.clone());
+                            }
+                            loose_count += 1;
+                        }
                     }
                 }
                 if loose_count > 0 {
-                    let loose_row = libadwaita::ActionRow::builder()
+                    let loose_row = libadwaita::ExpanderRow::builder()
                         .title(t("At the top level"))
                         .subtitle(t("{count} files").replace("{count}", &loose_count.to_string()))
-                        .activatable(false)
-                        .selectable(false)
                         .build();
+                    for path in &loose_preview {
+                        let child = libadwaita::ActionRow::builder()
+                            .title(path)
+                            .activatable(false)
+                            .selectable(false)
+                            .build();
+                        loose_row.add_row(&child);
+                    }
+                    if loose_count > LOOSE_PREVIEW_CAP {
+                        let more =
+                            libadwaita::ActionRow::builder()
+                                .title(t("{count} more…").replace(
+                                    "{count}",
+                                    &(loose_count - LOOSE_PREVIEW_CAP).to_string(),
+                                ))
+                                .activatable(false)
+                                .selectable(false)
+                                .build();
+                        loose_row.add_row(&more);
+                    }
                     list.append(&loose_row);
                 }
                 t("These deletions will be propagated to the server when it synchronizes.")
