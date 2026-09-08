@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.18] - 2026-09-08
+
+### Añadido
+- **La app avisa de un borrado masivo pendiente de revisión (#203)**: cuando el guard de borrado detecta que un número anómalo de archivos ha desaparecido de la carpeta local y pausa la sincronización para protegerlos, ahora aparece una notificación de escritorio de prioridad urgente. La notificación explica que la sincronización se pausó antes de que esos archivos se eliminaran del servidor y ofrece un botón **Revisar ahora** que abre directamente el diálogo de revisión, aunque la app esté solo en la bandeja del sistema. Solo los borrados locales disparan esta revisión; los originados en el servidor, la web o el móvil los gestiona el motor y no requieren confirmación local.
+
 ## [0.2.16] - 2026-08-27
 
 ### Corregido
