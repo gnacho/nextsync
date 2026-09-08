@@ -868,6 +868,65 @@ impl MainWindow {
         }));
     }
 
+    /// Wire a proactive desktop notification for the deletion guard (issue
+    /// #203). `notifier` raises a critical notification when a folder's guard
+    /// flags a mass deletion; clicking "Review Now" (or the body) routes back
+    /// to this window on the main loop to present the deletion review, even
+    /// when the app runs only in the tray (background).
+    pub fn install_delete_review_handler(
+        &self,
+        notifier: Rc<dyn crate::core::notifications::DesktopNotifier>,
+        window_weak: Weak<RefCell<MainWindow>>,
+    ) {
+        // "Review Now" is fired on the notifier's worker thread, which cannot
+        // carry a non-`Send` `Weak` to this window. Route it back through an
+        // `mpsc` channel and a periodic poller on the main loop.
+        let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+        let poll_weak = window_weak.clone();
+        let _poll = glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
+            if let Ok((account_id, folder_id)) = rx.try_recv() {
+                if let Some(main) = poll_weak.upgrade() {
+                    main.borrow().present_delete_review(&account_id, &folder_id);
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+        for (account_id, runtime) in self.account_manager.runtimes() {
+            for (folder_id, folder) in runtime.folders() {
+                let notifier = notifier.clone();
+                let account_id = account_id.clone();
+                let folder_id = folder_id.clone();
+                let review_tx = tx.clone();
+                let cb: Rc<dyn Fn(bool, Option<crate::core::scheduler::DeleteAlert>)> = Rc::new(
+                    move |raised, alert| {
+                        if !raised {
+                            return;
+                        }
+                        let Some(alert) = alert else {
+                            return;
+                        };
+                        let count = alert.missing_paths.len();
+                        let summary = t("Review Deletions").to_string();
+                        let body = t(
+                            "Synchronization was paused before {count} files could be deleted from Nextcloud.",
+                        )
+                        .replace("{count}", &count.to_string());
+                        let on_review: Box<dyn Fn(&str) + Send + 'static> = Box::new({
+                            let review_tx = review_tx.clone();
+                            let account_id = account_id.clone();
+                            let folder_id = folder_id.clone();
+                            move |_action| {
+                                let _ = review_tx.send((account_id.clone(), folder_id.clone()));
+                            }
+                        });
+                        notifier.send_delete_review(&summary, &body, on_review);
+                    },
+                );
+                folder.scheduler().set_on_delete_review(Some(cb));
+            }
+        }
+    }
+
     /// Open (or bring to front) the account setup wizard.
     /// Open (or bring to front) the activity/conflicts window for the active
     /// account's first synchronized folder.
@@ -1237,7 +1296,27 @@ impl MainWindow {
     /// Nextcloud re-downloads the folder; Approve These Deletions Once lets a
     /// single run proceed. Nextcloud accounts additionally get the server
     /// trash browser.
-    fn present_delete_review(&self, account_id: &str, folder_id: &str) {
+    /// Present an `AlertDialog` transient for `window`, making sure the window
+    /// is presented/mapped first. When the app runs only in the tray the main
+    /// window is hidden (not mapped), and a dialog with `set_transient_for` a
+    /// non-mapped parent is not shown by GTK; deferring the dialog by one idle
+    /// lets the window map first (issue #203, upstream release 0.1.32).
+    fn present_modal_dialog(
+        dialog: &libadwaita::AlertDialog,
+        window: &libadwaita::ApplicationWindow,
+    ) {
+        if !window.is_visible() {
+            window.present();
+        }
+        let dialog = dialog.clone();
+        let window = window.clone();
+        glib::idle_add_local_once(move || {
+            window.present();
+            dialog.present(Some(window.upcast_ref::<gtk4::Widget>()));
+        });
+    }
+
+    pub(crate) fn present_delete_review(&self, account_id: &str, folder_id: &str) {
         let Some(account) = self
             .config
             .accounts
@@ -1261,7 +1340,7 @@ impl MainWindow {
                 Some(t("No deletions are pending review.")),
             );
             dialog.add_response("close", t("Close"));
-            dialog.present(Some(self.window.upcast_ref::<gtk4::Widget>()));
+            MainWindow::present_modal_dialog(&dialog, &self.window);
             return;
         };
         let missing = alert.missing_paths.clone();
@@ -1282,76 +1361,115 @@ impl MainWindow {
         // mass cleanup (a removed SDK, virtualenv or build cache) shows a
         // handful of expandable groups instead of a wall of paths.
         if !missing.is_empty() {
-            const GROUP_ROW_CAP: usize = 100;
-            const GROUP_CHILD_CAP: usize = 25;
-            const TOTAL_CHILD_CAP: usize = 200;
+            const DELETION_LIST_MAX: usize = 50;
             let list = gtk4::ListBox::builder()
                 .css_classes(["boxed-list"])
                 .selection_mode(gtk4::SelectionMode::None)
                 .build();
             let review_rows = crate::core::delete_guard::deletion_review_rows(&missing);
-            let mut shown_rows = 0usize;
-            let mut shown_children = 0usize;
-            let mut truncated = false;
-            for review_row in &review_rows {
-                if shown_rows >= GROUP_ROW_CAP {
-                    truncated = true;
-                    break;
+            let note = if missing_len > DELETION_LIST_MAX {
+                // Summary mode (issue #203 UX feedback): a mass deletion hides
+                // the per-file wall. Show folder-level counters only (the alert
+                // body already carries the exact total), so several hundred
+                // flat files stay readable instead of a 200-row list.
+                let mut loose_count = 0usize;
+                for row in &review_rows {
+                    match row {
+                        crate::core::delete_guard::DeletionReviewRow::Group {
+                            prefix,
+                            count,
+                            ..
+                        } => {
+                            let group_row = libadwaita::ExpanderRow::builder()
+                                .title(prefix)
+                                .subtitle(t("{count} files").replace("{count}", &count.to_string()))
+                                .build();
+                            group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
+                            group_row.set_enable_expansion(false);
+                            list.append(&group_row);
+                        }
+                        crate::core::delete_guard::DeletionReviewRow::File(_) => loose_count += 1,
+                    }
                 }
-                match review_row {
-                    crate::core::delete_guard::DeletionReviewRow::Group {
-                        prefix,
-                        count,
-                        paths,
-                    } => {
-                        let group_row = libadwaita::ExpanderRow::builder()
-                            .title(prefix)
-                            .subtitle(t("{count} files").replace("{count}", &count.to_string()))
-                            .build();
-                        group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
-                        for path in paths.iter().take(GROUP_CHILD_CAP) {
-                            if shown_children >= TOTAL_CHILD_CAP {
-                                truncated = true;
-                                break;
+                if loose_count > 0 {
+                    let loose_row = libadwaita::ActionRow::builder()
+                        .title(t("At the top level"))
+                        .subtitle(t("{count} files").replace("{count}", &loose_count.to_string()))
+                        .activatable(false)
+                        .selectable(false)
+                        .build();
+                    list.append(&loose_row);
+                }
+                t("These deletions will be propagated to the server when it synchronizes.")
+                    .to_string()
+            } else {
+                const GROUP_ROW_CAP: usize = 100;
+                const GROUP_CHILD_CAP: usize = 25;
+                const TOTAL_CHILD_CAP: usize = 200;
+                let mut shown_rows = 0usize;
+                let mut shown_children = 0usize;
+                let mut truncated = false;
+                for review_row in &review_rows {
+                    if shown_rows >= GROUP_ROW_CAP {
+                        truncated = true;
+                        break;
+                    }
+                    match review_row {
+                        crate::core::delete_guard::DeletionReviewRow::Group {
+                            prefix,
+                            count,
+                            paths,
+                        } => {
+                            let group_row = libadwaita::ExpanderRow::builder()
+                                .title(prefix)
+                                .subtitle(t("{count} files").replace("{count}", &count.to_string()))
+                                .build();
+                            group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
+                            for path in paths.iter().take(GROUP_CHILD_CAP) {
+                                if shown_children >= TOTAL_CHILD_CAP {
+                                    truncated = true;
+                                    break;
+                                }
+                                let child = libadwaita::ActionRow::builder()
+                                    .title(path)
+                                    .activatable(false)
+                                    .selectable(false)
+                                    .build();
+                                group_row.add_row(&child);
+                                shown_children += 1;
                             }
-                            let child = libadwaita::ActionRow::builder()
+                            if paths.len() > GROUP_CHILD_CAP {
+                                let more = libadwaita::ActionRow::builder()
+                                    .title(t("{count} more…").replace(
+                                        "{count}",
+                                        &(paths.len() - GROUP_CHILD_CAP).to_string(),
+                                    ))
+                                    .activatable(false)
+                                    .selectable(false)
+                                    .build();
+                                group_row.add_row(&more);
+                            }
+                            list.append(&group_row);
+                            shown_rows += 1;
+                        }
+                        crate::core::delete_guard::DeletionReviewRow::File(path) => {
+                            let row = libadwaita::ActionRow::builder()
                                 .title(path)
                                 .activatable(false)
                                 .selectable(false)
                                 .build();
-                            group_row.add_row(&child);
-                            shown_children += 1;
+                            list.append(&row);
+                            shown_rows += 1;
                         }
-                        if paths.len() > GROUP_CHILD_CAP {
-                            let more = libadwaita::ActionRow::builder()
-                                .title(t("{count} more…").replace(
-                                    "{count}",
-                                    &(paths.len() - GROUP_CHILD_CAP).to_string(),
-                                ))
-                                .activatable(false)
-                                .selectable(false)
-                                .build();
-                            group_row.add_row(&more);
-                        }
-                        list.append(&group_row);
-                        shown_rows += 1;
-                    }
-                    crate::core::delete_guard::DeletionReviewRow::File(path) => {
-                        let row = libadwaita::ActionRow::builder()
-                            .title(path)
-                            .activatable(false)
-                            .selectable(false)
-                            .build();
-                        list.append(&row);
-                        shown_rows += 1;
                     }
                 }
-            }
-            let note = if truncated {
-                t("{count} more…").replace("{count}", &(review_rows.len() - shown_rows).to_string())
-            } else {
-                t("These deletions will be propagated to the server when it synchronizes.")
-                    .to_string()
+                if truncated {
+                    t("{count} more…")
+                        .replace("{count}", &(review_rows.len() - shown_rows).to_string())
+                } else {
+                    t("These deletions will be propagated to the server when it synchronizes.")
+                        .to_string()
+                }
             };
             let label = gtk4::Label::builder()
                 .label(&note)
@@ -1402,7 +1520,7 @@ impl MainWindow {
             ),
             _ => {}
         });
-        dialog.present(Some(self.window.upcast_ref::<gtk4::Widget>()));
+        MainWindow::present_modal_dialog(&dialog, &self.window);
     }
 
     /// Build the Settings callbacks against this window's shared cell.

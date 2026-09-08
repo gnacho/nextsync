@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/version-0.2.16-blue?style=flat-square" alt="Version 0.2.16">
+    <img src="https://img.shields.io/badge/version-0.2.18-blue?style=flat-square" alt="Version 0.2.18">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 or later">
   </p>
 </div>
@@ -84,7 +84,7 @@ Both engines sit behind the same small trait, so a new provider is a command bui
 Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/nextsync/releases/latest) and install it:
 
 ```bash
-sudo pacman -U nextsync-0.2.16-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-0.2.18-1-x86_64.pkg.tar.zst
 ```
 
 The package depends on `gtk4` and `libadwaita`. For Nextcloud accounts install `nextcloud-client` (it provides `nextcloudcmd`); for OpenCloud accounts, the official `opencloudcmd`.

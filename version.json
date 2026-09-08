@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.16",
+  "version": "0.2.18",
   "mandatory": false,
-  "summary": "Fixed a race where a waiting folder swallowed the sync turn, leaving the tray icon stuck on syncing forever.",
+  "summary": "Added a proactive desktop notification when the deletion guard pauses synchronization for a mass local deletion.",
   "changelog": [
-    "When the shared sync permit woke a waiting folder that then could not start (for example a leftover waiter with an empty queue), the turn was swallowed and every other waiting folder stayed queued forever with nothing running - the tray icon stayed on cloud-sync. The turn is now passed on to the next waiter (issue #197).",
-    "This became visible with the ETag gate making runs milliseconds long; the regression test covers the exact double-waiter interleaving."
+    "The deletion guard now raises a critical desktop notification when it detects an abnormal number of missing local files and pauses synchronization to protect them before they can be deleted from Nextcloud. The notification explains the pause and offers a Review Now button that opens the deletion review directly, even when the app is running only in the tray.",
+    "Deletions originating from the server, the web interface or a mobile client continue to be handled by the sync engine and never require local confirmation."
   ],
-  "released_at": "2026-08-27T00:00:00Z"
+  "released_at": "2026-09-08T00:00:00Z"
 }
