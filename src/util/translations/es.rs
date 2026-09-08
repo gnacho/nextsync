@@ -43,6 +43,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("App Token", "Token de aplicación"),
     ("Approve These Deletions Once", "Aprobar estos borrados masivos una vez"),
     ("Ask before syncing folders larger than", "Preguntar antes de sincronizar carpetas mayores de"),
+    ("At the top level", "En el nivel raíz"),
     ("Authentication", "Autenticación"),
     ("Authentication and synchronization failures", "Fallo de autenticación y sincronización"),
     ("Auto-scroll", "Desplazamiento automático"),

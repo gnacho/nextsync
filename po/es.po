@@ -1093,6 +1093,10 @@ msgstr "Preferencias"
 msgid "About"
 msgstr "Acerca de"
 
+#: src/ui/main_window.rs
+msgid "At the top level"
+msgstr "En el nivel raíz"
+
 #: src/nextsync/ui/main_window.py:337 src/nextsync/ui/main_window.py:351
 msgid "Accounts"
 msgstr "Cuentas"

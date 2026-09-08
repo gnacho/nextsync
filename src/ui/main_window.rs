@@ -1361,77 +1361,117 @@ impl MainWindow {
         // mass cleanup (a removed SDK, virtualenv or build cache) shows a
         // handful of expandable groups instead of a wall of paths.
         if !missing.is_empty() {
-            const GROUP_ROW_CAP: usize = 100;
-            const GROUP_CHILD_CAP: usize = 25;
-            const TOTAL_CHILD_CAP: usize = 200;
+            const DELETION_LIST_MAX: usize = 50;
             let list = gtk4::ListBox::builder()
                 .css_classes(["boxed-list"])
                 .selection_mode(gtk4::SelectionMode::None)
                 .build();
             let review_rows = crate::core::delete_guard::deletion_review_rows(&missing);
-            let mut shown_rows = 0usize;
-            let mut shown_children = 0usize;
-            let mut truncated = false;
-            for review_row in &review_rows {
-                if shown_rows >= GROUP_ROW_CAP {
-                    truncated = true;
-                    break;
+            let note;
+            if missing_len > DELETION_LIST_MAX {
+                // Summary mode (issue #203 UX feedback): a mass deletion hides
+                // the per-file wall. Show folder-level counters only (the alert
+                // body already carries the exact total), so several hundred
+                // flat files stay readable instead of a 200-row list.
+                let mut loose_count = 0usize;
+                for row in &review_rows {
+                    match row {
+                        crate::core::delete_guard::DeletionReviewRow::Group {
+                            prefix,
+                            count,
+                            ..
+                        } => {
+                            let group_row = libadwaita::ExpanderRow::builder()
+                                .title(prefix)
+                                .subtitle(t("{count} files").replace("{count}", &count.to_string()))
+                                .build();
+                            group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
+                            group_row.set_enable_expansion(false);
+                            list.append(&group_row);
+                        }
+                        crate::core::delete_guard::DeletionReviewRow::File(_) => loose_count += 1,
+                    }
                 }
-                match review_row {
-                    crate::core::delete_guard::DeletionReviewRow::Group {
-                        prefix,
-                        count,
-                        paths,
-                    } => {
-                        let group_row = libadwaita::ExpanderRow::builder()
-                            .title(prefix)
-                            .subtitle(t("{count} files").replace("{count}", &count.to_string()))
-                            .build();
-                        group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
-                        for path in paths.iter().take(GROUP_CHILD_CAP) {
-                            if shown_children >= TOTAL_CHILD_CAP {
-                                truncated = true;
-                                break;
+                if loose_count > 0 {
+                    let loose_row = libadwaita::ActionRow::builder()
+                        .title(t("At the top level"))
+                        .subtitle(t("{count} files").replace("{count}", &loose_count.to_string()))
+                        .activatable(false)
+                        .selectable(false)
+                        .build();
+                    list.append(&loose_row);
+                }
+                note = t("These deletions will be propagated to the server when it synchronizes.")
+                    .to_string();
+            } else {
+                const GROUP_ROW_CAP: usize = 100;
+                const GROUP_CHILD_CAP: usize = 25;
+                const TOTAL_CHILD_CAP: usize = 200;
+                let mut shown_rows = 0usize;
+                let mut shown_children = 0usize;
+                let mut truncated = false;
+                for review_row in &review_rows {
+                    if shown_rows >= GROUP_ROW_CAP {
+                        truncated = true;
+                        break;
+                    }
+                    match review_row {
+                        crate::core::delete_guard::DeletionReviewRow::Group {
+                            prefix,
+                            count,
+                            paths,
+                        } => {
+                            let group_row = libadwaita::ExpanderRow::builder()
+                                .title(prefix)
+                                .subtitle(t("{count} files").replace("{count}", &count.to_string()))
+                                .build();
+                            group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
+                            for path in paths.iter().take(GROUP_CHILD_CAP) {
+                                if shown_children >= TOTAL_CHILD_CAP {
+                                    truncated = true;
+                                    break;
+                                }
+                                let child = libadwaita::ActionRow::builder()
+                                    .title(path)
+                                    .activatable(false)
+                                    .selectable(false)
+                                    .build();
+                                group_row.add_row(&child);
+                                shown_children += 1;
                             }
-                            let child = libadwaita::ActionRow::builder()
+                            if paths.len() > GROUP_CHILD_CAP {
+                                let more = libadwaita::ActionRow::builder()
+                                    .title(t("{count} more…").replace(
+                                        "{count}",
+                                        &(paths.len() - GROUP_CHILD_CAP).to_string(),
+                                    ))
+                                    .activatable(false)
+                                    .selectable(false)
+                                    .build();
+                                group_row.add_row(&more);
+                            }
+                            list.append(&group_row);
+                            shown_rows += 1;
+                        }
+                        crate::core::delete_guard::DeletionReviewRow::File(path) => {
+                            let row = libadwaita::ActionRow::builder()
                                 .title(path)
                                 .activatable(false)
                                 .selectable(false)
                                 .build();
-                            group_row.add_row(&child);
-                            shown_children += 1;
+                            list.append(&row);
+                            shown_rows += 1;
                         }
-                        if paths.len() > GROUP_CHILD_CAP {
-                            let more = libadwaita::ActionRow::builder()
-                                .title(t("{count} more…").replace(
-                                    "{count}",
-                                    &(paths.len() - GROUP_CHILD_CAP).to_string(),
-                                ))
-                                .activatable(false)
-                                .selectable(false)
-                                .build();
-                            group_row.add_row(&more);
-                        }
-                        list.append(&group_row);
-                        shown_rows += 1;
-                    }
-                    crate::core::delete_guard::DeletionReviewRow::File(path) => {
-                        let row = libadwaita::ActionRow::builder()
-                            .title(path)
-                            .activatable(false)
-                            .selectable(false)
-                            .build();
-                        list.append(&row);
-                        shown_rows += 1;
                     }
                 }
+                note = if truncated {
+                    t("{count} more…")
+                        .replace("{count}", &(review_rows.len() - shown_rows).to_string())
+                } else {
+                    t("These deletions will be propagated to the server when it synchronizes.")
+                        .to_string()
+                };
             }
-            let note = if truncated {
-                t("{count} more…").replace("{count}", &(review_rows.len() - shown_rows).to_string())
-            } else {
-                t("These deletions will be propagated to the server when it synchronizes.")
-                    .to_string()
-            };
             let label = gtk4::Label::builder()
                 .label(&note)
                 .css_classes(["dim-label", "caption"])
