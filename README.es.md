@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="Estado de CI"></a>
-    <img src="https://img.shields.io/badge/version-0.2.18-blue?style=flat-square" alt="Versión 0.2.18">
+    <img src="https://img.shields.io/badge/version-0.2.20-blue?style=flat-square" alt="Versión 0.2.20">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 o posterior">
   </p>
 </div>
@@ -84,7 +84,7 @@ Ambos motores se esconden detrás del mismo trait pequeño, así que un proveedo
 Descarga el `.pkg.tar.zst` de la [última release](https://github.com/gnacho/nextsync/releases/latest) e instálalo:
 
 ```bash
-sudo pacman -U nextsync-0.2.18-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-0.2.20-1-x86_64.pkg.tar.zst
 ```
 
 El paquete depende de `gtk4` y `libadwaita`. Para cuentas Nextcloud instala `nextcloud-client` (aporta `nextcloudcmd`); para cuentas OpenCloud, el `opencloudcmd` oficial.

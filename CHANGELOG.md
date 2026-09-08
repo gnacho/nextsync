@@ -2,6 +2,11 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.20] - 2026-09-08
+
+### Mejorado
+- **El resumen de un borrado masivo ahora muestra una vista previa de los archivos sueltos**: cuando la revisión se agrupa por carpeta (más de 50 archivos), los archivos que estaban en el nivel raíz ya no se reducen a un simple contador. Ahora se agrupan en una fila expandible "En el nivel raíz · N archivos" con una vista previa de los primeros 15 y un "y M más…", para que veas qué se va a borrar sin tener que recorrer una lista de cientos de filas.
+
 ## [0.2.18] - 2026-09-08
 
 ### Añadido
