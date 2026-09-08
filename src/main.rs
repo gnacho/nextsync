@@ -238,6 +238,12 @@ fn main() {
                     }));
             }
             *window_slot.borrow_mut() = Some(main_window.clone());
+            // Proactive desktop notification for the deletion guard (issue
+            // #203): raises a critical notification when a folder's guard flags
+            // a mass deletion and routes "Review Now" back to this window.
+            main_window
+                .borrow()
+                .install_delete_review_handler(notifier.clone(), Rc::downgrade(&main_window));
 
             // Register the tray (best effort; the app works without one).
             let tray_callbacks = TrayCallbacks {

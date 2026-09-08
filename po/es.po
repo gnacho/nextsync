@@ -952,6 +952,14 @@ msgstr "Llavero de contraseñas bloqueado"
 msgid "Review Deletions"
 msgstr "Revisar borrados masivos"
 
+#: src/core/notifications.rs
+msgid "Review Now"
+msgstr "Revisar ahora"
+
+#: src/core/notifications.rs
+msgid "Synchronization was paused before {count} files could be deleted from Nextcloud."
+msgstr "La sincronización se pausó antes de que {count} archivos pudieran eliminarse de Nextcloud."
+
 #: src/ui/folder_status.rs
 msgid "Review deletions"
 msgstr "Revisar borrados masivos"

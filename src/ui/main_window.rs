@@ -868,6 +868,65 @@ impl MainWindow {
         }));
     }
 
+    /// Wire a proactive desktop notification for the deletion guard (issue
+    /// #203). `notifier` raises a critical notification when a folder's guard
+    /// flags a mass deletion; clicking "Review Now" (or the body) routes back
+    /// to this window on the main loop to present the deletion review, even
+    /// when the app runs only in the tray (background).
+    pub fn install_delete_review_handler(
+        &self,
+        notifier: Rc<dyn crate::core::notifications::DesktopNotifier>,
+        window_weak: Weak<RefCell<MainWindow>>,
+    ) {
+        // "Review Now" is fired on the notifier's worker thread, which cannot
+        // carry a non-`Send` `Weak` to this window. Route it back through an
+        // `mpsc` channel and a periodic poller on the main loop.
+        let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+        let poll_weak = window_weak.clone();
+        let _poll = glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
+            if let Ok((account_id, folder_id)) = rx.try_recv() {
+                if let Some(main) = poll_weak.upgrade() {
+                    main.borrow().present_delete_review(&account_id, &folder_id);
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+        for (account_id, runtime) in self.account_manager.runtimes() {
+            for (folder_id, folder) in runtime.folders() {
+                let notifier = notifier.clone();
+                let account_id = account_id.clone();
+                let folder_id = folder_id.clone();
+                let review_tx = tx.clone();
+                let cb: Rc<dyn Fn(bool, Option<crate::core::scheduler::DeleteAlert>)> = Rc::new(
+                    move |raised, alert| {
+                        if !raised {
+                            return;
+                        }
+                        let Some(alert) = alert else {
+                            return;
+                        };
+                        let count = alert.missing_paths.len();
+                        let summary = t("Review Deletions").to_string();
+                        let body = t(
+                            "Synchronization was paused before {count} files could be deleted from Nextcloud.",
+                        )
+                        .replace("{count}", &count.to_string());
+                        let on_review: Box<dyn Fn(&str) + Send + 'static> = Box::new({
+                            let review_tx = review_tx.clone();
+                            let account_id = account_id.clone();
+                            let folder_id = folder_id.clone();
+                            move |_action| {
+                                let _ = review_tx.send((account_id.clone(), folder_id.clone()));
+                            }
+                        });
+                        notifier.send_delete_review(&summary, &body, on_review);
+                    },
+                );
+                folder.scheduler().set_on_delete_review(Some(cb));
+            }
+        }
+    }
+
     /// Open (or bring to front) the account setup wizard.
     /// Open (or bring to front) the activity/conflicts window for the active
     /// account's first synchronized folder.
@@ -1237,7 +1296,7 @@ impl MainWindow {
     /// Nextcloud re-downloads the folder; Approve These Deletions Once lets a
     /// single run proceed. Nextcloud accounts additionally get the server
     /// trash browser.
-    fn present_delete_review(&self, account_id: &str, folder_id: &str) {
+    pub(crate) fn present_delete_review(&self, account_id: &str, folder_id: &str) {
         let Some(account) = self
             .config
             .accounts

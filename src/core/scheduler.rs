@@ -136,6 +136,10 @@ pub struct Scheduler {
 /// Callback invoked once per finished run with its outcome.
 type CompletedCallback = Box<dyn Fn(&SyncOutcome) + 'static>;
 
+/// Callback fired when the deletion guard raises (`true`) or clears (`false`)
+/// a review, carrying the alert when raised. See `Scheduler::set_on_delete_review`.
+type DeleteReviewCallback = Rc<dyn Fn(bool, Option<DeleteAlert>)>;
+
 struct SchedulerInner {
     state: StateController,
     permit: Option<SyncPermit>,
@@ -145,6 +149,12 @@ struct SchedulerInner {
     runner: Box<dyn SyncRunner>,
     guard: Option<Box<dyn GuardCheck>>,
     on_completed: Option<CompletedCallback>,
+    /// Fired with `true` and the alert when the deletion guard raises a review
+    /// and `false` (with `None`) when it clears (approve/restore/stop). Used to
+    /// raise a proactive desktop notification (issue #203). Runs wherever the
+    /// inner is borrowed, so it must never call back into the scheduler; the
+    /// alert is cloned into the callback for that reason.
+    delete_review_cb: Option<DeleteReviewCallback>,
     settings: TriggerSettings,
     self_ref: Weak<RefCell<SchedulerInner>>,
     online: bool,
@@ -235,6 +245,7 @@ impl Scheduler {
             runner,
             guard: None,
             on_completed,
+            delete_review_cb: None,
             settings,
             self_ref: Weak::new(),
             online: true,
@@ -388,6 +399,12 @@ impl Scheduler {
     /// with its outcome). Used by the app to feed the activity log.
     pub fn set_on_completed(&self, on_completed: Option<CompletedCallback>) {
         self.inner.borrow_mut().on_completed = on_completed;
+    }
+
+    /// Register a callback fired when the deletion guard raises (`true`) or
+    /// clears (`false`) a review. See `SchedulerInner::delete_review_cb`.
+    pub fn set_on_delete_review(&self, cb: Option<DeleteReviewCallback>) {
+        self.inner.borrow_mut().delete_review_cb = cb;
     }
 
     /// Approve one synchronization despite a deletion alert.
@@ -1195,10 +1212,17 @@ impl SchedulerInner {
         }
     }
 
+    fn notify_delete_review(&self, raised: bool, alert: Option<&DeleteAlert>) {
+        if let Some(cb) = &self.delete_review_cb {
+            cb(raised, alert.cloned());
+        }
+    }
+
     fn set_delete_alert(&mut self, alert: DeleteAlert) {
         self.state
             .set(AppState::DeleteReview, alert.message.clone());
-        self.delete_alert = Some(alert);
+        self.delete_alert = Some(alert.clone());
+        self.notify_delete_review(true, Some(&alert));
     }
 
     fn approve_delete_once(&mut self) {
@@ -1210,6 +1234,7 @@ impl SchedulerInner {
         }
         self.delete_alert = None;
         self.delete_bypass_once = true;
+        self.notify_delete_review(false, None);
         self.request(Trigger::Manual);
     }
 
@@ -1236,6 +1261,7 @@ impl SchedulerInner {
         }
         self.delete_alert = None;
         self.delete_bypass_once = false;
+        self.notify_delete_review(false, None);
         self.request(Trigger::Manual);
     }
 
@@ -1245,6 +1271,7 @@ impl SchedulerInner {
         }
         self.delete_alert = None;
         self.delete_bypass_once = false;
+        self.notify_delete_review(false, None);
         self.state
             .set(AppState::IdleNotSynced, t("Not synchronized yet"));
         self.request(Trigger::Manual);
@@ -1259,7 +1286,10 @@ impl SchedulerInner {
         self.queue.clear();
         self.local_dirty = false;
         self.remote_pending = false;
-        self.delete_alert = None;
+        if self.delete_alert.is_some() {
+            self.delete_alert = None;
+            self.notify_delete_review(false, None);
+        }
         if self.running {
             self.runner.cancel();
         }
@@ -2071,6 +2101,27 @@ mod tests {
         assert!(source.borrow().pending() >= 1);
         run_idle(&source);
         assert_eq!(runner.0.borrow().start_calls, 1);
+    }
+
+    #[test]
+    fn delete_review_callback_fires_raised_then_cleared() {
+        // Issue #203: the proactive notification hook fires `true` with the
+        // alert when the guard raises a review and `false` when it clears.
+        let (scheduler, _source, _runner) = make_scheduler(None);
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(bool, bool)>::new()));
+        let cb_events = events.clone();
+        scheduler.set_on_delete_review(Some(Rc::new(move |raised, alert| {
+            cb_events.borrow_mut().push((raised, alert.is_some()));
+        })));
+        scheduler.set_delete_alert(DeleteAlert {
+            reason: "mass_local_deletion".to_string(),
+            message: "Many files were removed".to_string(),
+            can_approve_once: true,
+            ..DeleteAlert::default()
+        });
+        assert_eq!(*events.borrow(), vec![(true, true)]);
+        scheduler.clear_delete_alert();
+        assert_eq!(*events.borrow(), vec![(true, true), (false, false)]);
     }
 
     #[test]

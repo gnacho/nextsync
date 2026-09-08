@@ -13,6 +13,18 @@ use std::rc::Rc;
 pub trait DesktopNotifier {
     /// Send a notification; `summary` is the title, `body` the detail.
     fn send(&self, summary: &str, body: &str);
+
+    /// Raise a critical desktop notification for a pending deletion review
+    /// (issue #203). The notification explains synchronization was paused to
+    /// protect the missing files and carries a "Review Now" action. `on_action`
+    /// is fired on a worker thread with the action name (`"default"` for a body
+    /// click, or `"__closed"` when the notification is dismissed).
+    fn send_delete_review(
+        &self,
+        summary: &str,
+        body: &str,
+        on_action: Box<dyn Fn(&str) + Send + 'static>,
+    );
 }
 
 /// Production notifier over org.freedesktop.Notifications (notify-rust).
@@ -29,17 +41,69 @@ impl DesktopNotifier for FreedesktopNotifier {
             eprintln!("notification failed: {error}");
         }
     }
+
+    fn send_delete_review(
+        &self,
+        summary: &str,
+        body: &str,
+        on_action: Box<dyn Fn(&str) + Send + 'static>,
+    ) {
+        let action_label = crate::util::i18n::t("Review Now").to_string();
+        let mut notification = notify_rust::Notification::new();
+        notification
+            .summary(summary)
+            .body(body)
+            .appname("nextsync")
+            .urgency(notify_rust::Urgency::Critical)
+            .action("default", &action_label);
+        match notification.show() {
+            Ok(handle) => {
+                // `wait_for_action` blocks a worker thread until the user acts
+                // on or dismisses the notification. Callers marshal back to the
+                // GLib main loop before touching UI.
+                std::thread::spawn(move || {
+                    handle.wait_for_action(|action| on_action(action));
+                });
+            }
+            Err(error) => eprintln!("notification failed: {error}"),
+        }
+    }
 }
 
 /// Test notifier recording every send.
 #[derive(Default)]
 pub struct CountingNotifier {
     pub sent: Cell<u32>,
+    last_summary: Cell<Option<String>>,
+    last_body: Cell<Option<String>>,
+}
+
+impl CountingNotifier {
+    /// Summary of the most recent notification, if any.
+    pub fn last_summary(&self) -> Option<String> {
+        self.last_summary.take()
+    }
+
+    /// Body of the most recent notification, if any.
+    pub fn last_body(&self) -> Option<String> {
+        self.last_body.take()
+    }
 }
 
 impl DesktopNotifier for CountingNotifier {
     fn send(&self, _summary: &str, _body: &str) {
         self.sent.set(self.sent.get() + 1);
+    }
+
+    fn send_delete_review(
+        &self,
+        summary: &str,
+        body: &str,
+        _on_action: Box<dyn Fn(&str) + Send + 'static>,
+    ) {
+        self.sent.set(self.sent.get() + 1);
+        self.last_summary.set(Some(summary.to_string()));
+        self.last_body.set(Some(body.to_string()));
     }
 }
 
@@ -118,5 +182,22 @@ mod tests {
         let notifier: Rc<dyn DesktopNotifier> = sent.clone();
         notify_for_outcome(&notifier, false, "acct", &SyncOutcome::Failed);
         assert_eq!(sent.sent.get(), 0);
+    }
+
+    #[test]
+    fn delete_review_notification_records_the_copy() {
+        let sent = Rc::new(CountingNotifier::default());
+        let notifier: Rc<dyn DesktopNotifier> = sent.clone();
+        notifier.send_delete_review(
+            "Review Deletions",
+            "Synchronization was paused before 12 files could be deleted.",
+            Box::new(|_| {}),
+        );
+        assert_eq!(sent.sent.get(), 1);
+        assert_eq!(sent.last_summary(), Some("Review Deletions".to_string()),);
+        assert_eq!(
+            sent.last_body(),
+            Some("Synchronization was paused before 12 files could be deleted.".to_string()),
+        );
     }
 }
