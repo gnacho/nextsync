@@ -1192,6 +1192,16 @@ impl SchedulerInner {
             self.state
                 .set(AppState::Offline, t("Waiting for a network connection"));
         } else if !was_online {
+            // Issue #207: the recovery probe is a one-shot timer; if it fired
+            // while the machine was offline, `start` aborted on !online and
+            // the timer died. Re-arm it now so the folder recovers by itself
+            // once the network is back, instead of sitting queued behind the
+            // server_unreachable gate until a manual sync. The probe guard
+            // (start_source) makes the re-arm a no-op if one is still pending.
+            if self.server_unreachable {
+                self.queue.add(Trigger::Retry);
+                self.schedule_server_probe();
+            }
             if !self.queue.is_empty() || !self.manual_only() {
                 self.request(Trigger::NetworkRestored);
             } else {
@@ -1771,6 +1781,49 @@ mod tests {
 
         // Firing the probe re-enters the engine; a Success clears the gate.
         fire_timer(&source, probe_id);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        finish(&runner, SyncOutcome::Success);
+        assert!(!scheduler.server_unreachable());
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
+    }
+
+    /// Issue #207: the recovery probe is a one-shot timer. If it fires while
+    /// the machine is offline, `start` aborts on !online and the timer is
+    /// gone for good. When the network comes back, the folder must still
+    /// recover on its own - the probe is re-armed and the queued retry runs -
+    /// without a manual sync or an app restart.
+    #[test]
+    fn network_restore_rearms_a_probe_that_died_while_offline() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Startup);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::NetworkError);
+        assert!(scheduler.server_unreachable());
+        let probe_id = source.borrow().only_id();
+
+        // Connectivity drops before the probe fires; the probe fires anyway
+        // and its one-shot start() aborts on !online: the timer is dead.
+        scheduler.set_online(false);
+        fire_timer(&source, probe_id);
+        assert_eq!(
+            runner.0.borrow().start_calls,
+            1,
+            "an offline probe must not run the engine"
+        );
+        assert_eq!(
+            source.borrow().pending(),
+            0,
+            "the one-shot probe timer is gone"
+        );
+
+        // Connectivity returns: the folder recovers without a manual sync.
+        scheduler.set_online(true);
+        assert!(
+            source.borrow().pending() >= 1,
+            "the recovery probe is re-armed on network restore"
+        );
+        let rearmed_id = source.borrow().only_id();
+        fire_timer(&source, rearmed_id);
         assert_eq!(runner.0.borrow().start_calls, 2);
         finish(&runner, SyncOutcome::Success);
         assert!(!scheduler.server_unreachable());
