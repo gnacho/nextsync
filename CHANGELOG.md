@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.22] - 2026-09-17
+
+### Fixed
+
+- Detect a missing sync engine (nextcloudcmd / opencloudcmd) and report a distinct "sync engine is not installed" state instead of a false "Synchronization completed" from the unchanged-ETag interval shortcut while nothing was actually synchronized (#209).
+- A configured engine path that no longer exists resolves as missing engine instead of a generic spawn failure.
+
 ## [0.2.20] - 2026-09-08
 
 ### Mejorado
