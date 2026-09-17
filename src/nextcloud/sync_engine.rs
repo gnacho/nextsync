@@ -80,6 +80,18 @@ impl CredentialLookup {
 pub trait CredentialSource: Send + Sync + 'static {
     /// Resolve the password for the given account.
     fn lookup(&self, account: &AccountConfig) -> CredentialLookup;
+
+    /// Issue #214: best-effort unlock of the keyring collections. Returns
+    /// `true` when at least one locked collection was unlocked, so the
+    /// caller re-runs [`CredentialSource::lookup`] once. GNOME collections
+    /// created by the desktop session usually share the login password: the
+    /// Secret Service then completes the unlock prompt on its own as long as
+    /// the client connection stays alive through it, so the common case
+    /// needs no user interaction. Sources without an unlock facility keep
+    /// the default: no unlock, no retry.
+    fn unlock_keyring(&self) -> bool {
+        false
+    }
 }
 
 /// [`CredentialSource`] backed by the desktop Secret Service.
@@ -99,6 +111,10 @@ impl CredentialSource for KeyringCredentialSource {
             )) => CredentialLookup::Locked,
             Err(_) => CredentialLookup::Unavailable,
         }
+    }
+
+    fn unlock_keyring(&self) -> bool {
+        CredentialsStore::unlock_locked_collections().unwrap_or(false)
     }
 }
 
@@ -458,7 +474,16 @@ fn engine_thread(
     process: Arc<Mutex<Option<Child>>>,
 ) -> EngineRun {
     let started = Instant::now();
-    let password = match credentials.lookup(&inputs.account) {
+    let mut lookup = credentials.lookup(&inputs.account);
+    // Issue #214: a locked collection may share the session password, in
+    // which case the Secret Service unlocks it without prompting while the
+    // client connection stays alive through the prompt. When the unlock
+    // succeeds, resolve the password once more instead of reporting the
+    // keyring as locked.
+    if matches!(lookup, CredentialLookup::Locked) && credentials.unlock_keyring() {
+        lookup = credentials.lookup(&inputs.account);
+    }
+    let password = match lookup {
         CredentialLookup::Found(password) => password,
         // Transient secret-service trouble (bus not ready at startup, locked
         // collection, agent hiccup) must not arm the credential gate
@@ -729,6 +754,44 @@ mod tests {
         }
     }
 
+    /// Issue #214: a source whose lookup is locked once but whose keyring can
+    /// be unlocked on demand (the collections share the session password, so
+    /// the Secret Service unlocks them without prompting).
+    struct UnlockingCredentials {
+        locked: std::sync::atomic::AtomicBool,
+        lookups: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CredentialSource for UnlockingCredentials {
+        fn lookup(&self, _account: &AccountConfig) -> CredentialLookup {
+            self.lookups
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.locked.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                CredentialLookup::Locked
+            } else {
+                CredentialLookup::Found("secret".to_string())
+            }
+        }
+
+        fn unlock_keyring(&self) -> bool {
+            true
+        }
+    }
+
+    /// Issue #214: a source that stays locked and cannot unlock anything must
+    /// be asked exactly once per run (no unlock retry loop).
+    struct LockedCredentials {
+        lookups: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CredentialSource for LockedCredentials {
+        fn lookup(&self, _account: &AccountConfig) -> CredentialLookup {
+            self.lookups
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            CredentialLookup::Locked
+        }
+    }
+
     fn account() -> AccountConfig {
         AccountConfig {
             id: "test-account".to_string(),
@@ -951,6 +1014,65 @@ mod tests {
         let (outcome, events) = run_engine(engine, &progress_rx);
         assert_eq!(outcome, SyncOutcome::KeyringLocked);
         assert!(events.is_empty());
+    }
+
+    /// Issue #214: when the unlock attempt succeeds, the lookup is retried
+    /// once and the run proceeds with the resolved password (here surfacing
+    /// as EngineMissing, which is only reachable after a successful lookup).
+    #[test]
+    fn locked_lookup_retries_once_after_a_successful_unlock() {
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let credentials = Arc::new(UnlockingCredentials {
+            locked: std::sync::atomic::AtomicBool::new(true),
+            lookups: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some("/nonexistent/nextcloudcmd".into()),
+            progress_tx,
+        )
+        .with_credentials(credentials.clone());
+        let (outcome, _events) = run_engine(engine, &progress_rx);
+        assert_eq!(outcome, SyncOutcome::EngineMissing);
+        assert_eq!(
+            credentials
+                .lookups
+                .load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the lookup must be retried once after a successful unlock"
+        );
+    }
+
+    /// Issue #214: a lookup that stays locked and an unlock that cannot help
+    /// must not loop: one lookup per run, keyring-locked outcome.
+    #[test]
+    fn locked_lookup_without_unlock_is_not_retried() {
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let credentials = Arc::new(LockedCredentials {
+            lookups: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            None,
+            progress_tx,
+        )
+        .with_credentials(credentials.clone());
+        let (outcome, events) = run_engine(engine, &progress_rx);
+        assert_eq!(outcome, SyncOutcome::KeyringLocked);
+        assert!(events.is_empty());
+        assert_eq!(
+            credentials
+                .lookups
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a failed unlock must not re-run the lookup"
+        );
     }
 
     #[test]
