@@ -1414,10 +1414,18 @@ fn finish_setup(ctx: &SetupContext) {
     // provider in the state is the freshly selected one, so switching
     // providers re-evaluates the check for the new engine.
     let provider = ctx.state.borrow().provider;
-    if let Some(hint) = engine_install_hint(provider, engine_present_for(provider)) {
-        let dialog = libadwaita::AlertDialog::new(Some(t("Sync Engine Not Installed")), Some(hint));
-        dialog.add_response("ok", t("OK"));
-        dialog.present(Some(&ctx.window));
+    if engine_install_hint(provider, engine_present_for(provider)).is_some() {
+        // Issue #218: the blocking dialog offers one-click installation of
+        // the provider's engine package; once installed, the finish gate
+        // passes on the next attempt.
+        let window = ctx.window.clone();
+        crate::ui::engine_install::present_engine_install_dialog(
+            &ctx.window,
+            provider,
+            Rc::new(move || {
+                crate::ui::engine_install::present_engine_installed_dialog(&window);
+            }),
+        );
         return;
     }
     let (provider, server, username, authentication_type, folders, trust_invalid, size_confirmed) = {
@@ -1659,8 +1667,8 @@ fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider) {
 }
 
 /// Whether the selected provider's sync binary is available on `$PATH`
-/// (issue #210).
-fn engine_present_for(provider: Provider) -> bool {
+/// (issue #210; reused by the install dialog, issue #218).
+pub(crate) fn engine_present_for(provider: Provider) -> bool {
     match provider {
         Provider::Nextcloud => find_binary("nextcloudcmd").is_some(),
         Provider::OpenCloud => find_binary("opencloudcmd").is_some(),
@@ -1671,8 +1679,11 @@ fn engine_present_for(provider: Provider) -> bool {
 /// provider's sync engine is not installed. Returns the actionable install
 /// hint to block the finish with, or `None` when the engine is present. Kept
 /// pure (binary presence passed in) so the policy is testable without a real
-/// `$PATH`.
-fn engine_install_hint(provider: Provider, engine_present: bool) -> Option<&'static str> {
+/// `$PATH`; also the body of the install dialog (issue #218).
+pub(crate) fn engine_install_hint(
+    provider: Provider,
+    engine_present: bool,
+) -> Option<&'static str> {
     if engine_present {
         return None;
     }

@@ -354,6 +354,30 @@ impl AccountView {
                         }
                     }))
                 },
+                // Issue #218: while the provider's engine is missing, the row
+                // menu offers one-click installation; a successful install
+                // retries the folder right away (the engine-missing state
+                // recovers on the next manual run).
+                on_install_engine: {
+                    let provider = account.provider;
+                    let folder_runtime = folder_runtime.clone();
+                    if crate::ui::setup::engine_present_for(provider) {
+                        None
+                    } else {
+                        Some(Rc::new(move |parent: &gtk4::Widget| {
+                            let folder_runtime = folder_runtime.clone();
+                            crate::ui::engine_install::present_engine_install_dialog(
+                                parent,
+                                provider,
+                                Rc::new(move || {
+                                    if let Some(fr) = &folder_runtime {
+                                        fr.sync_now();
+                                    }
+                                }),
+                            );
+                        }))
+                    }
+                },
             };
             // No last-sync caption is rendered (the v0.4.0 folder-focused
             // redesign dropped it), so no scheduler query here: the row's state

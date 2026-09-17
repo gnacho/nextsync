@@ -2749,3 +2749,63 @@ msgstr "{action} · {count}"
 msgid "{used} used"
 msgstr "{used} usados"
 
+
+#: src/ui/engine_install.rs
+msgid "This command will run with administrator rights:"
+msgstr "Este comando se ejecutará con derechos de administrador:"
+
+#: src/ui/engine_install.rs
+msgid "Run this command in a terminal:"
+msgstr "Ejecuta este comando en una terminal:"
+
+#: src/ui/engine_install.rs
+msgid "No automatic installation is available for this distribution yet."
+msgstr "Todavía no hay instalación automática disponible para esta distribución."
+
+#: src/ui/engine_install.rs
+msgid "Install"
+msgstr "Instalar"
+
+#: src/ui/engine_install.rs
+msgid "Copy Command"
+msgstr "Copiar comando"
+
+#: src/ui/engine_install.rs
+msgid "Installing…"
+msgstr "Instalando…"
+
+#: src/ui/engine_install.rs
+msgid "Command copied to the clipboard."
+msgstr "Comando copiado al portapapeles."
+
+#: src/ui/engine_install.rs
+msgid "The installation failed."
+msgstr "La instalación ha fallado."
+
+#: src/ui/engine_install.rs
+msgid "Exit code: {code}"
+msgstr "Código de salida: {code}"
+
+#: src/ui/engine_install.rs
+msgid "Installation Failed"
+msgstr "Instalación fallida"
+
+#: src/ui/engine_install.rs
+msgid "Sync Engine Installed"
+msgstr "Motor de sincronización instalado"
+
+#: src/ui/engine_install.rs
+msgid "The sync engine was installed. You can finish the setup now."
+msgstr "Se ha instalado el motor de sincronización. Ya puedes terminar la configuración."
+
+#: src/ui/engine_install.rs
+msgid "Install sync engine…"
+msgstr "Instalar el motor de sincronización…"
+
+#: src/ui/engine_install.rs
+msgid "On distributions without this package, install it from the AUR (for example: yay -S opencloud-desktop)."
+msgstr "En distribuciones sin este paquete, instálalo desde el AUR (por ejemplo: yay -S opencloud-desktop)."
+
+#: src/ui/engine_install.rs
+msgid "The installer crashed."
+msgstr "El instalador se cerró inesperadamente."
