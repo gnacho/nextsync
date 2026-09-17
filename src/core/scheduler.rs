@@ -34,13 +34,18 @@ pub const DEBOUNCE_MS: u64 = 2000;
 /// Cooldown after a sync finishes before the next one may start (s).
 pub const COOLDOWN_SECONDS: u64 = 4;
 
-/// Issue #170: budget of back-to-back keyring retries before the folder parks
-/// in the keyring-locked state. A transiently-unavailable Secret Service (bus
-/// coming up after login) recovers within these, but a genuinely locked
-/// collection must not retry forever.
+/// Issue #170: budget of back-to-back keyring retries before the folder falls
+/// back to the slow keyring watch (issue #214). A transiently-unavailable
+/// Secret Service (bus coming up after login) recovers within these, but a
+/// genuinely locked collection must not retry at a fast pace forever.
 pub const KEYRING_RETRY_MAX: u32 = 5;
 /// Starting retry delay for the keyring backoff (ms); each attempt doubles it.
 pub const KEYRING_RETRY_BASE_MS: u64 = 2000;
+/// Interval (ms) between keyring re-checks once the fast retry budget is
+/// exhausted (issue #214). Mirrors the server probe (issue #179): uncapped,
+/// so the folder recovers without a restart whenever the keyring is unlocked
+/// later, by any means.
+pub const KEYRING_WATCH_INTERVAL_MS: u64 = 60_000;
 /// Interval (ms) between server health probes while a folder is parked as
 /// server-unreachable (issue #179). Kept short so recovery is noticed quickly
 /// without hammering the network.
@@ -665,18 +670,19 @@ impl SchedulerInner {
     }
 
     /// Schedule a keyring retry with a capped exponential backoff (issue
-    /// #170). Once the retry budget is exhausted the folder stays in the
-    /// keyring-locked state and waits for a manual action instead of retrying
-    /// forever. The retry re-enters `start` on a timer WITHOUT changing the
+    /// #170). The retry re-enters `start` on a timer WITHOUT changing the
     /// visible state, so the informative keyring-locked label is preserved
-    /// while it re-attempts.
+    /// while it re-attempts. Once the fast budget is exhausted the folder
+    /// falls back to a slow periodic watch (issue #214) instead of parking
+    /// until a restart: a locked keyring is often unlocked later in the
+    /// session (by the user, the session itself, or the engine's own unlock
+    /// attempt), and the folder must notice on its own.
     fn schedule_keyring_retry(&mut self) {
-        if self.stopped
-            || self.start_source.is_some()
-            || self.preparing
-            || self.running
-            || self.keyring_retry_count >= KEYRING_RETRY_MAX
-        {
+        if self.stopped || self.start_source.is_some() || self.preparing || self.running {
+            return;
+        }
+        if self.keyring_retry_count >= KEYRING_RETRY_MAX {
+            self.schedule_keyring_watch();
             return;
         }
         let attempt = self.keyring_retry_count;
@@ -685,6 +691,32 @@ impl SchedulerInner {
         let weak = self.self_ref.clone();
         let id = self.source.borrow_mut().add_timeout(
             delay,
+            Box::new(move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.borrow_mut().start();
+                }
+            }),
+        );
+        self.start_source = Some(id);
+    }
+
+    /// Slow periodic re-check while the keyring stays locked (issue #214),
+    /// mirroring the server probe (issue #179): each tick re-enters `start`
+    /// WITHOUT changing the visible state; a run that still finds the keyring
+    /// locked re-arms the watch from `finished`, and the first run that
+    /// resolves credentials clears the gate.
+    fn schedule_keyring_watch(&mut self) {
+        if self.stopped
+            || self.start_source.is_some()
+            || self.preparing
+            || self.running
+            || !self.keyring_locked
+        {
+            return;
+        }
+        let weak = self.self_ref.clone();
+        let id = self.source.borrow_mut().add_timeout(
+            Duration::from_millis(KEYRING_WATCH_INTERVAL_MS),
             Box::new(move || {
                 if let Some(inner) = weak.upgrade() {
                     inner.borrow_mut().start();
@@ -1727,28 +1759,62 @@ mod tests {
         assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
     }
 
-    /// Issue #170: the keyring retry has a capped budget, so a genuinely
-    /// locked collection does not retry forever.
+    /// Issue #170: the fast keyring retry has a capped budget, so a genuinely
+    /// locked collection does not retry back-to-back forever. Issue #214:
+    /// once the budget is exhausted the folder falls back to a slow periodic
+    /// watch instead of parking until a restart.
     #[test]
-    fn keyring_retry_budget_is_capped() {
+    fn keyring_retry_budget_is_capped_and_falls_back_to_a_watch() {
         let (scheduler, source, runner) = make_scheduler(None);
         scheduler.request(Trigger::Startup);
         run_idle(&source);
-        // Burn the whole retry budget with back-to-back locked outcomes.
-        let mut calls = 1;
-        loop {
+        // Burn the whole fast retry budget with back-to-back locked outcomes.
+        for _ in 0..KEYRING_RETRY_MAX {
             finish(&runner, SyncOutcome::KeyringLocked);
-            if source.borrow().pending() == 0 {
-                break;
-            }
             let retry_id = source.borrow().only_id();
             fire_timer(&source, retry_id);
-            calls += 1;
         }
-        assert_eq!(calls, 1 + KEYRING_RETRY_MAX as usize);
-        // No more retries are scheduled; the folder is parked keyring-locked.
-        assert_eq!(source.borrow().pending(), 0);
+        assert_eq!(
+            runner.0.borrow().start_calls,
+            1 + KEYRING_RETRY_MAX as usize
+        );
+        // The next locked outcome exhausts the budget: no further fast retry,
+        // but a slow watch keeps re-checking the keyring.
+        finish(&runner, SyncOutcome::KeyringLocked);
         assert!(scheduler.keyring_locked());
+        assert_eq!(
+            source.borrow().pending(),
+            1,
+            "a keyring watch must keep re-checking after the retry budget"
+        );
+    }
+
+    /// Issue #214: after the fast retry budget is exhausted, the slow keyring
+    /// watch keeps re-entering the engine on its own, so the folder recovers
+    /// without restarting the app as soon as the keyring is unlocked - by the
+    /// user, the session, or the app's own unlock attempt.
+    #[test]
+    fn keyring_watch_recovers_without_restart_once_unlocked() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Startup);
+        run_idle(&source);
+        for _ in 0..KEYRING_RETRY_MAX {
+            finish(&runner, SyncOutcome::KeyringLocked);
+            let retry_id = source.borrow().only_id();
+            fire_timer(&source, retry_id);
+        }
+        // The budget is exhausted: the folder sits keyring-locked with only
+        // the slow watch pending, no external trigger in sight.
+        finish(&runner, SyncOutcome::KeyringLocked);
+        let calls = runner.0.borrow().start_calls;
+        assert!(scheduler.keyring_locked());
+        // The keyring gets unlocked; the next watch tick reconciles.
+        let watch_id = source.borrow().only_id();
+        fire_timer(&source, watch_id);
+        assert_eq!(runner.0.borrow().start_calls, calls + 1);
+        finish(&runner, SyncOutcome::Success);
+        assert!(!scheduler.keyring_locked());
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
     }
 
     /// Issue #179: a NetworkError outcome arms the server-unreachable gate:

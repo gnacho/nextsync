@@ -184,6 +184,27 @@ impl CredentialsStore {
         Ok(Some(password))
     }
 
+    /// Try to unlock every locked collection (issue #214).
+    ///
+    /// GNOME collections created by the desktop session usually share the
+    /// login password: the Secret Service then completes the unlock prompt
+    /// on its own as long as the client connection stays alive through it,
+    /// so the common case returns without any user interaction. Returns
+    /// `Ok(true)` when at least one collection was locked and got unlocked.
+    /// Per-collection failures are skipped so one stubborn collection does
+    /// not block the rest.
+    pub fn unlock_locked_collections() -> Result<bool, CredentialError> {
+        let service = SecretService::connect(EncryptionType::Dh)?;
+        let mut unlocked_any = false;
+        for collection in service.get_all_collections()? {
+            let was_locked = collection.is_locked().unwrap_or(false);
+            if was_locked && collection.unlock().is_ok() {
+                unlocked_any = true;
+            }
+        }
+        Ok(unlocked_any)
+    }
+
     /// Drop the cached password for an account (issue #178).
     ///
     /// Called when a sync run proves the credential wrong (authentication
