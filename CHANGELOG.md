@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.24] - 2026-09-17
+
+### Fixed
+
+- Folders no longer stay Offline after connectivity returns when the recovery probe fired while the machine was offline: the probe is re-armed on network restore and synchronization resumes on its own, without a manual sync or an app restart (#207).
+
 ## [0.2.22] - 2026-09-17
 
 ### Fixed

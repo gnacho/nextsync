@@ -1,12 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.22",
+  "version": "0.2.24",
   "mandatory": false,
-  "summary": "Detect a missing sync engine and stop reporting success when nothing can be synchronized.",
+  "summary": "Folders recover on their own after connectivity returns, even when the recovery probe fired while the machine was offline.",
   "changelog": [
-    "When the sync binary (nextcloudcmd / opencloudcmd) is not installed, folders now show a clear 'sync engine is not installed' state instead of a generic failure - or worse, a misleading 'Synchronization completed' from the unchanged-ETag interval shortcut while nothing was actually synced.",
-    "A configured engine path that no longer exists resolves as missing too, so a stale override surfaces the same actionable state.",
-    "The missing-engine reason is written to the daily log and raises a desktop notification like other problem outcomes."
+    "After a period without connectivity, folders no longer stay Offline until a manual sync or an app restart: when the network comes back, the server recovery probe is re-armed automatically and synchronization resumes on its own.",
+    "Fixes the case where the one-shot recovery probe fired while the machine was offline, died silently, and the NetworkRestored trigger stayed parked behind the server-unreachable gate forever."
   ],
   "released_at": "2026-09-17T00:00:00Z"
 }
