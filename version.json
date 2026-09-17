@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.24",
+  "version": "0.2.26",
   "mandatory": false,
-  "summary": "Folders recover on their own after connectivity returns, even when the recovery probe fired while the machine was offline.",
+  "summary": "The setup wizard blocks finishing without the selected provider's sync engine, and the package flags when no engine is installed at all.",
   "changelog": [
-    "After a period without connectivity, folders no longer stay Offline until a manual sync or an app restart: when the network comes back, the server recovery probe is re-armed automatically and synchronization resumes on its own.",
-    "Fixes the case where the one-shot recovery probe fired while the machine was offline, died silently, and the NetworkRestored trigger stayed parked behind the server-unreachable gate forever."
+    "The setup wizard now refuses to finish when the selected provider's sync engine is missing, with an actionable hint naming the package to install (nextcloud-client / opencloud-desktop). The welcome banner already warned on provider selection; now the finish is blocked too (issue #210).",
+    "The Arch package lists both sync engines as optional dependencies and prints a clear warning on install/upgrade when neither nextcloudcmd nor opencloudcmd is available, since pacman cannot express an 'at least one' dependency."
   ],
   "released_at": "2026-09-17T00:00:00Z"
 }

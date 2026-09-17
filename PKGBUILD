@@ -1,6 +1,6 @@
 # Maintainer: gnacho <https://github.com/gnacho>
 pkgname=nextsync
-pkgver=0.2.24
+pkgver=0.2.26
 pkgrel=1
 pkgdesc='Nextcloud desktop synchronization client for GNOME (Rust rewrite)'
 arch=('x86_64' 'aarch64')
@@ -8,7 +8,12 @@ url='https://github.com/gnacho/nextsync'
 license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'glibc' 'gcc-libs')
 makedepends=('cargo')
-optdepends=('nextcloud-client: nextcloudcmd sync engine')
+# pacman has no "A or B" dependency: the engines are alternative optdepends
+# and nextsync.install warns at install/upgrade time when NEITHER is present
+# (issue #210).
+optdepends=('nextcloud-client: nextcloudcmd sync engine (Nextcloud provider)'
+            'opencloud-desktop: opencloudcmd sync engine (OpenCloud provider)')
+install=nextsync.install
 source=("nextsync-$pkgver.tar.gz")
 sha256sums=('SKIP')
 

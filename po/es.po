@@ -2578,6 +2578,18 @@ msgstr "Tu árbol de archivos completo se almacenará físicamente en este equip
 msgid "opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization."
 msgstr "Falta opencloudcmd. Instala el paquete de escritorio de OpenCloud antes de la primera sincronización."
 
+#: src/ui/setup.rs
+msgid "nextcloudcmd is missing. Install the nextcloud-client package (it provides the sync engine) and finish the setup afterwards."
+msgstr "Falta nextcloudcmd. Instala el paquete nextcloud-client (incluye el motor de sincronización) y termina la configuración después."
+
+#: src/ui/setup.rs
+msgid "opencloudcmd is missing. Install the opencloud-desktop package (it provides the sync engine) and finish the setup afterwards."
+msgstr "Falta opencloudcmd. Instala el paquete opencloud-desktop (incluye el motor de sincronización) y termina la configuración después."
+
+#: src/ui/setup.rs
+msgid "Sync Engine Not Installed"
+msgstr "Motor de sincronización no instalado"
+
 
 #: src/core/scheduler.rs
 msgid "Automatic synchronization is off"
