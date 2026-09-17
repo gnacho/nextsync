@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.28",
+  "version": "0.2.30",
   "mandatory": false,
-  "summary": "The app recovers from a locked password keyring on its own, without a restart.",
+  "summary": "Install the sync engine from within the app, without touching a terminal.",
   "changelog": [
-    "When the password keyring is locked (for example after the keyring daemon restarts), the app now tries to unlock the collections itself - GNOME collections that share the session password unlock without prompting - and retries the lookup once (issue #214).",
-    "Once the fast retry budget is exhausted, a slow periodic check keeps watching the keyring, so the folder recovers and syncs as soon as the keyring is unlocked by any means, without restarting the app."
+    "When the sync engine is not installed, the app now offers one-click installation: the blocking wizard dialog and the folder menu can run the right package command with administrator rights (pacman, apt, dnf, zypper) and retry the folder once the binary appears (issue #218).",
+    "On distributions without an automatic route, the dialog shows the exact command to copy (including the AUR helper for opencloud-desktop on Arch)."
   ],
   "released_at": "2026-09-17T00:00:00Z"
 }
