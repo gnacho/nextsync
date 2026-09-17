@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.26] - 2026-09-17
+
+### Added
+
+- The setup wizard blocks finishing when the selected provider's sync engine is not installed, with an actionable hint naming the package (nextcloud-client / opencloud-desktop). The check re-evaluates for the newly selected provider (#210).
+- The Arch package lists both sync engines as optional dependencies and warns on install/upgrade when neither nextcloudcmd nor opencloudcmd is available.
+
 ## [0.2.24] - 2026-09-17
 
 ### Fixed

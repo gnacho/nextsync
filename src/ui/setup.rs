@@ -1408,6 +1408,18 @@ fn size_threshold_bytes(store: &ConfigStore) -> Option<u64> {
 /// Create the local roots, persist the account and the TLS trust choice, then
 /// invoke `on_complete` with the validated account and close the wizard.
 fn finish_setup(ctx: &SetupContext) {
+    // Issue #210: block the finish when the selected provider's sync engine
+    // is not installed. This is the single choke point every finish path
+    // (first-sync confirmation, resume, decision) goes through, and the
+    // provider in the state is the freshly selected one, so switching
+    // providers re-evaluates the check for the new engine.
+    let provider = ctx.state.borrow().provider;
+    if let Some(hint) = engine_install_hint(provider, engine_present_for(provider)) {
+        let dialog = libadwaita::AlertDialog::new(Some(t("Sync Engine Not Installed")), Some(hint));
+        dialog.add_response("ok", t("OK"));
+        dialog.present(Some(&ctx.window));
+        return;
+    }
     let (provider, server, username, authentication_type, folders, trust_invalid, size_confirmed) = {
         let state = ctx.state.borrow();
         (
@@ -1643,6 +1655,34 @@ fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider) {
             banner.set_revealed(true);
         }
         _ => banner.set_revealed(false),
+    }
+}
+
+/// Whether the selected provider's sync binary is available on `$PATH`
+/// (issue #210).
+fn engine_present_for(provider: Provider) -> bool {
+    match provider {
+        Provider::Nextcloud => find_binary("nextcloudcmd").is_some(),
+        Provider::OpenCloud => find_binary("opencloudcmd").is_some(),
+    }
+}
+
+/// Issue #210: the setup must not present itself as ready when the selected
+/// provider's sync engine is not installed. Returns the actionable install
+/// hint to block the finish with, or `None` when the engine is present. Kept
+/// pure (binary presence passed in) so the policy is testable without a real
+/// `$PATH`.
+fn engine_install_hint(provider: Provider, engine_present: bool) -> Option<&'static str> {
+    if engine_present {
+        return None;
+    }
+    match provider {
+        Provider::Nextcloud => Some(t(
+            "nextcloudcmd is missing. Install the nextcloud-client package (it provides the sync engine) and finish the setup afterwards.",
+        )),
+        Provider::OpenCloud => Some(t(
+            "opencloudcmd is missing. Install the opencloud-desktop package (it provides the sync engine) and finish the setup afterwards.",
+        )),
     }
 }
 
@@ -2450,5 +2490,41 @@ mod tests {
         assert!(resolved.is_none());
         let resolved = wizard_remote_picker_password("https://x.example.net", "").unwrap();
         assert!(resolved.is_none());
+    }
+
+    /// Issue #210: finishing the setup with the selected provider's engine
+    /// missing is blocked with an actionable hint naming the package; with
+    /// the engine present there is no block at all.
+    #[test]
+    fn engine_install_hint_blocks_only_when_the_binary_is_missing() {
+        use crate::nextcloud::driver::Provider;
+        assert!(
+            engine_install_hint(Provider::Nextcloud, true).is_none(),
+            "an installed engine never blocks the setup"
+        );
+        assert!(
+            engine_install_hint(Provider::OpenCloud, true).is_none(),
+            "an installed engine never blocks the setup"
+        );
+        let nextcloud = engine_install_hint(Provider::Nextcloud, false)
+            .expect("a missing Nextcloud engine blocks the setup");
+        assert!(
+            nextcloud.contains("nextcloudcmd"),
+            "the hint names the binary: {nextcloud}"
+        );
+        assert!(
+            nextcloud.contains("nextcloud-client"),
+            "the hint names the Arch package: {nextcloud}"
+        );
+        let opencloud = engine_install_hint(Provider::OpenCloud, false)
+            .expect("a missing OpenCloud engine blocks the setup");
+        assert!(
+            opencloud.contains("opencloudcmd"),
+            "the hint names the binary: {opencloud}"
+        );
+        assert!(
+            opencloud.contains("opencloud-desktop"),
+            "the hint names the Arch package: {opencloud}"
+        );
     }
 }

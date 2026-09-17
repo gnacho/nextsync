@@ -1,0 +1,17 @@
+# Issue #210: pacman cannot express "at least one of these two packages", so
+# both engines ship as optdepends and this script surfaces a clear warning
+# when neither sync engine is available after an install or upgrade.
+
+post_install() {
+    if ! command -v nextcloudcmd >/dev/null 2>&1 \
+        && ! command -v opencloudcmd >/dev/null 2>&1; then
+        echo "nextsync needs at least one sync engine to synchronize:"
+        echo "  - Nextcloud: install nextcloud-client (provides nextcloudcmd)"
+        echo "  - OpenCloud: install opencloud-desktop (provides opencloudcmd)"
+        echo "Without one of them every synchronization stays blocked."
+    fi
+}
+
+post_upgrade() {
+    post_install
+}
