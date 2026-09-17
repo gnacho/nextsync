@@ -502,6 +502,9 @@ pub fn outcome_log_line(outcome: &crate::core::scheduler::SyncOutcome) -> &'stat
         crate::core::scheduler::SyncOutcome::NetworkError => {
             t("Synchronization blocked: the server is unreachable")
         }
+        crate::core::scheduler::SyncOutcome::EngineMissing => {
+            t("Synchronization blocked: the sync engine is not installed")
+        }
     }
 }
 
@@ -1970,6 +1973,7 @@ mod tests {
             SyncOutcome::KeyringLocked,
             SyncOutcome::Failed,
             SyncOutcome::NetworkError,
+            SyncOutcome::EngineMissing,
         ] {
             let line = outcome_log_line(&outcome);
             assert!(!line.is_empty(), "English label for {outcome:?}");
