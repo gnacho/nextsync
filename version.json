@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.2.20",
+  "version": "0.2.22",
   "mandatory": false,
-  "summary": "Improved the mass-deletion review summary for a large number of flat files.",
+  "summary": "Detect a missing sync engine and stop reporting success when nothing can be synchronized.",
   "changelog": [
-    "When the deletion guard pauses for many files sitting at the top level of a folder, the review now shows a preview of the first files and a 'N more' note instead of just a bare counter, so you can see what was removed without scrolling a hundreds-row list.",
-    "Files inside subfolders keep the folder grouping; individual rows are only listed when the number of missing files is small."
+    "When the sync binary (nextcloudcmd / opencloudcmd) is not installed, folders now show a clear 'sync engine is not installed' state instead of a generic failure - or worse, a misleading 'Synchronization completed' from the unchanged-ETag interval shortcut while nothing was actually synced.",
+    "A configured engine path that no longer exists resolves as missing too, so a stale override surfaces the same actionable state.",
+    "The missing-engine reason is written to the daily log and raises a desktop notification like other problem outcomes."
   ],
-  "released_at": "2026-09-08T00:00:00Z"
+  "released_at": "2026-09-17T00:00:00Z"
 }

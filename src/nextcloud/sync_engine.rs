@@ -474,6 +474,27 @@ fn engine_thread(
     // the password/token on its diagnostics, and the structural passes alone
     // would leave it verbatim in the run tail (issue #126).
     let redactor = Arc::new(Redactor::from_secrets([password.clone()]));
+    // Issue #209: resolve the engine command BEFORE the remote ensurer and
+    // the ETag gate. A missing provider binary (nextcloudcmd / opencloudcmd)
+    // must surface as EngineMissing even when the periodic interval would
+    // take the cheap unchanged-ETag shortcut: otherwise the row reports a
+    // clean success for days while nothing is actually synchronized.
+    let driver = driver_for(inputs.account.provider);
+    let ctx = DriverContext::from_folder(
+        &inputs.account,
+        &inputs.folder,
+        &inputs.network,
+        password.clone(),
+        inputs.exclude_file.clone(),
+        inputs.executable.clone(),
+    );
+    let spec = match driver.build_command(&ctx) {
+        Ok(spec) => spec,
+        Err(crate::nextcloud::command::CommandError::MissingBinary) => {
+            return EngineRun::Direct(SyncOutcome::EngineMissing)
+        }
+        Err(_) => return EngineRun::Direct(SyncOutcome::Failed),
+    };
     // `nextcloudcmd` exits 1 with no output when the remote folder does not
     // exist; create it (and its parents) first. Auth rejection surfaces as
     // such; anything else falls through and lets nextcloudcmd report.
@@ -534,19 +555,6 @@ fn engine_thread(
             // might be missed).
         }
     }
-    let driver = driver_for(inputs.account.provider);
-    let ctx = DriverContext::from_folder(
-        &inputs.account,
-        &inputs.folder,
-        &inputs.network,
-        password.clone(),
-        inputs.exclude_file.clone(),
-        inputs.executable.clone(),
-    );
-    let spec = match driver.build_command(&ctx) {
-        Ok(spec) => spec,
-        Err(_) => return EngineRun::Direct(SyncOutcome::Failed),
-    };
     let mut command = if inputs.network.reduce_transfer_impact {
         spec.to_command_low_impact()
     } else {
@@ -907,8 +915,11 @@ mod tests {
         assert!(events.is_empty());
     }
 
+    /// Issue #209: a missing engine binary is the distinct EngineMissing
+    /// outcome (not the generic Failed), so the row can point at the real
+    /// fix - installing the engine package.
     #[test]
-    fn missing_binary_maps_to_failed() {
+    fn missing_binary_maps_to_engine_missing() {
         let (progress_tx, progress_rx) = async_channel::unbounded();
         let engine = SyncEngine::new(
             account(),
@@ -922,7 +933,7 @@ mod tests {
             "secret".to_string(),
         ))));
         let (outcome, _events) = run_engine(engine, &progress_rx);
-        assert_eq!(outcome, SyncOutcome::Failed);
+        assert_eq!(outcome, SyncOutcome::EngineMissing);
     }
 
     #[test]
@@ -1336,6 +1347,60 @@ mod tests {
         let outcome = run_engine_interval(engine, &async_channel::unbounded().1);
         assert_eq!(outcome, SyncOutcome::Success);
         assert!(!marker.exists(), "nextcloudcmd must not be spawned");
+    }
+
+    /// Issue #209: with the sync engine binary missing, a periodic interval
+    /// run whose root ETag is unchanged must NOT report a clean success: the
+    /// ETag gate would skip the reconciliation without ever spawning the
+    /// engine, hiding the breakage for days. The missing engine is detected
+    /// before the gate and reported as EngineMissing.
+    #[test]
+    fn missing_engine_blocks_the_etag_gate_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no-such-nextcloudcmd");
+        let (etag_tx, _etag_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(missing),
+            etag_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))))
+        .with_etag_probe(Arc::new(|_account, _folder, _password| {
+            Ok(Some("\"abc\"".to_string()))
+        }));
+        // Seed the slot with the same ETag the probe returns: without the
+        // engine check this run would take the gate shortcut and succeed.
+        *engine.etag_slot.lock().unwrap() = Some("\"abc\"".to_string());
+        let outcome = run_engine_interval(engine, &async_channel::unbounded().1);
+        assert_eq!(outcome, SyncOutcome::EngineMissing);
+    }
+
+    /// Issue #209: a manual run with a missing engine binary reports
+    /// EngineMissing (a distinct, actionable state) instead of the generic
+    /// failure.
+    #[test]
+    fn missing_engine_reports_engine_missing_on_manual_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no-such-nextcloudcmd");
+        let (progress_tx, progress_rx) = async_channel::unbounded();
+        let engine = SyncEngine::new(
+            account(),
+            folder(),
+            NetworkConfig::default(),
+            None,
+            Some(missing),
+            progress_tx,
+        )
+        .with_credentials(Arc::new(FakeCredentials(CredentialLookup::Found(
+            "secret".to_string(),
+        ))));
+        let (outcome, _) = run_engine(engine, &progress_rx);
+        assert_eq!(outcome, SyncOutcome::EngineMissing);
     }
 
     /// Issue #189: a changed root ETag (or no recorded ETag yet, e.g. first

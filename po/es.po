@@ -2557,6 +2557,15 @@ msgstr "Sincronización bloqueada: el almacén de contraseñas está bloqueado"
 msgid "Synchronization blocked: the server is unreachable"
 msgstr "Sincronización bloqueada: el servidor no está disponible"
 
+#: src/core/account_runtime.rs
+#: src/core/scheduler.rs
+msgid "Synchronization blocked: the sync engine is not installed"
+msgstr "Sincronización bloqueada: el motor de sincronización no está instalado"
+
+#: src/core/notifications.rs
+msgid "The sync engine is not installed."
+msgstr "El motor de sincronización no está instalado."
+
 #: src/core/scheduler.rs
 msgid "Waiting for local changes to settle"
 msgstr "Esperando a que los cambios locales se asienten"

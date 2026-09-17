@@ -122,6 +122,9 @@ pub fn failure_notification(outcome: &crate::core::scheduler::SyncOutcome) -> Op
             "No credentials are saved for this account.",
         )),
         SyncOutcome::Failed => Some(crate::util::i18n::t("A synchronization failed.")),
+        SyncOutcome::EngineMissing => {
+            Some(crate::util::i18n::t("The sync engine is not installed."))
+        }
         // A transport failure is a transient network condition (the server is
         // unreachable), not a problem the account needs a notification for:
         // it resolves on the next automatic trigger once the server answers.
@@ -168,6 +171,7 @@ mod tests {
             SyncOutcome::Failed,
             SyncOutcome::AuthFailed,
             SyncOutcome::KeyringLocked,
+            SyncOutcome::EngineMissing,
         ] {
             let sent = Rc::new(CountingNotifier::default());
             let notifier: Rc<dyn DesktopNotifier> = sent.clone();

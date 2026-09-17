@@ -292,9 +292,14 @@ impl SyncDriver for OpenCloudDriver {
 }
 
 /// The provider binary: the explicit override, or the `$PATH` lookup.
+///
+/// Issue #209: an explicit override pointing at a path that no longer exists
+/// resolves as `MissingBinary` (the actionable "engine not installed" state),
+/// not as an opaque spawn failure at run time.
 fn resolve_binary(name: &str, executable: &Option<PathBuf>) -> Result<String, CommandError> {
     match executable {
-        Some(path) => Ok(path.to_string_lossy().into_owned()),
+        Some(path) if path.exists() => Ok(path.to_string_lossy().into_owned()),
+        Some(_) => Err(CommandError::MissingBinary),
         None => find_binary(name)
             .map(|path| path.to_string_lossy().into_owned())
             .ok_or(CommandError::MissingBinary),
@@ -590,6 +595,19 @@ mod tests {
         assert!(
             find_binary("definitely-not-a-real-binary-xyz").is_none(),
             "unknown binary must not resolve"
+        );
+    }
+
+    /// Issue #209: an explicit executable override pointing at a path that no
+    /// longer exists must resolve as MissingBinary (a configured stale path
+    /// must surface the actionable state, not a generic spawn failure).
+    #[test]
+    fn resolve_binary_rejects_a_missing_explicit_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone-nextcloudcmd");
+        assert_eq!(
+            resolve_binary("nextcloudcmd", &Some(missing)),
+            Err(CommandError::MissingBinary)
         );
     }
 

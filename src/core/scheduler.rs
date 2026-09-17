@@ -94,6 +94,12 @@ pub enum SyncOutcome {
     /// Offline for that account only: the machine has a network link but the
     /// specific server does not answer (issue #162).
     NetworkError,
+    /// The provider's sync binary (nextcloudcmd / opencloudcmd) is not
+    /// installed, so nothing can be synchronized. Distinct from Failed so the
+    /// UI can point at the real fix - installing the engine package - and the
+    /// ETag gate never reports a false success while the engine is missing
+    /// (issue #209).
+    EngineMissing,
 }
 
 /// Executes a reconciliation. Implemented by the sync engine in Task 2.3.
@@ -982,6 +988,19 @@ impl SchedulerInner {
                 self.state.set(
                     AppState::Offline,
                     t("Synchronization blocked: the server is unreachable"),
+                );
+                (false, false)
+            }
+            SyncOutcome::EngineMissing => {
+                // Issue #209: the provider's sync binary is not installed.
+                // Nothing ran, so this is not a "ran" outcome; every later
+                // trigger re-checks the binary, so installing the engine
+                // package (e.g. nextcloud-client) recovers without a restart.
+                self.keyring_locked = false;
+                self.consecutive_failing_syncs += 1;
+                self.state.set(
+                    AppState::Error,
+                    t("Synchronization blocked: the sync engine is not installed"),
                 );
                 (false, false)
             }
@@ -2156,6 +2175,33 @@ mod tests {
         run_idle(&source);
         finish(&runner, SyncOutcome::Failed);
         assert_eq!(scheduler.state().snapshot().state, AppState::Error);
+    }
+
+    /// Issue #209: a missing sync engine binary (e.g. the user removed the
+    /// desktop package that provides nextcloudcmd) marks the folder Error
+    /// with a clear message, never reads as synchronized, and keeps retrying
+    /// on the next trigger once the engine is installed again.
+    #[test]
+    fn engine_missing_sets_error_and_recovers_on_retry() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish(&runner, SyncOutcome::EngineMissing);
+        let snapshot = scheduler.state().snapshot();
+        assert_eq!(snapshot.state, AppState::Error);
+        assert!(
+            snapshot.message.contains("engine"),
+            "the row explains the missing engine: {}",
+            snapshot.message
+        );
+
+        // Installing the engine does not need an app restart: the next
+        // automatic trigger runs again and a real success clears the state.
+        scheduler.request(Trigger::RemoteInterval);
+        run_idle(&source);
+        assert_eq!(runner.0.borrow().start_calls, 2);
+        finish(&runner, SyncOutcome::Success);
+        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
     }
 
     /// Issue #162: an unreachable server (transport failure) marks the folder
