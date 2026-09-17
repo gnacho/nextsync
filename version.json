@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.26",
+  "version": "0.2.28",
   "mandatory": false,
-  "summary": "The setup wizard blocks finishing without the selected provider's sync engine, and the package flags when no engine is installed at all.",
+  "summary": "The app recovers from a locked password keyring on its own, without a restart.",
   "changelog": [
-    "The setup wizard now refuses to finish when the selected provider's sync engine is missing, with an actionable hint naming the package to install (nextcloud-client / opencloud-desktop). The welcome banner already warned on provider selection; now the finish is blocked too (issue #210).",
-    "The Arch package lists both sync engines as optional dependencies and prints a clear warning on install/upgrade when neither nextcloudcmd nor opencloudcmd is available, since pacman cannot express an 'at least one' dependency."
+    "When the password keyring is locked (for example after the keyring daemon restarts), the app now tries to unlock the collections itself - GNOME collections that share the session password unlock without prompting - and retries the lookup once (issue #214).",
+    "Once the fast retry budget is exhausted, a slow periodic check keeps watching the keyring, so the folder recovers and syncs as soon as the keyring is unlocked by any means, without restarting the app."
   ],
   "released_at": "2026-09-17T00:00:00Z"
 }
