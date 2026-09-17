@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.28] - 2026-09-17
+
+### Fixed
+
+- Recover from a locked password keyring without restarting the app: the app tries to unlock the collections itself (GNOME collections sharing the session password unlock without prompting) and retries the lookup once; after the fast retry budget, a slow periodic watch keeps checking until the keyring is unlocked by any means (#214).
+
 ## [0.2.26] - 2026-09-17
 
 ### Added
