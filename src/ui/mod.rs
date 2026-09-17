@@ -4,6 +4,7 @@ pub mod about;
 pub mod account_settings;
 pub mod activity;
 pub mod conflict_resolver;
+pub mod engine_install;
 pub mod folder_emblems;
 pub mod folder_status;
 pub mod main_window;

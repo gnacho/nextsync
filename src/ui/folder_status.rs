@@ -162,6 +162,10 @@ pub fn pair_folder_runtimes(
         .collect()
 }
 
+/// Parented dialog callback: receives the row widget as the dialog's
+/// transient parent.
+pub type ParentedCallback = Rc<dyn Fn(&gtk4::Widget)>;
+
 /// Per-folder menu callbacks. All optional; the corresponding menu item is
 /// omitted when `None`.
 #[derive(Default)]
@@ -174,6 +178,10 @@ pub struct FolderRowCallbacks {
     pub on_pending_changes: Option<Rc<dyn Fn()>>,
     pub on_review_deletions: Option<Rc<dyn Fn()>>,
     pub on_resolve_conflicts: Option<Rc<dyn Fn()>>,
+    /// Issue #218: present the "install the sync engine" dialog. The wiring
+    /// only sets it while the provider's engine binary is missing, so the
+    /// menu entry disappears once an engine is available.
+    pub on_install_engine: Option<ParentedCallback>,
 }
 
 /// A GTK action row rendering one synchronized folder with live status.
@@ -305,8 +313,29 @@ impl FolderStatusRow {
             menu_actions.add_action(&action);
             actions.insert(name.to_string(), action);
         }
+        // Issue #218: the install entry needs the row as its dialog parent,
+        // so it cannot go through the parent-less loop above.
+        if let Some(callback) = callbacks.on_install_engine.clone() {
+            let action = gio::SimpleAction::new("install-engine", None);
+            let row_for_dialog = row.clone();
+            action.connect_activate(move |_action, _param| {
+                callback(row_for_dialog.upcast_ref());
+            });
+            menu_actions.add_action(&action);
+            actions.insert("install-engine".to_string(), action);
+        }
 
         let menu = gio::Menu::new();
+        // The install entry leads while the engine is missing: it is the
+        // action that unblocks everything else in this menu.
+        if actions.contains_key("install-engine") {
+            let item = gio::MenuItem::new(
+                Some(t("Install sync engine…")),
+                Some("folder.install-engine"),
+            );
+            item.set_icon(&gio::ThemedIcon::new("system-software-install-symbolic"));
+            menu.append_item(&item);
+        }
         if actions.contains_key("open") {
             let item = gio::MenuItem::new(Some(t("Open local folder")), Some("folder.open"));
             item.set_icon(&gio::ThemedIcon::new("folder-open-symbolic"));
@@ -702,6 +731,52 @@ mod tests {
         set_locale(Locale::Spanish);
         assert_eq!(format_sync_stamp(None), "Aún no sincronizado");
         reset_locale();
+    }
+
+    #[test]
+    fn install_engine_menu_item_follows_the_callback_presence() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let folder = FolderConfig {
+                id: "f1".to_string(),
+                local_root: "/tmp/a".to_string(),
+                remote_path: "/docs".to_string(),
+                space_id: None,
+                size_confirmed: false,
+            };
+            let label_at = |row: &FolderStatusRow, index: i32| {
+                row.menu_model
+                    .item_attribute_value(index, "label", None)
+                    .and_then(|value| value.str().map(str::to_string))
+            };
+            let has_install_entry = |row: &FolderStatusRow| {
+                (0..row.menu_model.n_items())
+                    .any(|index| label_at(row, index).as_deref() == Some("Install sync engine…"))
+            };
+            // Without the callback the entry is absent (the default).
+            let without = FolderStatusRow::new(
+                folder.clone(),
+                None,
+                FolderRowCallbacks::default(),
+                None,
+                None,
+            );
+            assert!(!has_install_entry(&without));
+            // With the callback the entry leads the menu.
+            let row = FolderStatusRow::new(
+                folder,
+                None,
+                FolderRowCallbacks {
+                    on_install_engine: Some(Rc::new(|_parent: &gtk4::Widget| {})),
+                    ..FolderRowCallbacks::default()
+                },
+                None,
+                None,
+            );
+            assert!(row._actions.contains_key("install-engine"));
+            assert_eq!(label_at(&row, 0).as_deref(), Some("Install sync engine…"));
+            reset_locale();
+        });
     }
 
     #[test]
