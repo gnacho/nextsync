@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.30] - 2026-09-17
+
+### Added
+
+- One-click sync engine installation from within the app: the blocking wizard dialog and the folder menu can install the provider's engine with administrator rights (pacman/apt/dnf/zypper) and retry the folder afterwards; other distributions get the exact command to copy (#218).
+
 ## [0.2.28] - 2026-09-17
 
 ### Fixed
