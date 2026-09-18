@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.2.32] - 2026-09-18
+
+### Changed
+
+- Credential operations reuse one process-wide Secret Service session instead of opening a fresh D-Bus + DH session per call, reconnecting exactly once on transport/stale-session failures (#221). Reduces exposure to the upstream gnome-keyring session-negotiation crash (#216, Ubuntu bug 2161749).
+
 ## [0.2.30] - 2026-09-17
 
 ### Added

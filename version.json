@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.2.30",
+  "version": "0.2.32",
   "mandatory": false,
-  "summary": "Install the sync engine from within the app, without touching a terminal.",
+  "summary": "Reuse a single Secret Service session per process, reducing exposure to the upstream gnome-keyring session-negotiation crash.",
   "changelog": [
-    "When the sync engine is not installed, the app now offers one-click installation: the blocking wizard dialog and the folder menu can run the right package command with administrator rights (pacman, apt, dnf, zypper) and retry the folder once the binary appears (issue #218).",
-    "On distributions without an automatic route, the dialog shows the exact command to copy (including the AUR helper for opencloud-desktop on Arch)."
+    "Every credential operation now runs on one process-wide Secret Service session (created lazily, reused until failure) instead of opening a fresh D-Bus + DH session per call (issue #221).",
+    "On a transport or stale-session failure the cached session is dropped and the operation reconnects exactly once; domain errors (locked keyring, missing item) never reconnect.",
+    "Context: issue #216 found the recurring gnome-keyring SIGABRT is an upstream bug (Ubuntu bug 2161749, a race in session negotiation any client can trip). Fewer sessions per process means fewer chances to hit the race."
   ],
-  "released_at": "2026-09-17T00:00:00Z"
+  "released_at": "2026-09-18T00:00:00Z"
 }
