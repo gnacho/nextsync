@@ -12,6 +12,16 @@
 //! Uses `secret_service::blocking` (feature `rt-tokio-crypto-rust`, DH
 //! encrypted session). Blocking calls must not run on the async UI loop.
 //!
+//! Issue #221: every operation below runs on ONE process-wide Secret Service
+//! session, created lazily on first use. Each `SecretService::connect`
+//! negotiates a fresh D-Bus connection plus DH session, and the upstream
+//! gnome-keyring crash (issue #216, Ubuntu bug 2161749) is a race in that
+//! negotiation that any client can trigger: fewer sessions per process means
+//! fewer chances to hit it. On a retryable failure (transport or stale
+//! session after a daemon restart) the cached session is dropped and the
+//! operation reconnects exactly once; domain errors (locked, missing item)
+//! never reconnect. All access is serialized through a Mutex.
+//!
 //! Issue #178: resolved passwords are cached in process memory, so each
 //! account costs one Secret Service session negotiation per process instead
 //! of one per sync run (the desktop reference clients, e.g. Iotas, do the
@@ -81,6 +91,101 @@ fn cache_lock() -> MutexGuard<'static, HashMap<String, String>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Process-wide Secret Service session (issue #221).
+///
+/// Created lazily on first use and reused by every operation, so a process
+/// pays one DH session negotiation instead of one per keyring call. The
+/// service is leaked on purpose: the desktop process lives for the whole
+/// session, and the crate ties returned collections/items to `&'a self` with
+/// the same `'a` as the struct, so a process-wide instance must be
+/// `'static` anyway. A reconnect (e.g. after the daemon restarted) leaks one
+/// more instance, which is negligible.
+static SERVICE: OnceLock<Mutex<Option<&'static SecretService<'static>>>> = OnceLock::new();
+
+fn service_lock() -> MutexGuard<'static, Option<&'static SecretService<'static>>> {
+    SERVICE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Connect a fresh session against the live daemon (negotiates DH).
+fn connect_service() -> Result<&'static SecretService<'static>, CredentialError> {
+    let service: SecretService<'static> = SecretService::connect(EncryptionType::Dh)?;
+    Ok(Box::leak(Box::new(service)))
+}
+
+/// Whether a failed operation may succeed on a fresh session (issue #221).
+///
+/// Domain errors are properties of the data, not of the connection, so
+/// reconnecting cannot change them: locked keyring (#98, #214), missing
+/// object, dismissed prompt, unreadable secret (#139). Everything else
+/// (crypto/session mismatch, zbus transport failure, name owner gone after
+/// a daemon restart) is worth exactly one retry on a new session.
+fn is_retryable(error: &CredentialError) -> bool {
+    !matches!(
+        error,
+        CredentialError::Utf8
+            | CredentialError::Service(
+                secret_service::Error::Locked
+                    | secret_service::Error::NoResult
+                    | secret_service::Error::Prompt
+            )
+    )
+}
+
+/// Run `op` against the cached session, reconnecting once on retryable
+/// failures (issue #221).
+///
+/// Pure policy over an injectable session slot and factory so the cache and
+/// reconnect behaviour are testable without a Secret Service:
+/// - the session is created lazily and reused until an operation fails;
+/// - on a retryable failure the cached session is dropped and exactly one
+///   fresh session is created for a single retry (no loops);
+/// - domain failures and connect failures are returned as-is.
+fn run_with_session<S: Copy, T, E>(
+    slot: &mut Option<S>,
+    connect: &impl Fn() -> Result<S, E>,
+    retryable: &impl Fn(&E) -> bool,
+    op: &impl Fn(S) -> Result<T, E>,
+) -> Result<T, E> {
+    if slot.is_none() {
+        *slot = Some(connect()?);
+    }
+    let session = slot.unwrap();
+    match op(session) {
+        Ok(value) => Ok(value),
+        Err(error) if retryable(&error) => {
+            *slot = None;
+            *slot = Some(connect()?);
+            op(slot.unwrap())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Run a credential operation on the process-wide session.
+///
+/// Serializes access (the session is shared by engine threads and UI) and
+/// applies the reconnect-once policy. The lock is held for the whole
+/// operation, including any unlock prompt: credential calls are fast, and
+/// while the keyring prompts it is locked for everyone anyway.
+fn with_service<T>(
+    op: impl Fn(&'static SecretService<'static>) -> Result<T, CredentialError>,
+) -> Result<T, CredentialError> {
+    run_with_session(&mut service_lock(), &connect_service, &is_retryable, &op)
+}
+
+/// Drop the cached session so the next operation reconnects (tests only).
+///
+/// The pool is process-global and tests run in parallel threads: a test that
+/// leaves the shared session in a bad state must reset the slot so it does
+/// not poison unrelated tests.
+#[cfg(test)]
+pub(crate) fn reset_service_for_tests() {
+    *service_lock() = None;
+}
+
 /// Prefer the `login` collection (unlocked automatically by the desktop
 /// session) and fall back to the default collection (issue #58).
 ///
@@ -103,15 +208,17 @@ pub struct CredentialsStore;
 impl CredentialsStore {
     /// Save (or replace) the password for an account.
     pub fn set(account_id: &str, password: &str) -> Result<(), CredentialError> {
-        let service = SecretService::connect(EncryptionType::Dh)?;
-        let collection = collection(&service)?;
-        collection.create_item(
-            &format!("nextsync-{account_id}"),
-            HashMap::from([(ATTR_ACCOUNT_ID, account_id)]),
-            password.as_bytes(),
-            true,
-            CONTENT_TYPE,
-        )?;
+        with_service(|service| {
+            let collection = collection(service)?;
+            collection.create_item(
+                &format!("nextsync-{account_id}"),
+                HashMap::from([(ATTR_ACCOUNT_ID, account_id)]),
+                password.as_bytes(),
+                true,
+                CONTENT_TYPE,
+            )?;
+            Ok(())
+        })?;
         cache_lock().insert(account_id.to_string(), password.to_string());
         Ok(())
     }
@@ -121,26 +228,27 @@ impl CredentialsStore {
     /// Returns `Ok(None)` when no item matches; requires the default collection
     /// to be unlocked (the normal state of a desktop session).
     pub fn get(account_id: &str) -> Result<Option<String>, CredentialError> {
-        let service = SecretService::connect(EncryptionType::Dh)?;
-        let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
-        let Some(item) = result.unlocked.first() else {
-            // Distinguish "no secret at all" from "the keyring is locked":
-            // the latter must surface as an error so callers do not treat it
-            // as missing credentials and demand re-authentication (issue #98).
-            return if result.locked.is_empty() {
-                Ok(None)
-            } else {
-                Err(CredentialError::Service(secret_service::Error::Locked))
+        with_service(|service| {
+            let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
+            let Some(item) = result.unlocked.first() else {
+                // Distinguish "no secret at all" from "the keyring is locked":
+                // the latter must surface as an error so callers do not treat it
+                // as missing credentials and demand re-authentication (issue #98).
+                return if result.locked.is_empty() {
+                    Ok(None)
+                } else {
+                    Err(CredentialError::Service(secret_service::Error::Locked))
+                };
             };
-        };
-        let secret = item.get_secret()?;
-        match std::str::from_utf8(&secret) {
-            Ok(password) => Ok(Some(password.to_string())),
-            // The stored bytes are not a usable password (issue #139): a
-            // silent lossy substitution would authenticate with a different
-            // string and fail opaquely. Surface it as an error instead.
-            Err(_) => Err(CredentialError::Utf8),
-        }
+            let secret = item.get_secret()?;
+            match std::str::from_utf8(&secret) {
+                Ok(password) => Ok(Some(password.to_string())),
+                // The stored bytes are not a usable password (issue #139): a
+                // silent lossy substitution would authenticate with a different
+                // string and fail opaquely. Surface it as an error instead.
+                Err(_) => Err(CredentialError::Utf8),
+            }
+        })
     }
 
     /// Read the password for an account, falling back to the legacy entry.
@@ -164,21 +272,26 @@ impl CredentialsStore {
             cache_lock().insert(account_id.to_string(), password.clone());
             return Ok(Some(password));
         }
-        let service = SecretService::connect(EncryptionType::Dh)?;
-        let result = service.search_items(HashMap::from([
-            (ATTR_SERVER, server),
-            (ATTR_USERNAME, login),
-        ]))?;
-        let Some(item) = result.unlocked.first() else {
-            // Same locked-vs-missing distinction as in `get` (issue #98).
-            return if result.locked.is_empty() {
-                Ok(None)
-            } else {
-                Err(CredentialError::Service(secret_service::Error::Locked))
+        let legacy = with_service(|service| {
+            let result = service.search_items(HashMap::from([
+                (ATTR_SERVER, server),
+                (ATTR_USERNAME, login),
+            ]))?;
+            let Some(item) = result.unlocked.first() else {
+                // Same locked-vs-missing distinction as in `get` (issue #98).
+                return if result.locked.is_empty() {
+                    Ok(None)
+                } else {
+                    Err(CredentialError::Service(secret_service::Error::Locked))
+                };
             };
+            Ok(Some(
+                String::from_utf8_lossy(&item.get_secret()?).into_owned(),
+            ))
+        })?;
+        let Some(password) = legacy else {
+            return Ok(None);
         };
-        let secret = item.get_secret()?;
-        let password = String::from_utf8_lossy(&secret).into_owned();
         let _ = Self::set(account_id, &password);
         cache_lock().insert(account_id.to_string(), password.clone());
         Ok(Some(password))
@@ -194,15 +307,16 @@ impl CredentialsStore {
     /// Per-collection failures are skipped so one stubborn collection does
     /// not block the rest.
     pub fn unlock_locked_collections() -> Result<bool, CredentialError> {
-        let service = SecretService::connect(EncryptionType::Dh)?;
-        let mut unlocked_any = false;
-        for collection in service.get_all_collections()? {
-            let was_locked = collection.is_locked().unwrap_or(false);
-            if was_locked && collection.unlock().is_ok() {
-                unlocked_any = true;
+        with_service(|service| {
+            let mut unlocked_any = false;
+            for collection in service.get_all_collections()? {
+                let was_locked = collection.is_locked().unwrap_or(false);
+                if was_locked && collection.unlock().is_ok() {
+                    unlocked_any = true;
+                }
             }
-        }
-        Ok(unlocked_any)
+            Ok(unlocked_any)
+        })
     }
 
     /// Drop the cached password for an account (issue #178).
@@ -217,14 +331,15 @@ impl CredentialsStore {
     /// Delete the stored password for an account, if any.
     pub fn delete(account_id: &str) -> Result<(), CredentialError> {
         cache_lock().remove(account_id);
-        let service = SecretService::connect(EncryptionType::Dh)?;
-        let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
-        // Only the unlocked items are reachable; items in a locked collection
-        // (the legacy default keyring) cannot be removed without unlocking.
-        for item in result.unlocked {
-            item.delete()?;
-        }
-        Ok(())
+        with_service(|service| {
+            let result = service.search_items(HashMap::from([(ATTR_ACCOUNT_ID, account_id)]))?;
+            // Only the unlocked items are reachable; items in a locked collection
+            // (the legacy default keyring) cannot be removed without unlocking.
+            for item in result.unlocked {
+                item.delete()?;
+            }
+            Ok(())
+        })
     }
 }
 
@@ -459,5 +574,150 @@ mod tests {
 
         CredentialsStore::delete(TEST_CACHE_ACCOUNT_WT).expect("delete should succeed");
         assert!(cached_for_tests(TEST_CACHE_ACCOUNT_WT).is_none());
+    }
+
+    /// Issue #221: the session pool policy (pure, no Secret Service needed).
+    /// `run_with_session` gets an injectable slot, factory and classifier,
+    /// with a Copy fake standing in for the leaked `&'static SecretService`.
+    mod session_pool {
+        use super::run_with_session;
+        use std::cell::Cell;
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        struct FakeSession(u32);
+
+        #[derive(Debug, PartialEq, Eq)]
+        enum FakeError {
+            /// Transport-like: a fresh session may fix it.
+            Disconnected,
+            /// Domain-like: reconnecting cannot help.
+            Locked,
+        }
+
+        fn is_retryable(error: &FakeError) -> bool {
+            *error == FakeError::Disconnected
+        }
+
+        /// Second and later operations reuse the cached session: the factory
+        /// runs exactly once.
+        #[test]
+        fn second_operation_reuses_the_session() {
+            let mut slot = None;
+            let connects = Cell::new(0u32);
+            let connect = || {
+                connects.set(connects.get() + 1);
+                Ok::<_, FakeError>(FakeSession(connects.get()))
+            };
+            let op = |session: FakeSession| Ok::<_, FakeError>(session.0);
+
+            let first = run_with_session(&mut slot, &connect, &is_retryable, &op);
+            let second = run_with_session(&mut slot, &connect, &is_retryable, &op);
+            assert_eq!(first, Ok(1));
+            assert_eq!(second, Ok(1));
+            assert_eq!(connects.get(), 1, "factory must run once until a failure");
+        }
+
+        /// A transport failure drops the cached session and reconnects
+        /// exactly once; the retry and the following operations run on the
+        /// new session without any further connect.
+        #[test]
+        fn transport_failure_reconnects_exactly_once() {
+            let mut slot = None;
+            let connects = Cell::new(0u32);
+            let connect = || {
+                connects.set(connects.get() + 1);
+                Ok::<_, FakeError>(FakeSession(connects.get()))
+            };
+            let op = |session: FakeSession| {
+                if session.0 == 1 {
+                    Err(FakeError::Disconnected)
+                } else {
+                    Ok(session.0)
+                }
+            };
+
+            let retried = run_with_session(&mut slot, &connect, &is_retryable, &op);
+            assert_eq!(retried, Ok(2), "the same call retries on the new session");
+            assert_eq!(connects.get(), 2, "one reconnect after the failure");
+
+            let next = run_with_session(&mut slot, &connect, &is_retryable, &op);
+            assert_eq!(next, Ok(2));
+            assert_eq!(connects.get(), 2, "the new session is cached and reused");
+        }
+
+        /// When both the original attempt and the single retry fail, the
+        /// error is returned: there is no reconnect loop.
+        #[test]
+        fn retry_does_not_loop() {
+            let mut slot = None;
+            let connects = Cell::new(0u32);
+            let connect = || {
+                connects.set(connects.get() + 1);
+                Ok::<_, FakeError>(FakeSession(connects.get()))
+            };
+            let op = |_: FakeSession| Err::<u32, _>(FakeError::Disconnected);
+
+            let result = run_with_session(&mut slot, &connect, &is_retryable, &op);
+            assert_eq!(result, Err(FakeError::Disconnected));
+            assert_eq!(connects.get(), 2, "original + one retry, then give up");
+        }
+
+        /// Domain errors (locked, missing…) never reconnect: the error
+        /// propagates as-is and the next operation still uses the cached
+        /// session.
+        #[test]
+        fn domain_error_does_not_reconnect() {
+            let mut slot = None;
+            let connects = Cell::new(0u32);
+            let connect = || {
+                connects.set(connects.get() + 1);
+                Ok::<_, FakeError>(FakeSession(connects.get()))
+            };
+
+            let locked = run_with_session(&mut slot, &connect, &is_retryable, &|_: FakeSession| {
+                Err::<u32, _>(FakeError::Locked)
+            });
+            assert_eq!(locked, Err(FakeError::Locked));
+            assert_eq!(connects.get(), 1, "domain errors must not reconnect");
+
+            let next = run_with_session(
+                &mut slot,
+                &connect,
+                &is_retryable,
+                &|session: FakeSession| Ok(session.0),
+            );
+            assert_eq!(next, Ok(1), "the cached session survives domain errors");
+            assert_eq!(connects.get(), 1);
+        }
+
+        /// A connect failure propagates without calling the operation and
+        /// without retrying.
+        #[test]
+        fn connect_failure_propagates_without_retry() {
+            let mut slot = None;
+            let connects = Cell::new(0u32);
+            let connect = || {
+                connects.set(connects.get() + 1);
+                Err::<FakeSession, _>(FakeError::Disconnected)
+            };
+            let op = |_: FakeSession| -> Result<u32, FakeError> {
+                panic!("op must not run when connect fails");
+            };
+
+            let result = run_with_session(&mut slot, &connect, &is_retryable, &op);
+            assert_eq!(result, Err(FakeError::Disconnected));
+            assert_eq!(connects.get(), 1);
+            assert!(slot.is_none(), "no stale session is cached");
+        }
+
+        /// The test-only reset is callable and idempotent. Parallel keyring
+        /// tests share the process-wide slot, so asserting on its content
+        /// would be racy; the cache/reconnect policy itself is covered by
+        /// the fake-world tests above.
+        #[test]
+        fn reset_for_tests_is_callable_and_idempotent() {
+            super::super::reset_service_for_tests();
+            super::super::reset_service_for_tests();
+        }
     }
 }
