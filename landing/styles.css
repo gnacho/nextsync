@@ -87,7 +87,7 @@ a:hover { text-decoration: underline; }
 }
 .skip-link:focus { left: 0; }
 
-/* ---------- NAV (siempre visible) ---------- */
+/* ---------- NAV (sticky en escritorio) ---------- */
 .nav {
   position: sticky; top: 0; z-index: 50;
   background: var(--nav-bg);
@@ -314,9 +314,12 @@ dialog#lightbox img { display: block; max-width: 92vw; max-height: 86vh; }
 @media (max-width: 860px) {
   .cards.three { grid-template-columns: 1fr; }
   .cards.two { grid-template-columns: 1fr; }
-  .nav-inner { flex-wrap: wrap; padding: 0.5rem 1.5rem; }
-  .nav-links { order: 3; width: 100%; justify-content: center; margin-left: 0; }
-  .nav-actions { margin-left: auto; }
+  /* Phones: one compact row that scrolls away. In-page anchors and the
+     install CTA are desktop affordances (NextSync is a GNOME app). */
+  .nav { position: static; }
+  .nav-inner { flex-wrap: nowrap; gap: 0.75rem; min-height: 56px; padding: 0.35rem 1.25rem; }
+  .nav-links, .nav-cta { display: none; }
+  .nav-actions { margin-left: auto; gap: 0.45rem; }
   .slider-arrow.prev { left: 6px; }
   .slider-arrow.next { right: 6px; }
   .slider-thumbs button { width: 72px; }
