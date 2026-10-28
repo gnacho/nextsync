@@ -264,6 +264,9 @@ a:hover { text-decoration: underline; }
   margin: 0 0 1rem;
 }
 .reqs { margin-top: 1.2rem; }
+.install-mobile { display: none; }
+.install-mobile p { margin: 0.8rem 0 0; color: var(--fg-dim); }
+.install-mobile .btn { margin-top: 1.1rem; }
 .small-print { font-size: 0.9rem; color: var(--fg-dim); margin: 0.8rem 0 0; }
 
 /* ---------- FAQ ---------- */
@@ -328,4 +331,8 @@ dialog#lightbox img { display: block; max-width: 92vw; max-height: 86vh; }
      Floating arrows would only cover the screenshot. */
   .slider-arrow { display: none; }
   .slider-thumbs button { width: 72px; }
+  /* Phones: a pacman command and GNOME requirements are dead weight.
+     Keep the honest note about the desktop scope and a mobile client. */
+  .install-desk, .install-card, .reqs { display: none; }
+  .install-mobile { display: block; }
 }
