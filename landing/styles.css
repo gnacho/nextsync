@@ -266,7 +266,6 @@ a:hover { text-decoration: underline; }
 .reqs { margin-top: 1.2rem; }
 .install-mobile { display: none; }
 .install-mobile p { margin: 0.8rem 0 0; color: var(--fg-dim); }
-.install-mobile .btn { margin-top: 1.1rem; }
 .small-print { font-size: 0.9rem; color: var(--fg-dim); margin: 0.8rem 0 0; }
 
 /* ---------- FAQ ---------- */
