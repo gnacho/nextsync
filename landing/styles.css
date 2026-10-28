@@ -1,4 +1,25 @@
 /* NextSync landing - look & feel gnome.org (paleta GNOME oficial + Inter) */
+
+/* Self-hosted, latin subset. Both files live in assets/fonts with their OFL
+   licence. The mono face is only declared, so phones never fetch it: the
+   install block is hidden there and inline code falls back to system mono. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("assets/fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("assets/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   --blue1: rgb(153, 193, 241);
   --blue2: rgb(98, 160, 234);
@@ -102,9 +123,9 @@ a:hover { text-decoration: underline; }
 }
 .nav-logo:hover { text-decoration: none; }
 .nav-logo img { display: block; }
-.nav-links { display: flex; gap: 0.2rem; margin-left: auto; flex-wrap: wrap; }
+.nav-links { display: flex; gap: 0.15rem; margin-left: auto; flex-wrap: wrap; }
 .nav-links a {
-  color: var(--fg); font-weight: 500; padding: 0.35rem 0.9rem;
+  color: var(--fg); font-weight: 500; padding: 0.35rem 0.8rem;
   border-radius: var(--pill); transition: background-color 250ms ease-out;
 }
 .nav-links a:hover { background: var(--btn-bg); text-decoration: none; }
@@ -331,7 +352,9 @@ dialog#lightbox img { display: block; max-width: 92vw; max-height: 86vh; }
   .slider-arrow { display: none; }
   .slider-thumbs button { width: 72px; }
   /* Phones: a pacman command and GNOME requirements are dead weight.
-     Keep the honest note about the desktop scope and a mobile client. */
+     Keep the honest note about the desktop scope. */
   .install-desk, .install-card, .reqs { display: none; }
   .install-mobile { display: block; }
+  /* No mono download on phones: system mono renders inline code. */
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 }
