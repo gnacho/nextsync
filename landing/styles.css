@@ -216,8 +216,9 @@ a:hover { text-decoration: underline; }
 .slider-viewport {
   border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
   border: 1px solid var(--card-border); cursor: zoom-in;
+  touch-action: pan-y;
 }
-.slider-viewport img { display: block; width: 100%; height: auto; }
+.slider-viewport img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
 .slider-arrow {
   position: absolute; top: 40%; transform: translateY(-50%);
   width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer;
@@ -323,7 +324,8 @@ dialog#lightbox img { display: block; max-width: 92vw; max-height: 86vh; }
   .nav-github, .nav-actions .nav-github { display: inline-flex; }
   .hero-install { display: none; }
   .nav-actions { margin-left: auto; gap: 0.45rem; }
-  .slider-arrow.prev { left: 6px; }
-  .slider-arrow.next { right: 6px; }
+  /* Phones: swipe on the image and the thumbnails are the navigation.
+     Floating arrows would only cover the screenshot. */
+  .slider-arrow { display: none; }
   .slider-thumbs button { width: 72px; }
 }

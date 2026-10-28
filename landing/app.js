@@ -68,9 +68,14 @@
     });
   }
 
-  function showSlide(i) {
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var animating = false;
+
+  function mod(i, n) { return ((i % n) + n) % n; }
+
+  function setSlide(i) {
     var list = activeSlides();
-    slideIndex = ((i % list.length) + list.length) % list.length;
+    slideIndex = mod(i, list.length);
     var s = list[slideIndex];
     slideImg.src = s.src;
     slideCaption.textContent = (I18N[lang] || I18N.es)[s.cap] || "";
@@ -79,8 +84,96 @@
     });
   }
 
-  document.getElementById("slidePrev").addEventListener("click", function () { showSlide(slideIndex - 1); });
-  document.getElementById("slideNext").addEventListener("click", function () { showSlide(slideIndex + 1); });
+  // dir: +1 next, -1 previous. Without it the direction comes from the index.
+  function showSlide(i, dir) {
+    var list = activeSlides();
+    var target = mod(i, list.length);
+    if (dir === undefined) dir = target === slideIndex ? 1 : (target > slideIndex ? 1 : -1);
+    if (target === slideIndex || animating || reduceMotion.matches) {
+      setSlide(target);
+      slideImg.style.transition = "";
+      slideImg.style.transform = "";
+      slideImg.style.opacity = "";
+      return;
+    }
+    animating = true;
+    slideImg.style.transition = "transform 180ms ease, opacity 180ms ease";
+    slideImg.style.transform = "translateX(" + (-dir * 32) + "px)";
+    slideImg.style.opacity = "0.35";
+    window.setTimeout(function () {
+      setSlide(target);
+      slideImg.style.transition = "none";
+      slideImg.style.transform = "translateX(" + (dir * 32) + "px)";
+      void slideImg.offsetWidth;
+      slideImg.style.transition = "transform 200ms ease, opacity 200ms ease";
+      slideImg.style.transform = "translateX(0)";
+      slideImg.style.opacity = "1";
+      window.setTimeout(function () {
+        animating = false;
+        slideImg.style.transition = "";
+        slideImg.style.transform = "";
+        slideImg.style.opacity = "";
+      }, 220);
+    }, 180);
+  }
+
+  document.getElementById("slidePrev").addEventListener("click", function () { showSlide(slideIndex - 1, -1); });
+  document.getElementById("slideNext").addEventListener("click", function () { showSlide(slideIndex + 1, 1); });
+
+  // ---------- Swipe del slider (tap y arrastre) ----------
+  var slideViewport = document.querySelector(".slider-viewport");
+  var drag = null;
+  var suppressLightbox = false;
+
+  function resetSlideImage() {
+    slideImg.style.transition = "transform 200ms ease, opacity 200ms ease";
+    slideImg.style.transform = "translateX(0)";
+    slideImg.style.opacity = "1";
+  }
+
+  slideViewport.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0 || animating) return;
+    drag = { x: e.clientX, y: e.clientY, dx: 0, active: false, id: e.pointerId };
+  });
+
+  slideViewport.addEventListener("pointermove", function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var dx = e.clientX - drag.x;
+    var dy = e.clientY - drag.y;
+    if (!drag.active) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
+      drag.active = true;
+      slideViewport.setPointerCapture(e.pointerId);
+      slideImg.style.transition = "none";
+    }
+    drag.dx = dx;
+    slideImg.style.transform = "translateX(" + dx + "px)";
+    slideImg.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / 600));
+    e.preventDefault();
+  });
+
+  function endDrag() {
+    if (!drag) return;
+    var d = drag;
+    drag = null;
+    if (!d.active) return;
+    suppressLightbox = true;
+    window.setTimeout(function () { suppressLightbox = false; }, 300);
+    var threshold = Math.min(70, slideViewport.clientWidth * 0.18);
+    if (Math.abs(d.dx) > threshold) {
+      var dir = d.dx < 0 ? 1 : -1;
+      showSlide(slideIndex + dir, dir);
+    } else {
+      resetSlideImage();
+    }
+  }
+
+  slideViewport.addEventListener("pointerup", endDrag);
+  slideViewport.addEventListener("pointercancel", function () {
+    if (drag && drag.active) resetSlideImage();
+    drag = null;
+  });
 
   document.addEventListener("keydown", function (e) {
     if (lightbox.open) return;
@@ -102,6 +195,7 @@
 
   // ---------- Lightbox ----------
   slideImg.addEventListener("click", function () {
+    if (suppressLightbox) { suppressLightbox = false; return; }
     lightboxImg.src = slideImg.src;
     lightboxImg.alt = slideImg.alt;
     lightbox.showModal();
