@@ -61,7 +61,8 @@
       b.setAttribute("role", "tab");
       b.setAttribute("aria-selected", i === slideIndex ? "true" : "false");
       var img = document.createElement("img");
-      img.src = s.src; img.alt = ""; img.loading = "lazy";
+      img.src = s.src; img.alt = ""; img.loading = "lazy"; img.decoding = "async";
+      img.width = 96; img.height = 64;
       b.appendChild(img);
       b.addEventListener("click", function () { showSlide(i); });
       thumbs.appendChild(b);
