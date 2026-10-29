@@ -336,9 +336,11 @@ impl ReloadTarget {
 
 /// Wrap a widget in a `Clamp` so the boxed lists keep a uniform, centered
 /// background instead of stretching white across a wide window (issue #118).
+/// The cap is wide enough to use most of a 1440 px window and still keeps the
+/// rows readable (issue #250).
 fn clamp(child: &impl IsA<gtk4::Widget>) -> libadwaita::Clamp {
     let clamp = libadwaita::Clamp::builder()
-        .maximum_size(760)
+        .maximum_size(1100)
         .tightening_threshold(600)
         .build();
     clamp.set_child(Some(child));

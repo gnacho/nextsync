@@ -38,6 +38,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Added the native GNOME Keyring unlock prompt required after biometric desktop login.", "Se añadió el diálogo nativo de GNOME Keyring necesario para desbloquear el llavero tras iniciar sesión en el escritorio con biometría."),
     ("Adds the synchronized folder to the file manager sidebar.", "Añade la carpeta sincronizada a la barra lateral del gestor de archivos."),
     ("Advanced", "Avanzado"),
+    ("Advanced synchronization", "Sincronización avanzada"),
     ("Allow invalid or self-signed certificates", "Permitir certificados no válidos o autofirmados"),
     ("Another synchronization engine ({name}) is already running on this folder. Close it and try again.", "Otro motor de sincronización ({name}) ya está funcionando en esta carpeta. Ciérralo e inténtalo de nuevo."),
     ("App Token", "Token de aplicación"),
