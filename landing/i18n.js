@@ -85,7 +85,7 @@ const I18N = {
     "install.r2t": "Desde el código fuente",
     "install.r2d": "El repo se compila con Cargo: cargo build --release y la batería se comprueba con cargo test. También hay PKGBUILD para generar el paquete localmente.",
     "about.title": "Por qué existe",
-    "about.p1": "NextSync hereda su identidad y buen criterio de PyNextCloud-Sync, de ehstbr. Ese proyecto tomó las decisiones correctas sobre la experiencia de escritorio; aquí se mantiene todo eso y se reescribe en Rust: un binario único, arranque instantáneo y una arquitectura que no depende de un solo servidor.",
+    "about.p1": "NextSync nació de una necesidad concreta: mantener espejos locales completos de varias cuentas Nextcloud y OpenCloud en el escritorio, sin depender de un cliente que solo hable con un servidor. Está escrito en Rust: un binario único, arranque instantáneo y una arquitectura que no ata el proyecto a un proveedor.",
     "about.p2": "Es un proyecto personal, GPL-3.0+, gratuito siempre. Corre 24/7 en producción propia y cada versión se prueba ahí primero. Con colaboraciones o apoyo quizás podría crecer más rápido, pero no puedo prometer nada.",
     "faq.q1": "¿Es un producto oficial de Nextcloud?",
     "faq.a1": "No. NextSync es un proyecto independiente y no oficial, sin afiliación con Nextcloud GmbH ni con el Heinlein Group. Nextcloud es una marca registrada de Nextcloud GmbH.",
@@ -97,7 +97,6 @@ const I18N = {
     "faq.a4": "No. Sin telemetría, sin analítica y sin informes de fallos remotos.",
     "footer.tag": "Tus archivos, en local. Cualquier servidor, en sincronía.",
     "footer.issues": "Reportar un problema",
-    "footer.upstream": "Proyecto original",
     "footer.license": "Licencia GPL-3.0+",
     "footer.copy": "NextSync es software libre (GPL-3.0+). Nextcloud es marca de Nextcloud GmbH; OpenCloud es un producto del Heinlein Group. Este sitio no está afiliado a ninguna de las dos empresas."
   },
@@ -186,7 +185,7 @@ const I18N = {
     "install.r2t": "From source",
     "install.r2d": "The repo builds with Cargo: cargo build --release, and the suite runs with cargo test. A PKGBUILD is included to build the package locally.",
     "about.title": "Why it exists",
-    "about.p1": "NextSync inherits its identity and good judgment from PyNextCloud-Sync, by ehstbr. That project made the right choices about the desktop experience; everything good is kept here and rewritten in Rust: a single binary, near instant startup and an architecture that does not depend on one server vendor.",
+    "about.p1": "NextSync started from a concrete need: keeping full local mirrors of several Nextcloud and OpenCloud accounts on the desktop, without depending on a client that only speaks to one server. It is written in Rust: a single binary, near instant startup and an architecture that does not tie the project to one vendor.",
     "about.p2": "It is a personal project, GPL-3.0+, free forever. It runs 24/7 on the author's own production setup and every release is tested there first. With contributions or support it might grow faster, but I cannot promise anything.",
     "faq.q1": "Is it an official Nextcloud product?",
     "faq.a1": "No. NextSync is an independent, unofficial project with no affiliation to Nextcloud GmbH or the Heinlein Group. Nextcloud is a registered trademark of Nextcloud GmbH.",
@@ -198,7 +197,6 @@ const I18N = {
     "faq.a4": "No. No telemetry, no analytics and no remote crash reporting.",
     "footer.tag": "Your files, local. Any server, in sync.",
     "footer.issues": "Report an issue",
-    "footer.upstream": "Original project",
     "footer.license": "GPL-3.0+ license",
     "footer.copy": "NextSync is free software (GPL-3.0+). Nextcloud is a trademark of Nextcloud GmbH; OpenCloud is a product of the Heinlein Group. This site is not affiliated with either company."
   }
