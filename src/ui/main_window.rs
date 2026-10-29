@@ -25,7 +25,7 @@ use crate::ui::settings::{
     page as settings_page, present_add_folder_dialog, ExclusionsDialog, SettingsCallbacks,
     SettingsHost, SettingsView,
 };
-use crate::util::i18n::t;
+use crate::util::i18n::{plural, t};
 
 /// Translated window title (also used as a machine-readable page name).
 pub fn window_title() -> &'static str {
@@ -931,8 +931,10 @@ impl MainWindow {
                         };
                         let count = alert.missing_paths.len();
                         let summary = t("Review Deletions").to_string();
-                        let body = t(
-                            "Synchronization was paused before {count} files could be deleted from Nextcloud.",
+                        let body = plural(
+                            count as u64,
+                            t("Synchronization was paused before {count} file could be deleted from Nextcloud."),
+                            t("Synchronization was paused before {count} files could be deleted from Nextcloud."),
                         )
                         .replace("{count}", &count.to_string());
                         let on_review: Box<dyn Fn(&str) + Send + 'static> = Box::new({
@@ -1371,8 +1373,12 @@ impl MainWindow {
         let missing_len = missing.len();
 
         let body = if missing_len > 0 {
-            t("{count} files disappeared from the local folder.")
-                .replace("{count}", &missing_len.to_string())
+            plural(
+                missing_len as u64,
+                t("{count} file disappeared from the local folder."),
+                t("{count} files disappeared from the local folder."),
+            )
+            .replace("{count}", &missing_len.to_string())
         } else {
             alert.message.clone()
         };
@@ -1408,7 +1414,10 @@ impl MainWindow {
                         } => {
                             let group_row = libadwaita::ExpanderRow::builder()
                                 .title(prefix)
-                                .subtitle(t("{count} files").replace("{count}", &count.to_string()))
+                                .subtitle(
+                                    plural(*count as u64, t("{count} file"), t("{count} files"))
+                                        .replace("{count}", &count.to_string()),
+                                )
                                 .build();
                             group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
                             group_row.set_enable_expansion(false);
@@ -1425,7 +1434,10 @@ impl MainWindow {
                 if loose_count > 0 {
                     let loose_row = libadwaita::ExpanderRow::builder()
                         .title(t("At the top level"))
-                        .subtitle(t("{count} files").replace("{count}", &loose_count.to_string()))
+                        .subtitle(
+                            plural(loose_count as u64, t("{count} file"), t("{count} files"))
+                                .replace("{count}", &loose_count.to_string()),
+                        )
                         .build();
                     for path in &loose_preview {
                         let child = libadwaita::ActionRow::builder()
@@ -2881,10 +2893,7 @@ mod tests {
             state.set(crate::state::AppState::Syncing, "");
             assert_eq!(action_row.subtitle().as_deref(), Some("Synchronizing…"));
             state.set(crate::state::AppState::IdleOk, "");
-            assert_eq!(
-                action_row.subtitle().as_deref(),
-                Some("Synced in local docs")
-            );
+            assert_eq!(action_row.subtitle().as_deref(), Some("Local copy of docs"));
             reset_locale();
         });
     }

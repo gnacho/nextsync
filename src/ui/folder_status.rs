@@ -17,7 +17,7 @@ use libadwaita::prelude::*;
 use crate::core::account_runtime::FolderRuntime;
 use crate::state::{AppState, StateController, StateSnapshot};
 use crate::storage::config::FolderConfig;
-use crate::util::i18n::t;
+use crate::util::i18n::{plural, t};
 
 /// The `(icon_name, status_label)` pair for a folder state, mirroring the
 /// Python `STATE_PRESENTATION` table. The label is translated through
@@ -59,7 +59,7 @@ pub fn folder_status_color(state: AppState) -> Option<&'static str> {
 /// slash: the name is what matters, the slash is noise.
 pub fn remote_label(remote_path: &str) -> String {
     let folder = remote_path.trim_start_matches('/');
-    t("Synced in local {folder}").replace("{folder}", folder)
+    t("Local copy of {folder}").replace("{folder}", folder)
 }
 
 /// The translated suffix for the folder's local used space ("{size} local",
@@ -85,9 +85,13 @@ pub fn progress_line_text(
     }
     .replace("{file}", file);
     if progress.processed > 0 {
-        t("{action} · {count} files")
-            .replace("{action}", &action)
-            .replace("{count}", &progress.processed.to_string())
+        plural(
+            u64::from(progress.processed),
+            t("{action} · {count} file"),
+            t("{action} · {count} files"),
+        )
+        .replace("{action}", &action)
+        .replace("{count}", &progress.processed.to_string())
     } else {
         action
     }
@@ -269,10 +273,16 @@ impl FolderStatusRow {
         // operations done, never a total), gone when it ends. The row, the
         // bar and the progress caption share a vertical slot that the folder
         // list appends.
+        // Issue #248: the bar keeps its 3 px height but is inset from the card
+        // corners and separated from the row border, which used to disappear
+        // under it while a run was in flight.
         let progress_bar = gtk4::ProgressBar::builder()
             .hexpand(true)
             .valign(gtk4::Align::End)
             .height_request(3)
+            .margin_start(12)
+            .margin_end(12)
+            .margin_top(2)
             .visible(false)
             .build();
         progress_bar.add_css_class("nextsync-run-bar");
@@ -569,7 +579,7 @@ fn render(
         progress_bar.pulse();
     }
     // The synced-in-local segment belongs to the synchronized state only and
-    // already says "Synced in local {folder}", so the redundant "Synchronized"
+    // already says "Local copy of {folder}", so the redundant "Synchronized"
     // status is dropped there (issue #108): the green check already conveys it.
     // Attention states surface the scheduler's specific message (which says
     // what the attention is and what to do) instead of a generic label (#95).
@@ -689,8 +699,8 @@ mod tests {
         assert_eq!(label, "Sincronizado");
         let (_, label) = folder_status_presentation(AppState::Offline);
         assert_eq!(label, "Sin conexión");
-        assert_eq!(remote_label("/docs"), "Sincronizado en local docs");
-        assert_eq!(remote_label("docs"), "Sincronizado en local docs");
+        assert_eq!(remote_label("/docs"), "Copia local de docs");
+        assert_eq!(remote_label("docs"), "Copia local de docs");
         // Live progress line (issue #86): translated action plus counter.
         let mut progress =
             crate::nextcloud::nextcloudcmd_progress::SyncProgress::new("upload", "/tmp/a/b.txt");
@@ -699,6 +709,31 @@ mod tests {
         assert_eq!(
             progress_line_text(&progress, "b.txt"),
             "subiendo b.txt · 7 archivos"
+        );
+        reset_locale();
+    }
+
+    /// Issue #247: a single file must not read as a plural.
+    #[test]
+    fn progress_counter_uses_the_singular_for_one_file() {
+        set_locale(Locale::English);
+        let mut progress =
+            crate::nextcloud::nextcloudcmd_progress::SyncProgress::new("upload", "/tmp/a/b.txt");
+        progress.processed = 1;
+        assert_eq!(
+            progress_line_text(&progress, "b.txt"),
+            "uploading b.txt · 1 file"
+        );
+        progress.processed = 2;
+        assert_eq!(
+            progress_line_text(&progress, "b.txt"),
+            "uploading b.txt · 2 files"
+        );
+        set_locale(Locale::Spanish);
+        progress.processed = 1;
+        assert_eq!(
+            progress_line_text(&progress, "b.txt"),
+            "subiendo b.txt · 1 archivo"
         );
         reset_locale();
     }
@@ -825,14 +860,14 @@ mod tests {
                 None,
             );
             assert_eq!(row.row.title(), "a");
-            assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
+            assert_eq!(row.row.subtitle().as_deref(), Some("Local copy of docs"));
             // The local-size suffix stays hidden until a size arrives and
             // leaves the subtitle alone (issue #43).
             assert!(!row.local_size.is_visible());
             row.set_local_size("12.4 KiB local");
             assert_eq!(row.local_size.label(), "12.4 KiB local");
             assert!(row.local_size.is_visible());
-            assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
+            assert_eq!(row.row.subtitle().as_deref(), Some("Local copy of docs"));
             row.set_local_size("");
             assert!(!row.local_size.is_visible());
             // Outside the synchronized state the synced-in-local segment
@@ -853,7 +888,7 @@ mod tests {
                 Some("Waiting for another folder to finish…")
             );
             state.set(AppState::IdleOk, "ok");
-            assert_eq!(row.row.subtitle().as_deref(), Some("Synced in local docs"));
+            assert_eq!(row.row.subtitle().as_deref(), Some("Local copy of docs"));
             // Live progress (issue #86): a progress event shows the line,
             // clearing it hides the label again.
             state.set_progress(Some(crate::nextcloud::sync_engine::SyncProgress {

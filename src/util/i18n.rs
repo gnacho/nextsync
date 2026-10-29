@@ -66,6 +66,19 @@ pub fn t(msgid: &str) -> &str {
     }
 }
 
+/// Pick the singular or plural form of a counted message (issue #247).
+///
+/// The catalog is a flat map with no plural rules, so every counted message
+/// ships two English msgids and their two translations and the caller passes
+/// both already resolved through [`t`].
+pub fn plural(count: u64, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 {
+        one
+    } else {
+        many
+    }
+}
+
 /// Binary-search the sorted Spanish catalog.
 fn lookup_spanish(msgid: &str) -> Option<&str> {
     es::CATALOG
