@@ -1,8 +1,9 @@
-// NextSync landing - tema, idioma, slider con lightbox, scrollspy y reveals.
+// NextSync landing - tema, idioma, menu movil, slider con lightbox y escena de sync.
 (function () {
   "use strict";
 
   var root = document.documentElement;
+  var dict = function () { return I18N[lang] || I18N.es; };
 
   // ---------- Tema ----------
   function systemTheme() {
@@ -24,60 +25,82 @@
   });
 
   // ---------- Idioma ----------
-  var langSelect = document.getElementById("langSelect");
+  var langButtons = [].slice.call(document.querySelectorAll(".language-switch button"));
   var lang = currentLang();
-  langSelect.value = lang;
   applyLang(lang);
-  langSelect.addEventListener("change", function () {
-    lang = langSelect.value;
-    applyLang(lang);
+  syncLangButtons();
+  langButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      lang = btn.getAttribute("data-lang");
+      applyLang(lang);
+      syncLangButtons();
+    });
+  });
+  function syncLangButtons() {
+    langButtons.forEach(function (btn) {
+      var on = btn.getAttribute("data-lang") === lang;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+
+  // ---------- Menu movil ----------
+  var mobileMenu = document.getElementById("mobileMenu");
+  mobileMenu.querySelectorAll("a").forEach(function (a) {
+    a.addEventListener("click", function () { mobileMenu.open = false; });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && mobileMenu.open) mobileMenu.open = false;
   });
 
   // ---------- Slider de capturas ----------
-  // Dos diapositivas por idioma: tema claro y oscuro.
-  function shot(base, cap, theme) {
-    return {
-      src: "assets/shots/" + base + "-960.webp",
-      srcset: "assets/shots/" + base + "-320.webp 320w, " +
-        "assets/shots/" + base + "-640.webp 640w, " +
-        "assets/shots/" + base + "-960.webp 960w, " +
-        "assets/shots/" + base + "-1080.webp 1080w, " +
-        "assets/shots/" + base + ".webp 1800w",
-      full: "assets/shots/" + base + ".webp",
-      thumb: "assets/shots/" + base + "-320.webp",
-      cap: cap,
-      theme: theme
-    };
-  }
-  var slides = {
-    es: [shot("main-es-light", "shots.capLight", "light"), shot("main-es-dark", "shots.capDark", "dark")],
-    en: [shot("main-en-light", "shots.capLight", "light"), shot("main-en-dark", "shots.capDark", "dark")]
-  };
-  var slideImg = document.getElementById("slideImg");
-  var slideCaption = document.getElementById("slideCaption");
-  var thumbs = document.getElementById("slideThumbs");
+  // Three windows times two themes, in the current language.
+  var WINDOWS = [
+    { base: "main", cap: "shots.capMain", alt: "shots.altMain" },
+    { base: "activity", cap: "shots.capActivity", alt: "shots.altActivity" },
+    { base: "settings", cap: "shots.capSettings", alt: "shots.altSettings" }
+  ];
+  var shotImg = document.getElementById("slideImg");
+  var shotCaption = document.getElementById("shotCaption");
+  var shotViewport = document.getElementById("shotViewport");
   var lightbox = document.getElementById("lightbox");
   var lightboxImg = document.getElementById("lightboxImg");
-  var slideIndex = 0;
+  var lightboxCaption = document.getElementById("lightboxCaption");
+  var windowButtons = [].slice.call(document.querySelectorAll("[data-window]"));
+  var themeButtons = [].slice.call(document.querySelectorAll("[data-shot-theme]"));
+  var winIndex = 0;
+  var shotTheme = currentTheme();
 
-  function activeSlides() { return slides[lang] || slides.es; }
+  function path(win, theme, suffix) {
+    return "assets/shots/" + WINDOWS[win].base + "-" + lang + "-" + theme + suffix;
+  }
+  function captionKey(win, theme) {
+    return dict()[WINDOWS[win].cap + (theme === "dark" ? "Dark" : "Light")] || "";
+  }
+  function altKey(win) {
+    return dict()[WINDOWS[win].alt] || "";
+  }
 
-  function renderThumbs() {
-    thumbs.innerHTML = "";
-    var dict = I18N[lang] || I18N.es;
-    activeSlides().forEach(function (s, i) {
-      var b = document.createElement("button");
-      b.setAttribute("role", "tab");
-      b.setAttribute("aria-selected", i === slideIndex ? "true" : "false");
-      b.setAttribute("aria-controls", "slideViewport");
-      b.setAttribute("aria-label", dict[s.cap] || "");
-      b.tabIndex = i === slideIndex ? 0 : -1;
-      var img = document.createElement("img");
-      img.src = s.thumb; img.alt = ""; img.loading = "lazy"; img.decoding = "async";
-      img.width = 96; img.height = 64;
-      b.appendChild(img);
-      b.addEventListener("click", function () { showSlide(i); });
-      thumbs.appendChild(b);
+  function paintSlide() {
+    shotImg.srcset = [
+      path(winIndex, shotTheme, "-320.webp") + " 320w",
+      path(winIndex, shotTheme, "-640.webp") + " 640w",
+      path(winIndex, shotTheme, "-960.webp") + " 960w",
+      path(winIndex, shotTheme, "-1080.webp") + " 1080w",
+      path(winIndex, shotTheme, ".webp") + " 1440w"
+    ].join(", ");
+    shotImg.src = path(winIndex, shotTheme, "-1080.webp");
+    shotImg.alt = altKey(winIndex);
+    shotCaption.textContent = captionKey(winIndex, shotTheme);
+    windowButtons.forEach(function (b, i) {
+      var on = i === winIndex;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    themeButtons.forEach(function (b) {
+      var on = b.getAttribute("data-shot-theme") === shotTheme;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
     });
   }
 
@@ -86,84 +109,85 @@
 
   function mod(i, n) { return ((i % n) + n) % n; }
 
-  function setSlide(i) {
-    var list = activeSlides();
-    slideIndex = mod(i, list.length);
-    var s = list[slideIndex];
-    slideImg.src = s.src;
-    slideImg.srcset = s.srcset;
-    slideCaption.textContent = (I18N[lang] || I18N.es)[s.cap] || "";
-    [...thumbs.children].forEach(function (b, j) {
-      b.setAttribute("aria-selected", j === slideIndex ? "true" : "false");
-      b.tabIndex = j === slideIndex ? 0 : -1;
-    });
-  }
-
-  // dir: +1 next, -1 previous. Without it the direction comes from the index.
-  function showSlide(i, dir) {
-    var list = activeSlides();
-    var target = mod(i, list.length);
-    if (dir === undefined) dir = target === slideIndex ? 1 : (target > slideIndex ? 1 : -1);
-    if (target === slideIndex || animating || reduceMotion.matches) {
-      setSlide(target);
-      slideImg.style.transition = "";
-      slideImg.style.transform = "";
-      slideImg.style.opacity = "";
+  // dir: +1 next, -1 previous.
+  function showWindow(i, dir) {
+    var target = mod(i, WINDOWS.length);
+    if (dir === undefined) dir = target === winIndex ? 1 : (target > winIndex ? 1 : -1);
+    if (target === winIndex || animating || reduceMotion.matches) {
+      winIndex = target;
+      paintSlide();
+      shotImg.style.transition = "";
+      shotImg.style.transform = "";
+      shotImg.style.opacity = "";
       return;
     }
     animating = true;
-    slideImg.style.transition = "transform 180ms ease, opacity 180ms ease";
-    slideImg.style.transform = "translateX(" + (-dir * 32) + "px)";
-    slideImg.style.opacity = "0.35";
+    shotImg.style.transition = "transform 180ms ease, opacity 180ms ease";
+    shotImg.style.transform = "translateX(" + (-dir * 32) + "px)";
+    shotImg.style.opacity = "0.35";
     window.setTimeout(function () {
-      setSlide(target);
-      slideImg.style.transition = "none";
-      slideImg.style.transform = "translateX(" + (dir * 32) + "px)";
-      void slideImg.offsetWidth;
-      slideImg.style.transition = "transform 200ms ease, opacity 200ms ease";
-      slideImg.style.transform = "translateX(0)";
-      slideImg.style.opacity = "1";
+      winIndex = target;
+      paintSlide();
+      shotImg.style.transition = "none";
+      shotImg.style.transform = "translateX(" + (dir * 32) + "px)";
+      void shotImg.offsetWidth;
+      shotImg.style.transition = "transform 200ms ease, opacity 200ms ease";
+      shotImg.style.transform = "translateX(0)";
+      shotImg.style.opacity = "1";
       window.setTimeout(function () {
         animating = false;
-        slideImg.style.transition = "";
-        slideImg.style.transform = "";
-        slideImg.style.opacity = "";
+        shotImg.style.transition = "";
+        shotImg.style.transform = "";
+        shotImg.style.opacity = "";
       }, 220);
     }, 180);
   }
 
-  // Arrow keys move between screenshots, the way a tablist behaves.
-  thumbs.addEventListener("keydown", function (e) {
-    var keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-    if (keys.indexOf(e.key) === -1) return;
-    e.preventDefault();
-    var n = activeSlides().length;
-    var next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : slideIndex + (e.key === "ArrowRight" ? 1 : -1);
-    showSlide(next, e.key === "ArrowLeft" || e.key === "Home" ? -1 : 1);
-    var btn = thumbs.children[mod(next, n)];
-    if (btn) btn.focus();
+  windowButtons.forEach(function (b) {
+    b.addEventListener("click", function () { showWindow(Number(b.getAttribute("data-window"))); });
+  });
+  themeButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      shotTheme = b.getAttribute("data-shot-theme");
+      paintSlide();
+    });
+  });
+  document.getElementById("slidePrev").addEventListener("click", function () { showWindow(winIndex - 1, -1); });
+  document.getElementById("slideNext").addEventListener("click", function () { showWindow(winIndex + 1, 1); });
+
+  // Arrow keys move between windows when the tabs have focus.
+  [].slice.call(document.querySelectorAll(".window-tabs, .theme-tabs")).forEach(function (group) {
+    group.addEventListener("keydown", function (e) {
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].indexOf(e.key) === -1) return;
+      e.preventDefault();
+      if (group.classList.contains("window-tabs")) {
+        var n = WINDOWS.length;
+        var next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : winIndex + (e.key === "ArrowRight" ? 1 : -1);
+        showWindow(next, e.key === "ArrowLeft" || e.key === "Home" ? -1 : 1);
+        windowButtons[mod(next, n)].focus();
+      } else {
+        shotTheme = e.key === "ArrowLeft" || e.key === "Home" ? "light" : "dark";
+        paintSlide();
+        (shotTheme === "light" ? themeButtons[0] : themeButtons[1]).focus();
+      }
+    });
   });
 
-  document.getElementById("slidePrev").addEventListener("click", function () { showSlide(slideIndex - 1, -1); });
-  document.getElementById("slideNext").addEventListener("click", function () { showSlide(slideIndex + 1, 1); });
-
-  // ---------- Swipe del slider (tap y arrastre) ----------
-  var slideViewport = document.querySelector(".slider-viewport");
+  // ---------- Swipe (tap y arrastre) ----------
   var drag = null;
   var suppressLightbox = false;
 
   function resetSlideImage() {
-    slideImg.style.transition = "transform 200ms ease, opacity 200ms ease";
-    slideImg.style.transform = "translateX(0)";
-    slideImg.style.opacity = "1";
+    shotImg.style.transition = "transform 200ms ease, opacity 200ms ease";
+    shotImg.style.transform = "translateX(0)";
+    shotImg.style.opacity = "1";
   }
 
-  slideViewport.addEventListener("pointerdown", function (e) {
+  shotViewport.addEventListener("pointerdown", function (e) {
     if (e.button !== 0 || animating) return;
     drag = { x: e.clientX, y: e.clientY, dx: 0, active: false, id: e.pointerId };
   });
-
-  slideViewport.addEventListener("pointermove", function (e) {
+  shotViewport.addEventListener("pointermove", function (e) {
     if (!drag || e.pointerId !== drag.id) return;
     var dx = e.clientX - drag.x;
     var dy = e.clientY - drag.y;
@@ -171,15 +195,14 @@
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
       drag.active = true;
-      slideViewport.setPointerCapture(e.pointerId);
-      slideImg.style.transition = "none";
+      shotViewport.setPointerCapture(e.pointerId);
+      shotImg.style.transition = "none";
     }
     drag.dx = dx;
-    slideImg.style.transform = "translateX(" + dx + "px)";
-    slideImg.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / 600));
+    shotImg.style.transform = "translateX(" + dx + "px)";
+    shotImg.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / 600));
     e.preventDefault();
   });
-
   function endDrag() {
     if (!drag) return;
     var d = drag;
@@ -187,44 +210,26 @@
     if (!d.active) return;
     suppressLightbox = true;
     window.setTimeout(function () { suppressLightbox = false; }, 300);
-    var threshold = Math.min(70, slideViewport.clientWidth * 0.18);
+    var threshold = Math.min(70, shotViewport.clientWidth * 0.18);
     if (Math.abs(d.dx) > threshold) {
       var dir = d.dx < 0 ? 1 : -1;
-      showSlide(slideIndex + dir, dir);
+      showWindow(winIndex + dir, dir);
     } else {
       resetSlideImage();
     }
   }
-
-  slideViewport.addEventListener("pointerup", endDrag);
-  slideViewport.addEventListener("pointercancel", function () {
+  shotViewport.addEventListener("pointerup", endDrag);
+  shotViewport.addEventListener("pointercancel", function () {
     if (drag && drag.active) resetSlideImage();
     drag = null;
   });
 
-  document.addEventListener("keydown", function (e) {
-    if (lightbox.open) return;
-    if (e.key === "ArrowLeft") showSlide(slideIndex - 1);
-    if (e.key === "ArrowRight") showSlide(slideIndex + 1);
-  });
-
-  // Al cambiar de idioma o de tema, la diapositiva acompaña.
-  document.addEventListener("langchange", function () {
-    slideIndex = currentTheme() === "dark" ? 1 : 0;
-    renderThumbs(); showSlide(slideIndex);
-  });
-  document.addEventListener("themechange", function (e) {
-    showSlide(e.detail.theme === "dark" ? 1 : 0);
-  });
-
-  slideIndex = currentTheme() === "dark" ? 1 : 0;
-  renderThumbs(); showSlide(slideIndex);
-
   // ---------- Lightbox ----------
-  slideImg.addEventListener("click", function () {
+  shotImg.addEventListener("click", function () {
     if (suppressLightbox) { suppressLightbox = false; return; }
-    lightboxImg.src = activeSlides()[slideIndex].full;
-    lightboxImg.alt = slideImg.alt;
+    lightboxImg.src = path(winIndex, shotTheme, ".webp");
+    lightboxImg.alt = altKey(winIndex);
+    lightboxCaption.textContent = captionKey(winIndex, shotTheme);
     lightbox.showModal();
   });
   document.getElementById("lightboxClose").addEventListener("click", function () { lightbox.close(); });
@@ -232,13 +237,59 @@
     if (e.target === lightbox) lightbox.close();
   });
 
+  // The site theme drives the screenshot theme, keeping the window on screen.
+  document.addEventListener("themechange", function (e) {
+    shotTheme = e.detail.theme;
+    paintSlide();
+  });
+  document.addEventListener("langchange", function () { paintSlide(); });
+  paintSlide();
+
+  // ---------- Escena de sincronizacion ----------
+  var scene = document.getElementById("syncScene");
+  var track = document.getElementById("syncTrack");
+  var motionBtn = document.getElementById("motionToggle");
+
+  function layoutScene() {
+    var line = track.querySelector(".sync-lane-line");
+    var start = line ? line.offsetLeft : 0;
+    var travel = Math.max(24, track.clientWidth - start - 48);
+    scene.style.setProperty("--travel", travel + "px");
+    scene.style.setProperty("--travel-half", travel / 2 + "px");
+  }
+  if (window.ResizeObserver) new ResizeObserver(layoutScene).observe(track);
+  layoutScene();
+
+  var paused = reduceMotion.matches;
+  function updateMotion() {
+    scene.classList.toggle("is-paused", paused);
+    motionBtn.classList.toggle("is-paused", paused);
+    motionBtn.disabled = reduceMotion.matches;
+    var d = dict();
+    var text = reduceMotion.matches ? d["sync.paused"] : (paused ? d["sync.resume"] : d["sync.pause"]);
+    var label = reduceMotion.matches ? d["sync.reducedLabel"] : (paused ? d["sync.resumeLabel"] : d["sync.pauseLabel"]);
+    motionBtn.querySelector("span").textContent = text;
+    motionBtn.setAttribute("aria-label", label);
+  }
+  motionBtn.addEventListener("click", function () {
+    paused = !paused;
+    updateMotion();
+  });
+  document.addEventListener("langchange", updateMotion);
+  updateMotion();
+
   // ---------- Copiar comando ----------
   var copyBtn = document.getElementById("copyBtn");
+  var copyLabel = copyBtn.querySelector("span");
   copyBtn.addEventListener("click", function () {
     var text = document.getElementById("installCmd").textContent;
     function done() {
-      copyBtn.textContent = (I18N[lang] || I18N.es)["install.copied"];
-      setTimeout(function () { copyBtn.textContent = (I18N[lang] || I18N.es)["install.copy"]; }, 2000);
+      copyBtn.classList.add("is-copied");
+      copyLabel.textContent = dict()["install.copied"];
+      window.setTimeout(function () {
+        copyBtn.classList.remove("is-copied");
+        copyLabel.textContent = dict()["install.copy"];
+      }, 2000);
     }
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done, function () { legacyCopy(text); done(); });
@@ -253,27 +304,4 @@
     try { document.execCommand("copy"); } catch (e) { /* sin portapapeles */ }
     document.body.removeChild(ta);
   }
-
-  // ---------- Reveal on scroll ----------
-  var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (en) {
-      if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
-    });
-  }, { threshold: 0.12 });
-  document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
-
-  // ---------- Scrollspy ----------
-  var navAnchors = [...document.querySelectorAll(".nav-links a[href^='#']")];
-  var sections = navAnchors
-    .map(function (a) { return document.querySelector(a.getAttribute("href")); })
-    .filter(Boolean);
-  var spy = new IntersectionObserver(function (entries) {
-    entries.forEach(function (en) {
-      if (!en.isIntersecting) return;
-      navAnchors.forEach(function (a) {
-        a.classList.toggle("active", a.getAttribute("href") === "#" + en.target.id);
-      });
-    });
-  }, { rootMargin: "-40% 0px -55% 0px" });
-  sections.forEach(function (s) { spy.observe(s); });
 })();
