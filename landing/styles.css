@@ -351,7 +351,10 @@ dialog#lightbox img { display: block; max-width: 92vw; max-height: 86vh; }
   /* Phones: swipe on the image and the thumbnails are the navigation.
      Floating arrows would only cover the screenshot. */
   .slider-arrow { display: none; }
-  .slider-thumbs button { width: 72px; }
+  /* Six thumbnails: share the row instead of a fixed width, so they never
+     push the page sideways. */
+  .slider-thumbs { gap: 0.45rem; }
+  .slider-thumbs button { flex: 1 1 0; width: auto; min-width: 0; }
   /* Phones: a pacman command and GNOME requirements are dead weight.
      Keep the honest note about the desktop scope. */
   .install-desk, .install-card, .reqs { display: none; }

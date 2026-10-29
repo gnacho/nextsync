@@ -35,23 +35,40 @@
 
   // ---------- Slider de capturas ----------
   // Dos diapositivas por idioma: tema claro y oscuro.
-  function shot(base, cap, theme) {
+  function shot(base, cap, alt, theme) {
     return {
       src: "assets/shots/" + base + "-960.webp",
       srcset: "assets/shots/" + base + "-320.webp 320w, " +
         "assets/shots/" + base + "-640.webp 640w, " +
         "assets/shots/" + base + "-960.webp 960w, " +
         "assets/shots/" + base + "-1080.webp 1080w, " +
-        "assets/shots/" + base + ".webp 1800w",
+        "assets/shots/" + base + ".webp 1440w",
       full: "assets/shots/" + base + ".webp",
       thumb: "assets/shots/" + base + "-320.webp",
       cap: cap,
+      alt: alt,
       theme: theme
     };
   }
+  // Order matters: the first half is the light set, the second half the dark
+  // one, and both halves follow the same window order.
   var slides = {
-    es: [shot("main-es-light", "shots.capLight", "light"), shot("main-es-dark", "shots.capDark", "dark")],
-    en: [shot("main-en-light", "shots.capLight", "light"), shot("main-en-dark", "shots.capDark", "dark")]
+    es: [
+      shot("main-es-light", "shots.capMainLight", "shots.altMain", "light"),
+      shot("activity-es-light", "shots.capActivityLight", "shots.altActivity", "light"),
+      shot("settings-es-light", "shots.capSettingsLight", "shots.altSettings", "light"),
+      shot("main-es-dark", "shots.capMainDark", "shots.altMain", "dark"),
+      shot("activity-es-dark", "shots.capActivityDark", "shots.altActivity", "dark"),
+      shot("settings-es-dark", "shots.capSettingsDark", "shots.altSettings", "dark")
+    ],
+    en: [
+      shot("main-en-light", "shots.capMainLight", "shots.altMain", "light"),
+      shot("activity-en-light", "shots.capActivityLight", "shots.altActivity", "light"),
+      shot("settings-en-light", "shots.capSettingsLight", "shots.altSettings", "light"),
+      shot("main-en-dark", "shots.capMainDark", "shots.altMain", "dark"),
+      shot("activity-en-dark", "shots.capActivityDark", "shots.altActivity", "dark"),
+      shot("settings-en-dark", "shots.capSettingsDark", "shots.altSettings", "dark")
+    ]
   };
   var slideImg = document.getElementById("slideImg");
   var slideCaption = document.getElementById("slideCaption");
@@ -90,9 +107,11 @@
     var list = activeSlides();
     slideIndex = mod(i, list.length);
     var s = list[slideIndex];
+    var dict = I18N[lang] || I18N.es;
     slideImg.src = s.src;
     slideImg.srcset = s.srcset;
-    slideCaption.textContent = (I18N[lang] || I18N.es)[s.cap] || "";
+    slideImg.alt = dict[s.alt] || "";
+    slideCaption.textContent = dict[s.cap] || "";
     [...thumbs.children].forEach(function (b, j) {
       b.setAttribute("aria-selected", j === slideIndex ? "true" : "false");
       b.tabIndex = j === slideIndex ? 0 : -1;
@@ -208,17 +227,21 @@
     if (e.key === "ArrowRight") showSlide(slideIndex + 1);
   });
 
-  // Al cambiar de idioma o de tema, la diapositiva acompaña.
+  // The light set comes first and the dark set second, with the same windows
+  // in the same order, so switching theme keeps the same window on screen.
+  function withTheme(i, theme) {
+    var half = activeSlides().length / 2;
+    return (i % half) + (theme === "dark" ? half : 0);
+  }
+
   document.addEventListener("langchange", function () {
-    slideIndex = currentTheme() === "dark" ? 1 : 0;
     renderThumbs(); showSlide(slideIndex);
   });
   document.addEventListener("themechange", function (e) {
-    showSlide(e.detail.theme === "dark" ? 1 : 0);
+    showSlide(withTheme(slideIndex, e.detail.theme));
   });
 
-  slideIndex = currentTheme() === "dark" ? 1 : 0;
-  renderThumbs(); showSlide(slideIndex);
+  renderThumbs(); showSlide(withTheme(0, currentTheme()));
 
   // ---------- Lightbox ----------
   slideImg.addEventListener("click", function () {
