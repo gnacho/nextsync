@@ -229,9 +229,6 @@ pub struct GeneralConfig {
     /// runtime plumbing and older config files keep working.
     #[serde(default)]
     pub pause_on_battery: bool,
-    /// Color scheme preference: `"system"`, `"light"` or `"dark"`.
-    #[serde(default = "default_color_scheme")]
-    pub color_scheme: String,
     /// Whether desktop notifications are sent for sync/auth failures.
     #[serde(default = "yes")]
     pub show_notifications: bool,
@@ -248,11 +245,6 @@ pub struct GeneralConfig {
     /// automatic synchronization is suspended (issue #45).
     #[serde(default)]
     pub quiet_hours: Option<(String, String)>,
-}
-
-/// Default color scheme (follow the desktop).
-fn default_color_scheme() -> String {
-    "system".to_string()
 }
 
 /// Parse the `quiet_hours` pair from its serialized `[start, end]` form,
@@ -326,7 +318,6 @@ impl Default for GeneralConfig {
         Self {
             autostart: true,
             pause_on_battery: false,
-            color_scheme: default_color_scheme(),
             show_notifications: yes(),
             show_server_notifications: false,
             size_confirm_threshold_mb: default_size_confirm_threshold_mb(),
@@ -1174,10 +1165,6 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
     GeneralConfig {
         autostart: get_bool(obj, "autostart", true),
         pause_on_battery: get_bool(obj, "pause_on_battery", false),
-        // The theme switch only understands system/light/dark; anything else
-        // falls back to the system default instead of reaching the UI
-        // (issue #138).
-        color_scheme: get_valid_color_scheme(obj),
         show_notifications: get_bool(obj, "show_notifications", true),
         show_server_notifications: get_bool(obj, "show_server_notifications", false),
         size_confirm_threshold_mb: get_i64_tolerant(
@@ -1188,18 +1175,6 @@ fn validate_general(raw: Option<&Value>) -> GeneralConfig {
             1_000_000,
         ),
         quiet_hours: parse_quiet_hours(obj),
-    }
-}
-
-/// Read `color_scheme` restricted to the three values the theme switch
-/// understands (`system` / `light` / `dark`); anything else is treated as
-/// missing and falls back to the default (issue #138).
-fn get_valid_color_scheme(obj: &serde_json::Map<String, Value>) -> String {
-    match obj.get("color_scheme") {
-        Some(Value::String(value)) if matches!(value.as_str(), "system" | "light" | "dark") => {
-            value.clone()
-        }
-        _ => default_color_scheme(),
     }
 }
 
@@ -1683,15 +1658,14 @@ mod tests {
     }
 
     #[test]
-    fn invalid_color_scheme_falls_back_to_the_default() {
-        // Issue #138: only system/light/dark reach the theme switch; any
-        // other value is treated as missing.
+    fn legacy_color_scheme_key_is_ignored_and_dropped() {
+        // Issue #246: the theme switch was removed in v0.70.0 (#53) and the
+        // field became dead. Old configs still carry it, so loading must work
+        // and the key must be gone from the next save.
         let config = validate_config(json!({ "general": { "color_scheme": "banana" } })).unwrap();
-        assert_eq!(config.general.color_scheme, "system");
-        let config = validate_config(json!({ "general": { "color_scheme": "dark" } })).unwrap();
-        assert_eq!(config.general.color_scheme, "dark");
-        let config = validate_config(json!({ "general": { "color_scheme": 7 } })).unwrap();
-        assert_eq!(config.general.color_scheme, "system");
+        assert!(config.general.autostart);
+        let saved = serde_json::to_value(&config).unwrap();
+        assert!(saved["general"].get("color_scheme").is_none());
     }
 
     // ---- migrations -----------------------------------------------------------
