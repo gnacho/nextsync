@@ -35,15 +35,23 @@
 
   // ---------- Slider de capturas ----------
   // Dos diapositivas por idioma: tema claro y oscuro.
+  function shot(base, cap, theme) {
+    return {
+      src: "assets/shots/" + base + "-960.webp",
+      srcset: "assets/shots/" + base + "-320.webp 320w, " +
+        "assets/shots/" + base + "-640.webp 640w, " +
+        "assets/shots/" + base + "-960.webp 960w, " +
+        "assets/shots/" + base + "-1080.webp 1080w, " +
+        "assets/shots/" + base + ".webp 1800w",
+      full: "assets/shots/" + base + ".webp",
+      thumb: "assets/shots/" + base + "-320.webp",
+      cap: cap,
+      theme: theme
+    };
+  }
   var slides = {
-    es: [
-      { src: "assets/shots/main-es-light.webp", cap: "shots.capLight", theme: "light" },
-      { src: "assets/shots/main-es-dark.webp", cap: "shots.capDark", theme: "dark" }
-    ],
-    en: [
-      { src: "assets/shots/main-en-light.webp", cap: "shots.capLight", theme: "light" },
-      { src: "assets/shots/main-en-dark.webp", cap: "shots.capDark", theme: "dark" }
-    ]
+    es: [shot("main-es-light", "shots.capLight", "light"), shot("main-es-dark", "shots.capDark", "dark")],
+    en: [shot("main-en-light", "shots.capLight", "light"), shot("main-en-dark", "shots.capDark", "dark")]
   };
   var slideImg = document.getElementById("slideImg");
   var slideCaption = document.getElementById("slideCaption");
@@ -65,7 +73,7 @@
       b.setAttribute("aria-label", dict[s.cap] || "");
       b.tabIndex = i === slideIndex ? 0 : -1;
       var img = document.createElement("img");
-      img.src = s.src; img.alt = ""; img.loading = "lazy"; img.decoding = "async";
+      img.src = s.thumb; img.alt = ""; img.loading = "lazy"; img.decoding = "async";
       img.width = 96; img.height = 64;
       b.appendChild(img);
       b.addEventListener("click", function () { showSlide(i); });
@@ -83,6 +91,7 @@
     slideIndex = mod(i, list.length);
     var s = list[slideIndex];
     slideImg.src = s.src;
+    slideImg.srcset = s.srcset;
     slideCaption.textContent = (I18N[lang] || I18N.es)[s.cap] || "";
     [...thumbs.children].forEach(function (b, j) {
       b.setAttribute("aria-selected", j === slideIndex ? "true" : "false");
@@ -214,7 +223,7 @@
   // ---------- Lightbox ----------
   slideImg.addEventListener("click", function () {
     if (suppressLightbox) { suppressLightbox = false; return; }
-    lightboxImg.src = slideImg.src;
+    lightboxImg.src = activeSlides()[slideIndex].full;
     lightboxImg.alt = slideImg.alt;
     lightbox.showModal();
   });
