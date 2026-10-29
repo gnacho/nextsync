@@ -960,6 +960,10 @@ msgstr "Revisar ahora"
 msgid "Synchronization was paused before {count} files could be deleted from Nextcloud."
 msgstr "La sincronización se pausó antes de que {count} archivos pudieran eliminarse de Nextcloud."
 
+#: src/ui/main_window.rs
+msgid "Synchronization was paused before {count} file could be deleted from Nextcloud."
+msgstr "La sincronización se pausó antes de que {count} archivo pudiera eliminarse de Nextcloud."
+
 #: src/ui/folder_status.rs
 msgid "Review deletions"
 msgstr "Revisar borrados masivos"
@@ -2659,13 +2663,25 @@ msgstr "Sincronización bloqueada: no hay credenciales guardadas"
 msgid "{action} · {count} files"
 msgstr "{action} · {count} archivos"
 
+#: src/ui/folder_status.rs
+msgid "{action} · {count} file"
+msgstr "{action} · {count} archivo"
+
 #: src/ui/main_window.rs
 msgid "{count} files disappeared from the local folder."
 msgstr "{count} archivos desaparecieron de la carpeta local."
 
 #: src/ui/main_window.rs
+msgid "{count} file disappeared from the local folder."
+msgstr "Desapareció {count} archivo de la carpeta local."
+
+#: src/ui/main_window.rs
 msgid "{count} files"
 msgstr "{count} archivos"
+
+#: src/ui/main_window.rs
+msgid "{count} file"
+msgstr "{count} archivo"
 
 #: src/ui/main_window.rs
 msgid "{count} more…"
@@ -2719,8 +2735,8 @@ msgstr "Versión del servidor conservada en {count} archivo(s)"
 msgid "Resolve All Conflicts"
 msgstr "Resolver todos los conflictos"
 
-msgid "Synced in local {folder}"
-msgstr "Sincronizado en local {folder}"
+msgid "Local copy of {folder}"
+msgstr "Copia local de {folder}"
 
 msgid "Waiting to synchronize"
 msgstr "A la espera"
