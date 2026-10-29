@@ -56,10 +56,14 @@
 
   function renderThumbs() {
     thumbs.innerHTML = "";
+    var dict = I18N[lang] || I18N.es;
     activeSlides().forEach(function (s, i) {
       var b = document.createElement("button");
       b.setAttribute("role", "tab");
       b.setAttribute("aria-selected", i === slideIndex ? "true" : "false");
+      b.setAttribute("aria-controls", "slideViewport");
+      b.setAttribute("aria-label", dict[s.cap] || "");
+      b.tabIndex = i === slideIndex ? 0 : -1;
       var img = document.createElement("img");
       img.src = s.src; img.alt = ""; img.loading = "lazy"; img.decoding = "async";
       img.width = 96; img.height = 64;
@@ -82,6 +86,7 @@
     slideCaption.textContent = (I18N[lang] || I18N.es)[s.cap] || "";
     [...thumbs.children].forEach(function (b, j) {
       b.setAttribute("aria-selected", j === slideIndex ? "true" : "false");
+      b.tabIndex = j === slideIndex ? 0 : -1;
     });
   }
 
@@ -117,6 +122,18 @@
       }, 220);
     }, 180);
   }
+
+  // Arrow keys move between screenshots, the way a tablist behaves.
+  thumbs.addEventListener("keydown", function (e) {
+    var keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (keys.indexOf(e.key) === -1) return;
+    e.preventDefault();
+    var n = activeSlides().length;
+    var next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : slideIndex + (e.key === "ArrowRight" ? 1 : -1);
+    showSlide(next, e.key === "ArrowLeft" || e.key === "Home" ? -1 : 1);
+    var btn = thumbs.children[mod(next, n)];
+    if (btn) btn.focus();
+  });
 
   document.getElementById("slidePrev").addEventListener("click", function () { showSlide(slideIndex - 1, -1); });
   document.getElementById("slideNext").addEventListener("click", function () { showSlide(slideIndex + 1, 1); });

@@ -261,6 +261,7 @@ a:hover { text-decoration: underline; }
 
 /* ---------- Comparativa ---------- */
 .table-wrap { overflow-x: auto; border-radius: var(--radius); box-shadow: var(--shadow); }
+.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .matrix { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.98rem; }
 .matrix th, .matrix td { padding: 0.9rem 1.1rem; text-align: left; border-bottom: 1px solid var(--card-border); }
 .matrix thead th { font-weight: 700; background: var(--btn-bg); }
