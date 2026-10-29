@@ -71,8 +71,12 @@
   var winIndex = 0;
   var shotTheme = currentTheme();
 
+  // The shots are served with a 30 day cache and keep their file names, so the
+  // query string is what tells a returning visitor that the picture changed.
+  var SHOTS_V = "?v=2";
+
   function path(win, theme, suffix) {
-    return "assets/shots/" + WINDOWS[win].base + "-" + lang + "-" + theme + suffix;
+    return "assets/shots/" + WINDOWS[win].base + "-" + lang + "-" + theme + suffix + SHOTS_V;
   }
   function captionKey(win, theme) {
     return dict()[WINDOWS[win].cap + (theme === "dark" ? "Dark" : "Light")] || "";
