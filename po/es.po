@@ -1365,6 +1365,10 @@ msgstr ""
 msgid "Advanced"
 msgstr "Avanzado"
 
+#: src/ui/settings.rs
+msgid "Advanced synchronization"
+msgstr "Sincronización avanzada"
+
 #: src/nextsync/ui/settings.py:527
 msgid "Logging"
 msgstr "Registro"

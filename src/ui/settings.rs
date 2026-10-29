@@ -2,8 +2,8 @@
 //!
 //! Port of `ui/settings.py` (v0.4.0) to gtk-rs/libadwaita: a single in-app
 //! `SettingsView` (ToolbarView + ViewStack + ViewSwitcherBar) with General,
-//! Synchronization, Network and Advanced pages, and the typed Remove account
-//! confirmation. Folder management lives in the sync view (issue #18); the
+//! Synchronization, Advanced synchronization, Network and Advanced pages, and
+//! the typed Remove account confirmation. Folder management lives in the sync view (issue #18); the
 //! standalone Add Folder dialog here is shared with it.
 //!
 //! # Deviations from `settings.py` (motivated)
@@ -101,7 +101,7 @@ impl SettingsHost {
     }
 }
 
-/// The in-app settings view: the four preference pages in a `ViewStack` with
+/// The in-app settings view: the five preference pages in a `ViewStack` with
 /// a `ViewSwitcherBar`, rendered inside the main window (official-client
 /// style) instead of a separate `PreferencesWindow`. Dialogs and toasts anchor
 /// on the shared [`SettingsHost`].
@@ -132,8 +132,16 @@ impl SettingsView {
         // removed from Settings by user decision (issue #18): the sync view
         // owns it, so the settings pages never duplicate it.
         let general = build_general_page(&config_store, &config.general);
-        let synchronization =
-            build_sync_page(&config_store, &account_id, &account, &callbacks, host);
+        let (sync_groups, sync_advanced_groups) =
+            sync_option_groups(&config_store, &account_id, &account, &callbacks, host);
+        let synchronization = build_sync_page(sync_groups);
+        let sync_advanced = build_sync_advanced_page(
+            sync_advanced_groups,
+            &config_store,
+            &account_id,
+            &account,
+            &callbacks,
+        );
         let network = build_network_page(&config_store, &config.network);
         let advanced = build_advanced_page(&config_store, &config.logging, &callbacks);
 
@@ -155,6 +163,7 @@ impl SettingsView {
         };
         view.add_page("general", general);
         view.add_page("synchronization", synchronization);
+        view.add_page("synchronization-advanced", sync_advanced);
         view.add_page("network", network);
         view.add_page("advanced", advanced);
         stack.set_visible_child_name("general");
@@ -197,6 +206,7 @@ impl SettingsView {
 pub mod page {
     pub const GENERAL: &str = "general";
     pub const SYNCHRONIZATION: &str = "synchronization";
+    pub const SYNCHRONIZATION_ADVANCED: &str = "synchronization-advanced";
     pub const NETWORK: &str = "network";
     pub const ADVANCED: &str = "advanced";
 }
@@ -402,20 +412,27 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
     page
 }
 
-/// Synchronization page: the manual-only banner, the four trigger switches,
-/// exclusions and reliability.
-/// Build the per-account synchronization option groups (issue #56): they
-/// are shared by the account settings panel in the main window and were
-/// the former Synchronization page.
+/// Build the per-account synchronization option groups (issue #56): they are
+/// shared by the account settings panel in the main window and were the former
+/// Synchronization page.
+///
+/// Returns the everyday groups (manual-only banner, local and remote changes)
+/// and the advanced ones (exclusions and reliability). Issue #249 splits them
+/// across two pages because the whole block did not fit in a 960 px tall
+/// window.
 pub(crate) fn sync_option_groups(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
     callbacks: &SettingsCallbacks,
     _host: &SettingsHost,
-) -> Vec<libadwaita::PreferencesGroup> {
+) -> (
+    Vec<libadwaita::PreferencesGroup>,
+    Vec<libadwaita::PreferencesGroup>,
+) {
     let sync = &account.sync;
     let mut groups: Vec<libadwaita::PreferencesGroup> = Vec::new();
+    let mut advanced: Vec<libadwaita::PreferencesGroup> = Vec::new();
 
     let manual_group = libadwaita::PreferencesGroup::new();
     let banner = libadwaita::Banner::new(t(
@@ -503,7 +520,7 @@ pub(crate) fn sync_option_groups(
         });
     }
     excluded.add(&edit_row);
-    groups.push(excluded);
+    advanced.push(excluded);
 
     let reliability = libadwaita::PreferencesGroup::builder()
         .title(t("Reliability"))
@@ -515,7 +532,7 @@ pub(crate) fn sync_option_groups(
         sync.max_sync_retries as f64,
     );
     reliability.add(&retries);
-    groups.push(reliability);
+    advanced.push(reliability);
 
     let widgets = SyncWidgets {
         banner,
@@ -603,24 +620,38 @@ pub(crate) fn sync_option_groups(
     }
 
     let _ = widgets;
-    groups
+    (groups, advanced)
 }
 
-/// Synchronization page: the per-account trigger options, exclusions,
-/// reliability, deletion guard and detailed output (issue #63 moves them
-/// here from the account panel).
-fn build_sync_page(
-    store: &ConfigStore,
-    account_id: &str,
-    account: &AccountConfig,
-    callbacks: &SettingsCallbacks,
-    host: &SettingsHost,
-) -> libadwaita::PreferencesPage {
+/// Synchronization page: the everyday trigger switches (issue #63 moved them
+/// here from the account panel). Exclusions, reliability, detailed output and
+/// the deletion guard live on the advanced synchronization page since #249.
+fn build_sync_page(groups: Vec<libadwaita::PreferencesGroup>) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("Synchronization"))
         .icon_name("emblem-synchronizing-symbolic")
         .build();
-    for group in sync_option_groups(store, account_id, account, callbacks, host) {
+    for group in groups {
+        page.add(&group);
+    }
+    page
+}
+
+/// Advanced synchronization page: exclusions, reliability, detailed output and
+/// the deletion guard (issue #249). Kept apart from the everyday switches so
+/// neither page has to be scrolled at 1440x960.
+fn build_sync_advanced_page(
+    groups: Vec<libadwaita::PreferencesGroup>,
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+) -> libadwaita::PreferencesPage {
+    let page = libadwaita::PreferencesPage::builder()
+        .title(t("Advanced synchronization"))
+        .icon_name("preferences-other-symbolic")
+        .build();
+    for group in groups {
         page.add(&group);
     }
     let detailed_group = libadwaita::PreferencesGroup::new();
@@ -2430,7 +2461,7 @@ mod tests {
                 SettingsCallbacks::default(),
                 &host,
             );
-            assert_eq!(view.page_names().len(), 4);
+            assert_eq!(view.page_names().len(), 5);
             assert!(view
                 .page_names()
                 .iter()
@@ -2444,7 +2475,7 @@ mod tests {
                 SettingsCallbacks::default(),
                 &host,
             );
-            assert_eq!(view.page_names().len(), 4);
+            assert_eq!(view.page_names().len(), 5);
             reset_locale();
         });
     }
@@ -2456,10 +2487,10 @@ mod tests {
         SettingsHost::new(&window, &toast)
     }
 
-    /// The in-app view embeds exactly the four preference pages and switches
+    /// The in-app view embeds exactly the five preference pages and switches
     /// between them in place (issue #10: no separate window anywhere).
     #[test]
-    fn settings_view_embeds_four_pages_and_switches_in_place() {
+    fn settings_view_embeds_five_pages_and_switches_in_place() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let dir = tempdir().unwrap();
@@ -2480,6 +2511,7 @@ mod tests {
                 [
                     page::GENERAL,
                     page::SYNCHRONIZATION,
+                    page::SYNCHRONIZATION_ADVANCED,
                     page::NETWORK,
                     page::ADVANCED
                 ]
