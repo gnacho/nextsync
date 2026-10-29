@@ -18,16 +18,19 @@
   <meta property="og:image" content="https://nextsync.cloudless.club/og.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="NextSync: tus archivos en local, cualquier servidor en sincronía" />
   <meta property="og:locale" content="es_ES" />
   <meta property="og:locale:alternate" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="NextSync - Your files, local. Any server, in sync." />
   <meta name="twitter:description" content="A GNOME desktop companion that keeps local mirrors of your Nextcloud and OpenCloud accounts. Rust, GTK 4, Libadwaita. No telemetry, GPL-3.0+." />
   <meta name="twitter:image" content="https://nextsync.cloudless.club/og.png" />
+  <meta name="twitter:image:alt" content="NextSync: your files local, any server in sync" />
   <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
-  <link rel="preload" href="assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="styles.css?v=13" />
-  <noscript><style>.reveal { opacity: 1; transform: none; }</style></noscript>
+  <link rel="preload" href="assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="assets/fonts/ibm-plex-serif-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="styles.css?v=16" />
+  <noscript><style>.menu-button { display: none; }</style></noscript>
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -40,231 +43,462 @@
         "license": "https://www.gnu.org/licenses/gpl-3.0.html",
         "description": "GNOME desktop companion that keeps complete local mirrors of Nextcloud and OpenCloud accounts, delegating synchronization to the official server CLI.",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }, "isAccessibleForFree": true },
-      { "@type": "FAQPage", "mainEntity": [
-        { "@type": "Question", "name": "Is NextSync an official Nextcloud product?",
-          "acceptedAnswer": { "@type": "Answer", "text": "No. NextSync is an independent, unofficial project and is not affiliated with Nextcloud GmbH or the Heinlein Group." } },
-        { "@type": "Question", "name": "Does NextSync support virtual files?",
-          "acceptedAnswer": { "@type": "Answer", "text": "No. NextSync keeps complete local mirrors of the folders you choose. It does not do on-demand placeholder files." } },
-        { "@type": "Question", "name": "Which servers does NextSync support?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Nextcloud and OpenCloud today, through their official sync CLIs. Any platform that ships a sync CLI can be added later." } },
-        { "@type": "Question", "name": "Does NextSync send telemetry?",
-          "acceptedAnswer": { "@type": "Answer", "text": "No. No telemetry, no analytics and no remote crash reporting." } }
+      { "@type": "FAQPage", "inLanguage": "es", "mainEntity": [
+        { "@type": "Question", "name": "¿Es un producto oficial de Nextcloud?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. NextSync es un proyecto independiente y no oficial, sin afiliación con Nextcloud GmbH ni con el Heinlein Group." } },
+        { "@type": "Question", "name": "¿Soporta archivos virtuales?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. NextSync mantiene espejos locales completos de las carpetas que elijas; no trabaja con ficheros bajo demanda." } },
+        { "@type": "Question", "name": "¿Qué servidores soporta?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Nextcloud y OpenCloud hoy, a través de sus CLI oficiales de sincronización. Cualquier plataforma que publique un CLI así puede añadirse detrás de la misma abstracción." } },
+        { "@type": "Question", "name": "¿Envía telemetría?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. Sin telemetría, sin analítica y sin informes de fallos remotos." } }
       ] }
     ]
   }
   </script>
 </head>
 <body>
+  <svg class="sprite" aria-hidden="true" focusable="false"><symbol id="i-sync-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15.251A4.5 4.5 0 0 0 17.5 8h-1.79A7 7 0 1 0 3 13.607"></path><path d="M7 11v4h4"></path><path d="M8 19a5 5 0 0 0 9-3 4.5 4.5 0 0 0-4.5-4.5 4.82 4.82 0 0 0-3.41 1.41L7 15"></path></symbol><symbol id="i-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></symbol>
+<symbol id="i-arrow-left-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></symbol>
+<symbol id="i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></symbol>
+<symbol id="i-arrow-up-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></symbol>
+<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></symbol>
+<symbol id="i-check-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 7 17l-5-5"></path><path d="m22 10-7.5 7.5L13 16"></path></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></symbol>
+<symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></symbol>
+<symbol id="i-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 16 4-4-4-4"></path><path d="m6 8-4 4 4 4"></path><path d="m14.5 4-5 16"></path></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></symbol>
+<symbol id="i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 15 6 6"></path><path d="m15 9 6-6"></path><path d="M21 16v5h-5"></path><path d="M21 8V3h-5"></path><path d="M3 16v5h5"></path><path d="m3 21 6-6"></path><path d="M3 8V3h5"></path><path d="M9 9 3 3"></path></symbol>
+<symbol id="i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path><path d="M14 2v5a1 1 0 0 0 1 1h5"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></symbol>
+<symbol id="i-folder-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v.5"></path><path d="M12 10v4h4"></path><path d="m12 14 1.535-1.605a5 5 0 0 1 8 1.5"></path><path d="M22 22v-4h-4"></path><path d="m22 18-1.535 1.605a5 5 0 0 1-8-1.5"></path></symbol>
+<symbol id="i-github" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></symbol>
+<symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></symbol>
+<symbol id="i-key-round" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle></symbol>
+<symbol id="i-laptop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"></path><path d="M20.054 15.987H3.946"></path></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"></path><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"></path><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path></symbol>
+<symbol id="i-list-ordered" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5h10"></path><path d="M11 12h10"></path><path d="M11 19h10"></path><path d="M4 4h1v5"></path><path d="M4 9h2"></path><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02"></path></symbol>
+<symbol id="i-log-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 17 5-5-5-5"></path><path d="M15 12H3"></path><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"></path><path d="M4 12h16"></path><path d="M4 19h16"></path></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path></symbol>
+<symbol id="i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="18" r="4"></circle><path d="M12 18V2l7 4"></path></symbol>
+<symbol id="i-package" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"></path><path d="M12 22V12"></path><polyline points="3.29 7 12 12 20.71 7"></polyline><path d="m7.5 4.27 9 5.15"></path></symbol>
+<symbol id="i-panel-top" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="3" width="5" height="18" rx="1"></rect><rect x="5" y="3" width="5" height="18" rx="1"></rect></symbol>
+<symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"></path></symbol>
+<symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect><rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></symbol>
+<symbol id="i-shield-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></symbol>
+<symbol id="i-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></symbol>
+<symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></symbol></svg>
+
   <a class="skip-link" href="#main" data-i18n="misc.skip">Saltar al contenido</a>
 
-  <nav class="nav" id="top"><div class="container nav-inner">
-    <a class="nav-logo" href="#top"><img src="assets/icon-symbolic.svg" alt="" width="22" height="22" /><span>NextSync</span></a>
-    <div class="nav-links" id="navLinks">
-      <a href="#features" data-i18n="nav.features">Funciones</a>
-      <a href="#shots" data-i18n="nav.shots">Capturas</a>
-      <a href="#compare" data-i18n="nav.compare">Comparativa</a>
-      <a href="#install" data-i18n="nav.install">Instalar</a>
-      <a href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">GitHub</a>
-    </div>
-    <div class="nav-actions">
-      <a class="icon-btn nav-github" href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener" aria-label="Repositorio en GitHub" data-i18n-aria="misc.github">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#top" aria-label="NextSync">
+        <svg class="icon" width="26" height="26" aria-hidden="true"><use href="#i-sync-mark" /></svg>
+        <span>NextSync</span>
       </a>
-      <select id="langSelect" aria-label="Language / Idioma">
-        <option value="es">ES</option>
-        <option value="en">EN</option>
-      </select>
-      <button id="themeBtn" class="icon-btn" aria-label="Cambiar tema" data-i18n-aria="misc.theme">
-        <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 1a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V2a1 1 0 0 1 1-1zm0 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7-4a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM3 8a1 1 0 0 1-1 1H1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zm10.657-4.657a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM4.464 11.536a1 1 0 0 1 0 1.414l-.707.707a1 1 0 0 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zm9.193 1.414a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 0 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM4.464 3.343a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 0 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM8 13a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1z"/></svg>
-        <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M14.53 10.53a6.5 6.5 0 0 1-9.06-9.06.5.5 0 0 0-.72-.64 7.5 7.5 0 1 0 10.42 10.42.5.5 0 0 0-.64-.72z"/></svg>
-      </button>
-      <a class="btn suggested nav-cta" href="#install" data-i18n="hero.cta1">Instalar</a>
+      <nav class="desktop-nav" aria-label="Principal" data-i18n-aria="nav.main">
+        <a href="#features" data-i18n="nav.features">Funciones</a>
+        <a href="#shots" data-i18n="nav.shots">Capturas</a>
+        <a href="#compare" data-i18n="nav.compare">Comparativa</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button desktop-github" href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener" aria-label="Repositorio en GitHub" data-i18n-aria="misc.github">
+          <svg class="icon" width="19" height="19" aria-hidden="true"><use href="#i-github" /></svg>
+        </a>
+        <div class="language-switch" aria-label="Language / Idioma">
+          <button type="button" data-lang="es" class="active" aria-pressed="true">ES</button>
+          <button type="button" data-lang="en" aria-pressed="false">EN</button>
+        </div>
+        <button type="button" class="icon-button" id="themeBtn" aria-label="Cambiar tema" data-i18n-aria="misc.theme">
+          <svg class="icon i-sun" width="19" height="19" aria-hidden="true"><use href="#i-sun" /></svg>
+          <svg class="icon i-moon" width="19" height="19" aria-hidden="true"><use href="#i-moon" /></svg>
+        </button>
+        <a class="button button-small header-install" href="#install"><span data-i18n="nav.install">Instalar</span>
+          <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-arrow-right" /></svg>
+        </a>
+        <details class="mobile-menu" id="mobileMenu">
+          <summary class="icon-button menu-button" aria-label="Menú" data-i18n-aria="misc.menu">
+            <svg class="icon i-menu" width="21" height="21" aria-hidden="true"><use href="#i-menu" /></svg>
+            <svg class="icon i-close" width="21" height="21" aria-hidden="true"><use href="#i-x" /></svg>
+          </summary>
+          <nav class="mobile-nav" aria-label="Navegación móvil" data-i18n-aria="nav.mobile">
+            <a href="#features" data-i18n="nav.features">Funciones</a>
+            <a href="#shots" data-i18n="nav.shots">Capturas</a>
+            <a href="#compare" data-i18n="nav.compare">Comparativa</a>
+            <a href="#install" data-i18n="nav.install">Instalar</a>
+            <a href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">GitHub</a>
+          </nav>
+        </details>
+      </div>
     </div>
-  </div></nav>
+  </header>
 
   <main id="main">
-    <header class="hero">
-      <div class="hero-bg" aria-hidden="true"></div>
-      <div class="container hero-inner">
-        <span class="eyebrow" data-i18n="hero.eyebrow">Sincronización para GNOME</span>
-        <h1><span data-i18n="hero.t1">Tus archivos, en local.</span><br /><span class="text-accent" data-i18n="hero.t2">Cualquier servidor, en sincronía.</span></h1>
-        <p class="hero-sub" data-i18n="hero.sub">NextSync es una app de escritorio para GNOME que mantiene espejos locales completos de tus cuentas Nextcloud y OpenCloud. Sin nube propia, sin telemetría, sin suscripción.</p>
+    <section class="hero shell" id="top">
+      <div class="hero-copy">
+        <div class="hero-meta">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span data-i18n="hero.eyebrow">Sincronización para GNOME</span>
+          <span>GTK 4 / Rust</span>
+        </div>
+        <h1><span data-i18n="hero.t1">Tus archivos, en local.</span><br /> <em data-i18n="hero.t2">Cualquier servidor, en sincronía.</em></h1>
+        <p class="hero-lead" data-i18n="hero.sub">NextSync es una app de escritorio para GNOME que mantiene espejos locales completos de tus cuentas Nextcloud y OpenCloud. Sin nube propia, sin telemetría, sin suscripción.</p>
         <div class="hero-actions">
-          <a class="btn suggested big hero-install" href="#install" data-i18n="hero.cta1">Instalar</a>
-          <a class="btn big" href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener" data-i18n="hero.cta2">Ver en GitHub</a>
-        </div>
-        <ul class="hero-facts">
-          <li data-i18n="hero.fact1">Binario único en Rust</li>
-          <li>GPL-3.0+</li>
-          <li data-i18n="hero.fact2">Nextcloud y OpenCloud</li>
-          <li data-i18n="hero.fact3">Sin telemetría</li>
-        </ul>
-
-        <div class="sync-widget" role="img" aria-label="Animación: los archivos viajan entre tu equipo y tu servidor" data-i18n-aria="hero.widget">
-          <svg viewBox="0 0 720 260" width="100%" aria-hidden="true">
-            <defs>
-              <path id="flowUp" d="M 170 195 C 260 195, 260 100, 350 100" fill="none" />
-              <path id="flowDown" d="M 370 120 C 460 120, 460 195, 550 195" fill="none" />
-            </defs>
-            <g class="sw-node">
-              <rect x="40" y="150" width="130" height="90" rx="16" />
-              <g transform="translate(88 158) scale(1.42)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sw-glyph">
-                <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8" /><path d="M12 17v4" />
-              </g>
-              <text x="105" y="222" text-anchor="middle" class="sw-label" data-i18n-svg="sw.local">Tu equipo</text>
-            </g>
-            <g class="sw-node">
-              <rect x="550" y="150" width="130" height="90" rx="16" />
-              <g transform="translate(598 158) scale(1.42)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sw-glyph">
-                <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-              </g>
-              <text x="615" y="222" text-anchor="middle" class="sw-label" data-i18n-svg="sw.server">Tu servidor</text>
-            </g>
-            <g class="sw-cloud">
-              <circle cx="360" cy="110" r="46" />
-              <g transform="translate(342 92) scale(1.5)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 3 4 7l4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" />
-              </g>
-            </g>
-            <use href="#flowUp" class="sw-path" />
-            <use href="#flowDown" class="sw-path" />
-            <circle r="7" class="sw-dot up"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#flowUp" /></animateMotion></circle>
-            <circle r="7" class="sw-dot up d2"><animateMotion dur="2.6s" begin="1.3s" repeatCount="indefinite"><mpath href="#flowUp" /></animateMotion></circle>
-            <circle r="7" class="sw-dot down"><animateMotion dur="2.6s" begin="0.6s" repeatCount="indefinite"><mpath href="#flowDown" /></animateMotion></circle>
-            <circle r="7" class="sw-dot down d2"><animateMotion dur="2.6s" begin="1.9s" repeatCount="indefinite"><mpath href="#flowDown" /></animateMotion></circle>
-          </svg>
+          <a class="button" href="#install"><span data-i18n="hero.cta1">Instalar</span>
+            <svg class="icon" width="18" height="18" aria-hidden="true"><use href="#i-arrow-right" /></svg>
+          </a>
+          <a class="text-link" href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">
+            <svg class="icon" width="18" height="18" aria-hidden="true"><use href="#i-github" /></svg>
+            <span data-i18n="hero.cta2">Ver en GitHub</span>
+            <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-arrow-up-right" /></svg>
+          </a>
         </div>
       </div>
-    </header>
 
-    <section class="block" id="principles"><div class="container">
-      <h2 class="reveal" data-i18n="pillars.title">Construido sobre tres principios</h2>
-      <p class="lead reveal" data-i18n="pillars.lead">No son eslóganes de marketing. Condicionan cada decisión del proyecto.</p>
-      <div class="cards three">
-        <article class="card reveal">
-          <h3 data-i18n="pillars.p1t">Agnóstico de servidor</h3>
-          <p data-i18n="pillars.p1d">NextSync no habla el protocolo de un fabricante: delega la sincronización en el CLI oficial del servidor (<code>nextcloudcmd</code>, <code>opencloudcmd</code>). La experiencia de escritorio es la misma para todos.</p>
+      <div class="product-stage sync-hero-stage">
+        <svg class="dot-field" viewBox="0 0 640 440" aria-hidden="true">
+          <defs>
+            <pattern id="dotGrid" width="75" height="65" patternUnits="userSpaceOnUse">
+              <circle cx="20" cy="20" r="1.5" />
+            </pattern>
+          </defs>
+          <rect width="640" height="440" fill="url(#dotGrid)" />
+          <circle class="sync-dot" cx="20" cy="20" r="3" />
+          <circle class="sync-dot" cx="170" cy="150" r="3" />
+          <circle class="sync-dot" cx="470" cy="215" r="3" />
+        </svg>
+        <div class="sync-visual">
+          <div class="sync-scene" id="syncScene" role="img" aria-label="Animación: los archivos viajan entre tu equipo y tu servidor" data-i18n-aria="hero.widget">
+            <div class="sync-node">
+              <svg class="icon" width="34" height="34" aria-hidden="true"><use href="#i-laptop" /></svg>
+              <strong data-i18n="sw.local">Tu equipo</strong>
+              <span data-i18n="sw.localSub">GNOME · copia local</span>
+            </div>
+            <div class="sync-track" id="syncTrack">
+              <div class="sync-direction">
+                <svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-arrow-left-right" /></svg>
+                <span>local / remote</span>
+              </div>
+              <div class="sync-lane">
+                <span class="sync-lane-label" data-i18n="sw.docs">Docs</span>
+                <span class="sync-lane-line" aria-hidden="true"></span>
+                <span class="file-flight" style="--duration:5.8s;animation-delay:-1.2s"><svg class="icon" width="21" height="21" aria-hidden="true"><use href="#i-file-text" /></svg></span>
+              </div>
+              <div class="sync-lane">
+                <span class="sync-lane-label" data-i18n="sw.photos">Fotos</span>
+                <span class="sync-lane-line" aria-hidden="true"></span>
+                <span class="file-flight reverse" style="--duration:6.6s;animation-delay:-3.8s"><svg class="icon" width="21" height="21" aria-hidden="true"><use href="#i-image" /></svg></span>
+              </div>
+              <div class="sync-lane">
+                <span class="sync-lane-label" data-i18n="sw.music">Música</span>
+                <span class="sync-lane-line" aria-hidden="true"></span>
+                <span class="file-flight" style="--duration:7.2s;animation-delay:-2.4s"><svg class="icon" width="21" height="21" aria-hidden="true"><use href="#i-music" /></svg></span>
+              </div>
+            </div>
+            <div class="sync-node">
+              <svg class="icon" width="34" height="34" aria-hidden="true"><use href="#i-server" /></svg>
+              <strong data-i18n="sw.server">Tu servidor</strong>
+              <span>Nextcloud · OpenCloud</span>
+            </div>
+          </div>
+          <div class="sync-visual-footer">
+            <span><span class="live-dot" aria-hidden="true"></span><span data-i18n="sync.live">Cambios sincronizados en ambos sentidos</span></span>
+            <button type="button" class="sync-motion-toggle" id="motionToggle" aria-label="Pausar animación" data-i18n-aria="sync.pauseLabel">
+              <svg class="icon i-pause" width="16" height="16" aria-hidden="true"><use href="#i-pause" /></svg>
+              <svg class="icon i-play" width="16" height="16" aria-hidden="true"><use href="#i-play" /></svg>
+              <span data-i18n="sync.pause">Pausar</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <ul class="hero-facts" aria-label="Datos clave" data-i18n-aria="hero.factsLabel">
+        <li><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-terminal" /></svg><span data-i18n="hero.fact1">Binario único en Rust</span></li>
+        <li><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-code" /></svg><span>GPL-3.0+</span></li>
+        <li><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-folder-sync" /></svg><span data-i18n="hero.fact2">Nextcloud y OpenCloud</span></li>
+        <li><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-shield-check" /></svg><span data-i18n="hero.fact3">Sin telemetría</span></li>
+      </ul>
+    </section>
+
+    <section class="section shell principles" aria-labelledby="principles-title">
+      <div class="section-intro">
+        <h2 id="principles-title" data-i18n="pillars.title">Construido sobre tres principios</h2>
+        <p data-i18n="pillars.lead">No son eslóganes de marketing. Condicionan cada decisión del proyecto.</p>
+      </div>
+      <div class="principle-list">
+        <article class="principle">
+          <svg class="icon" width="25" height="25" aria-hidden="true"><use href="#i-server" /></svg>
+          <div><h3 data-i18n="pillars.p1t">Agnóstico de servidor</h3><p data-i18n="pillars.p1d">NextSync no habla el protocolo de un fabricante: delega la sincronización en el CLI oficial del servidor (nextcloudcmd, opencloudcmd). La experiencia de escritorio es la misma para todos.</p></div>
         </article>
-        <article class="card reveal d1">
-          <h3 data-i18n="pillars.p2t">El motor oficial hace el trabajo</h3>
-          <p data-i18n="pillars.p2d">La sincronización, los conflictos y la seguridad son del motor CLI. NextSync añade la capa GNOME y cubre lo que el CLI deja abierto, como la guardia de borrados masivos.</p>
+        <article class="principle">
+          <svg class="icon" width="25" height="25" aria-hidden="true"><use href="#i-cloud" /></svg>
+          <div><h3 data-i18n="pillars.p2t">El motor oficial hace el trabajo</h3><p data-i18n="pillars.p2d">La sincronización, los conflictos y la seguridad son del motor CLI. NextSync añade la capa GNOME y cubre lo que el CLI deja abierto, como la guardia de borrados masivos.</p></div>
         </article>
-        <article class="card reveal d2">
-          <h3 data-i18n="pillars.p3t">Privado por diseño</h3>
-          <p data-i18n="pillars.p3d">Sin telemetría, sin analítica, sin informes de fallos remotos. Las credenciales viven en GNOME Keyring a través de Secret Service.</p>
+        <article class="principle">
+          <svg class="icon" width="25" height="25" aria-hidden="true"><use href="#i-key-round" /></svg>
+          <div><h3 data-i18n="pillars.p3t">Privado por diseño</h3><p data-i18n="pillars.p3d">Sin telemetría, sin analítica, sin informes de fallos remotos. Las credenciales viven en GNOME Keyring a través de Secret Service.</p></div>
         </article>
       </div>
-    </div></section>
+    </section>
 
-    <section class="block" id="features"><div class="container">
-      <h2 class="reveal" data-i18n="features.title">Lo que hace por ti</h2>
-      <div class="cards two">
-        <article class="card reveal"><h3 data-i18n="features.f1t">Multi-cuenta y multi-carpeta</h3><p data-i18n="features.f1d">Cada cuenta mantiene sus propias carpetas, y cada carpeta tiene su ruta remota (o su space de OpenCloud), su estado y sus disparadores.</p></article>
-        <article class="card reveal d1"><h3 data-i18n="features.f2t">Detección rápida de cambios</h3><p data-i18n="features.f2d">Vigilancia local recursiva con inotify y coalescencia de eventos. Los cambios remotos llegan por notify_push en Nextcloud o por intervalo.</p></article>
-        <article class="card reveal"><h3 data-i18n="features.f3t">Una sola cola por cuenta</h3><p data-i18n="features.f3d">Todos los disparadores confluyen en una cola que coalesce: un cambio local y uno remoto a la vez producen una sola pasada, nunca dos motores sobre la misma carpeta.</p></article>
-        <article class="card reveal d1"><h3 data-i18n="features.f4t">Guardia de borrados</h3><p data-i18n="features.f4d">Un borrado masivo local bloquea la sincronización antes de que el motor lo propague al servidor. Los CLI oficiales no piden confirmación en modo no interactivo; NextSync sí.</p></article>
-        <article class="card reveal"><h3 data-i18n="features.f5t">Vive en la bandeja</h3><p data-i18n="features.f5d">Abrir, registro y salir desde el icono de bandeja. Cerrar la ventana deja la app trabajando en segundo plano.</p></article>
-        <article class="card reveal d1"><h3 data-i18n="features.f6t">Login seguro</h3><p data-i18n="features.f6d">Login Flow v2 por navegador en Nextcloud, app password en OpenCloud. Las credenciales se guardan en el llavero del sistema.</p></article>
+    <section class="section shell features" id="features" aria-labelledby="features-title">
+      <div class="section-intro sticky-intro">
+        <span class="section-label">NextSync / GNOME</span>
+        <h2 id="features-title" data-i18n="features.title">Lo que hace por ti</h2>
+        <p data-i18n="features.lead">Una capa de escritorio cuidada sobre los motores oficiales. Ni más, ni menos.</p>
+        <a class="text-link" href="#shots"><span data-i18n="features.seeUi">Ver la interfaz</span>
+          <svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-arrow-right" /></svg>
+        </a>
       </div>
-    </div></section>
+      <div class="feature-grid">
+        <article class="feature">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-layers" /></svg>
+          <h3 data-i18n="features.f1t">Multi-cuenta y multi-carpeta</h3>
+          <p data-i18n="features.f1d">Cada cuenta mantiene sus propias carpetas, y cada carpeta tiene su ruta remota (o su space de OpenCloud), su estado y sus disparadores.</p>
+        </article>
+        <article class="feature">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-zap" /></svg>
+          <h3 data-i18n="features.f2t">Detección rápida de cambios</h3>
+          <p data-i18n="features.f2d">Vigilancia local recursiva con inotify y coalescencia de eventos. Los cambios remotos llegan por notify_push en Nextcloud o por intervalo.</p>
+        </article>
+        <article class="feature">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-list-ordered" /></svg>
+          <h3 data-i18n="features.f3t">Una sola cola por cuenta</h3>
+          <p data-i18n="features.f3d">Todos los disparadores confluyen en una cola que coalesce: un cambio local y uno remoto a la vez producen una sola pasada, nunca dos motores sobre la misma carpeta.</p>
+        </article>
+        <article class="feature">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-shield-alert" /></svg>
+          <h3 data-i18n="features.f4t">Guardia de borrados</h3>
+          <p data-i18n="features.f4d">Un borrado masivo local bloquea la sincronización antes de que el motor lo propague al servidor. Los CLI oficiales no piden confirmación en modo no interactivo; NextSync sí.</p>
+        </article>
+        <article class="feature">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-panel-top" /></svg>
+          <h3 data-i18n="features.f5t">Vive en la bandeja</h3>
+          <p data-i18n="features.f5d">Abrir, registro y salir desde el icono de bandeja. Cerrar la ventana deja la app trabajando en segundo plano.</p>
+        </article>
+        <article class="feature">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-log-in" /></svg>
+          <h3 data-i18n="features.f6t">Login seguro</h3>
+          <p data-i18n="features.f6d">Login Flow v2 por navegador en Nextcloud, app password en OpenCloud. Las credenciales se guardan en el llavero del sistema.</p>
+        </article>
+      </div>
+    </section>
 
-    <section class="block alt" id="shots"><div class="container">
-      <h2 class="reveal" data-i18n="shots.title">Un vistazo a la interfaz</h2>
-      <p class="lead reveal" data-i18n="shots.lead">Tres ventanas reales de la app, en los dos idiomas y los dos temas.</p>
-      <div class="slider reveal" id="slider">
-        <div class="slider-viewport" id="slideViewport" role="tabpanel">
+    <section class="shots-section" id="shots" aria-labelledby="shots-title">
+      <div class="shell section">
+        <div class="shots-heading">
+          <div class="section-intro">
+            <h2 id="shots-title" data-i18n="shots.title">Un vistazo a la interfaz</h2>
+            <p data-i18n="shots.lead">Tres ventanas reales de la app, en los dos idiomas y los dos temas.</p>
+          </div>
+          <div class="shot-controls">
+            <div class="shot-tabs window-tabs" role="tablist" aria-label="Ventana" data-i18n-aria="shots.windowsLabel">
+              <button type="button" role="tab" data-window="0" class="active" aria-selected="true">
+                <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-panel-top" /></svg><span data-i18n="shots.winMain">Principal</span>
+              </button>
+              <button type="button" role="tab" data-window="1" aria-selected="false">
+                <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-list-ordered" /></svg><span data-i18n="shots.winActivity">Actividad</span>
+              </button>
+              <button type="button" role="tab" data-window="2" aria-selected="false">
+                <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-shield-check" /></svg><span data-i18n="shots.winSettings">Ajustes</span>
+              </button>
+            </div>
+            <div class="shot-controls-row">
+              <div class="shot-tabs theme-tabs" role="tablist" aria-label="Tema" data-i18n-aria="shots.themeLabel">
+                <button type="button" role="tab" data-shot-theme="light" class="active" aria-selected="true">
+                  <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-sun" /></svg><span data-i18n="shots.themeLight">Claro</span>
+                </button>
+                <button type="button" role="tab" data-shot-theme="dark" aria-selected="false">
+                  <svg class="icon" width="16" height="16" aria-hidden="true"><use href="#i-moon" /></svg><span data-i18n="shots.themeDark">Oscuro</span>
+                </button>
+              </div>
+              <div class="arrow-controls">
+                <button type="button" class="icon-button" id="slidePrev" aria-label="Captura anterior" data-i18n-aria="shots.prev">
+                  <svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-left" /></svg>
+                </button>
+                <button type="button" class="icon-button" id="slideNext" aria-label="Captura siguiente" data-i18n-aria="shots.next">
+                  <svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-right" /></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="shot-viewport" type="button" id="shotViewport" aria-label="Captura ampliada" data-i18n-aria="shots.zoom">
           <img id="slideImg"
-            src="assets/shots/main-es-light-960.webp"
+            src="assets/shots/main-es-light-1080.webp"
             srcset="assets/shots/main-es-light-320.webp 320w, assets/shots/main-es-light-640.webp 640w, assets/shots/main-es-light-960.webp 960w, assets/shots/main-es-light-1080.webp 1080w, assets/shots/main-es-light.webp 1440w"
-            sizes="(max-width: 860px) 92vw, 940px"
-            alt="Ventana principal de NextSync con dos cuentas y sus carpetas" width="1440" height="960" draggable="false" />
-        </div>
-        <button class="slider-arrow prev" id="slidePrev" aria-label="Captura anterior" data-i18n-aria="shots.prev">&#10094;</button>
-        <button class="slider-arrow next" id="slideNext" aria-label="Captura siguiente" data-i18n-aria="shots.next">&#10095;</button>
-        <div class="slider-thumbs" id="slideThumbs" role="tablist"></div>
-        <p class="slider-caption" id="slideCaption" aria-live="polite"></p>
+            sizes="(max-width: 860px) 92vw, 1200px"
+            width="1440" height="960" draggable="false"
+            alt="Ventana principal de NextSync con dos cuentas y sus carpetas" />
+          <span class="zoom-hint"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-expand" /></svg><span data-i18n="shots.zoom">Captura ampliada</span></span>
+        </button>
+        <div class="shot-caption"><span id="shotCaption" aria-live="polite">Ventana principal, tema claro</span><span>1440 × 960 · WebP</span></div>
       </div>
-    </div></section>
+    </section>
 
-    <section class="block" id="compare"><div class="container">
-      <h2 class="reveal" data-i18n="compare.title">El compañero GNOME que faltaba</h2>
-      <p class="lead reveal" data-i18n="compare.lead">Comparativa con los clientes de escritorio oficiales, contrastada el 20 de agosto de 2026 contra sus repos públicos.</p>
-      <div class="table-wrap reveal" role="region" tabindex="0" aria-label="Tabla comparativa" data-i18n-aria="compare.tableLabel"><table class="matrix">
-        <thead><tr>
-          <th data-i18n="compare.h0"></th><th>NextSync</th><th>Nextcloud Desktop</th><th>OpenCloud Desktop</th>
-        </tr></thead>
-        <tbody>
-          <tr><td data-i18n="compare.r1">Interfaz nativa GNOME (GTK 4 / Libadwaita)</td><td class="yes">✓</td><td class="no" data-i18n="compare.qt1">✗ (Qt)</td><td class="no" data-i18n="compare.qt2">✗ (Qt)</td></tr>
-          <tr><td data-i18n="compare.r2">Multi-proveedor en una sola app</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td></tr>
-          <tr><td data-i18n="compare.r3">Motor de sync = CLI oficial del servidor</td><td class="yes">✓</td><td class="mid" data-i18n="compare.own1">◐ (motor propio)</td><td class="mid" data-i18n="compare.own2">◐ (motor propio)</td></tr>
-          <tr><td data-i18n="compare.r4">Archivos virtuales bajo demanda</td><td class="no" data-i18n="compare.mirror">✗ (espejo completo)</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-          <tr><td data-i18n="compare.r5">Guardia de borrado masivo</td><td class="yes">✓</td><td class="mid" data-i18n="compare.opt1">◐ (opt-in, solo GUI)</td><td class="mid" data-i18n="compare.opt2">◐ (opt-in, solo GUI)</td></tr>
-          <tr><td data-i18n="compare.r6">Credenciales en el llavero del sistema</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        </tbody>
-      </table></div>
-      <aside class="honest reveal">
-        <h3 data-i18n="compare.ht">Lo que NextSync no hace (todavía)</h3>
+    <section class="section shell compare" id="compare" aria-labelledby="compare-title">
+      <div class="section-intro compare-intro">
+        <h2 id="compare-title" data-i18n="compare.title">El compañero GNOME que faltaba</h2>
+        <p data-i18n="compare.lead">Comparativa con los clientes de escritorio oficiales, contrastada el 20 de agosto de 2026 contra sus repos públicos.</p>
+      </div>
+      <p class="table-hint" data-i18n="compare.hint">Desliza horizontalmente para ver todos los clientes</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Tabla comparativa" data-i18n-aria="compare.tableLabel">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th scope="col" data-i18n="compare.h0">Función</th>
+              <th scope="col" class="nextsync-col"><svg class="icon" width="18" height="18" aria-hidden="true"><use href="#i-sync-mark" /></svg>NextSync</th>
+              <th scope="col">Nextcloud Desktop</th>
+              <th scope="col">OpenCloud Desktop</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row" data-i18n="compare.r1">Interfaz nativa GNOME (GTK 4 / Libadwaita)</th>
+              <td class="nextsync-col"><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span><span data-i18n="compare.qt1">(Qt)</span></span></td>
+              <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span><span data-i18n="compare.qt2">(Qt)</span></span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="compare.r2">Multi-proveedor en una sola app</th>
+              <td class="nextsync-col"><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span></span></td>
+              <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span></span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="compare.r3">Motor de sync = CLI oficial del servidor</th>
+              <td class="nextsync-col"><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-minus" /></svg><span class="sr-only" data-i18n="compare.partial">Parcial</span><span data-i18n="compare.own1">(motor propio)</span></span></td>
+              <td><span class="status-cell"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-minus" /></svg><span class="sr-only" data-i18n="compare.partial">Parcial</span><span data-i18n="compare.own2">(motor propio)</span></span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="compare.r4">Archivos virtuales bajo demanda</th>
+              <td class="nextsync-col"><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span><span data-i18n="compare.mirror">(espejo completo)</span></span></td>
+              <td><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="compare.r5">Guardia de borrado masivo</th>
+              <td class="nextsync-col"><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-minus" /></svg><span class="sr-only" data-i18n="compare.partial">Parcial</span><span data-i18n="compare.opt1">(opt-in, solo GUI)</span></span></td>
+              <td><span class="status-cell"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-minus" /></svg><span class="sr-only" data-i18n="compare.partial">Parcial</span><span data-i18n="compare.opt2">(opt-in, solo GUI)</span></span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="compare.r6">Credenciales en el llavero del sistema</th>
+              <td class="nextsync-col"><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+              <td><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="limits">
+        <div class="limits-title">
+          <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-alert-triangle" /></svg>
+          <h3 data-i18n="compare.ht">Lo que NextSync no hace (todavía)</h3>
+        </div>
         <ul>
           <li data-i18n="compare.h1">No hay archivos virtuales: descarga copias completas de las carpetas que elijas.</li>
           <li data-i18n="compare.h2">Solo Linux con GNOME (o un escritorio con StatusNotifier). Nada de Windows ni macOS.</li>
           <li data-i18n="compare.h3">Es una versión temprana: pruébalo con datos no críticos y mantén copias independientes.</li>
         </ul>
-      </aside>
-    </div></section>
+      </div>
+    </section>
 
-    <section class="block alt" id="install"><div class="container">
-      <h2 class="reveal install-desk" data-i18n="install.title">Instalación fácil y rápida</h2>
-      <p class="lead reveal install-desk" data-i18n="install.lead">En Arch, CachyOS y derivadas hay paquete listo en cada release.</p>
-      <div class="install-mobile">
-        <h2 data-i18n="install.mTitle">Instalación</h2>
-        <p data-i18n="install.mBody">NextSync es una aplicación de escritorio para Linux, pensada para GNOME. No hay versión para Android ni iOS: la instalación se hace en el ordenador.</p>
+    <section class="install-section" id="install" aria-labelledby="install-title">
+      <div class="shell section install-grid">
+        <div class="install-copy">
+          <span class="section-label install-label">Arch · CachyOS · PKGBUILD</span>
+          <h2 id="install-title" class="install-desk" data-i18n="install.title">Instalación fácil y rápida</h2>
+          <p class="install-desk" data-i18n="install.lead">En Arch, CachyOS y derivadas hay paquete listo en cada release.</p>
+          <div class="install-mobile">
+            <h2 data-i18n="install.mTitle">Instalación</h2>
+            <p data-i18n="install.mBody">NextSync es una aplicación de escritorio para Linux, pensada para GNOME. No hay versión para Android ni iOS: la instalación se hace en el ordenador.</p>
+          </div>
+          <a class="button button-dark" href="https://github.com/gnacho/nextsync/releases" target="_blank" rel="noopener">
+            <svg class="icon" width="18" height="18" aria-hidden="true"><use href="#i-package" /></svg>
+            <span data-i18n="install.download">Descargar release</span>
+            <svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-arrow-up-right" /></svg>
+          </a>
+        </div>
+        <div class="install-panel install-card">
+          <div class="command-label">
+            <svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-terminal" /></svg>
+            <span>pacman / x86_64</span>
+          </div>
+          <div class="command-box">
+            <code id="installCmd">sudo pacman -U nextsync-0.2.32-1-x86_64.pkg.tar.zst</code>
+            <button type="button" id="copyBtn" aria-label="Copiar comando" data-i18n-aria="install.copy">
+              <svg class="icon i-copy" width="19" height="19" aria-hidden="true"><use href="#i-copy" /></svg>
+              <svg class="icon i-copied" width="19" height="19" aria-hidden="true"><use href="#i-check-check" /></svg>
+              <span data-i18n="install.copy">Copiar comando</span>
+            </button>
+          </div>
+          <p data-i18n="install.note">Descarga el paquete .pkg.tar.zst más reciente desde GitHub Releases y ajusta el nombre del fichero.</p>
+        </div>
+        <div class="install-details">
+          <article><h3 data-i18n="install.r1t">Requisitos</h3><p data-i18n="install.r1d">Linux con GNOME (o un escritorio con bandeja StatusNotifier). Para cuentas Nextcloud hace falta nextcloudcmd (paquete nextcloud-client en Arch); para OpenCloud, el CLI oficial opencloudcmd.</p></article>
+          <article><h3 data-i18n="install.r2t">Desde el código fuente</h3><p data-i18n="install.r2d">El repo se compila con Cargo: cargo build --release y la batería se comprueba con cargo test. También hay PKGBUILD para generar el paquete localmente.</p></article>
+        </div>
       </div>
-      <div class="card install-card reveal">
-        <pre class="code-block"><code id="installCmd">sudo pacman -U nextsync-0.2.32-1-x86_64.pkg.tar.zst</code></pre>
-        <button class="btn suggested" id="copyBtn" data-i18n="install.copy">Copiar comando</button>
-        <p class="small-print" data-i18n="install.note">Descarga el paquete <code>.pkg.tar.zst</code> más reciente desde <a href="https://github.com/gnacho/nextsync/releases" target="_blank" rel="noopener">GitHub Releases</a> y ajusta el nombre del fichero.</p>
-      </div>
-      <div class="cards two reqs">
-        <article class="card reveal"><h3 data-i18n="install.r1t">Requisitos</h3><p data-i18n="install.r1d">Linux con GNOME (o un escritorio con bandeja StatusNotifier). Para cuentas Nextcloud hace falta <code>nextcloudcmd</code> (paquete <code>nextcloud-client</code> en Arch); para OpenCloud, el CLI oficial <code>opencloudcmd</code>.</p></article>
-        <article class="card reveal d1"><h3 data-i18n="install.r2t">Desde el código fuente</h3><p data-i18n="install.r2d">El repo se compila con Cargo: <code>cargo build --release</code> y la batería se comprueba con <code>cargo test</code>. También hay PKGBUILD para generar el paquete localmente.</p></article>
-      </div>
-    </div></section>
+    </section>
 
-    <section class="block" id="about"><div class="container">
-      <h2 class="reveal" data-i18n="about.title">Por qué existe</h2>
-      <div class="about-text reveal">
+    <section class="section shell about-faq" aria-label="Por qué existe" data-i18n-aria="about.title">
+      <div class="about">
+        <span class="section-label">GPL-3.0+ · Rust</span>
+        <h2 data-i18n="about.title">Por qué existe</h2>
         <p data-i18n="about.p1">NextSync nació de una necesidad concreta: mantener espejos locales completos de varias cuentas Nextcloud y OpenCloud en el escritorio, sin depender de un cliente que solo hable con un servidor. Está escrito en Rust: un binario único, arranque instantáneo y una arquitectura que no ata el proyecto a un proveedor.</p>
         <p data-i18n="about.p2">Es un proyecto personal, GPL-3.0+, gratuito siempre. Corre 24/7 en producción propia y cada versión se prueba ahí primero. Con colaboraciones o apoyo quizás podría crecer más rápido, pero no puedo prometer nada.</p>
+        <a class="text-link" href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener"><span data-i18n="about.code">Explorar el código</span>
+          <svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-arrow-up-right" /></svg>
+        </a>
       </div>
-      <div class="faq reveal" id="faq">
-        <details><summary data-i18n="faq.q1">¿Es un producto oficial de Nextcloud?</summary><p data-i18n="faq.a1">No. NextSync es un proyecto independiente y no oficial, sin afiliación con Nextcloud GmbH ni con el Heinlein Group. Nextcloud es una marca registrada de Nextcloud GmbH.</p></details>
-        <details><summary data-i18n="faq.q2">¿Soporta archivos virtuales?</summary><p data-i18n="faq.a2">No. NextSync mantiene espejos locales completos de las carpetas que elijas; no trabaja con ficheros bajo demanda.</p></details>
-        <details><summary data-i18n="faq.q3">¿Qué servidores soporta?</summary><p data-i18n="faq.a3">Nextcloud y OpenCloud hoy, a través de sus CLI oficiales de sincronización. Cualquier plataforma que publique un CLI así puede añadirse detrás de la misma abstracción.</p></details>
-        <details><summary data-i18n="faq.q4">¿Envía telemetría?</summary><p data-i18n="faq.a4">No. Sin telemetría, sin analítica y sin informes de fallos remotos.</p></details>
+      <div class="faq-list">
+        <details><summary><span data-i18n="faq.q1">¿Es un producto oficial de Nextcloud?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a1">No. NextSync es un proyecto independiente y no oficial, sin afiliación con Nextcloud GmbH ni con el Heinlein Group. Nextcloud es una marca registrada de Nextcloud GmbH.</p></details>
+        <details><summary><span data-i18n="faq.q2">¿Soporta archivos virtuales?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a2">No. NextSync mantiene espejos locales completos de las carpetas que elijas; no trabaja con ficheros bajo demanda.</p></details>
+        <details><summary><span data-i18n="faq.q3">¿Qué servidores soporta?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a3">Nextcloud y OpenCloud hoy, a través de sus CLI oficiales de sincronización. Cualquier plataforma que publique un CLI así puede añadirse detrás de la misma abstracción.</p></details>
+        <details><summary><span data-i18n="faq.q4">¿Envía telemetría?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a4">No. Sin telemetría, sin analítica y sin informes de fallos remotos.</p></details>
       </div>
-    </div></section>
+    </section>
   </main>
 
-  <footer>
-    <div class="container footer-inner">
-      <p class="tagline" data-i18n="footer.tag">Tus archivos, en local. Cualquier servidor, en sincronía.</p>
-      <ul class="bottomlinks">
-        <li><a href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">GitHub</a></li>
-        <li><a href="https://github.com/gnacho/nextsync/issues" target="_blank" rel="noopener" data-i18n="footer.issues">Reportar un problema</a></li>
-        <li><a href="https://github.com/gnacho/nextsync/releases" target="_blank" rel="noopener">Releases</a></li>
-        <li><a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener" data-i18n="footer.license">Licencia GPL-3.0+</a></li>
-      </ul>
-      <p class="copy" data-i18n="footer.copy">NextSync es software libre (GPL-3.0+). Nextcloud es marca de Nextcloud GmbH; OpenCloud es un producto del Heinlein Group. Este sitio no está afiliado a ninguna de las dos empresas.</p>
+  <footer class="site-footer">
+    <div class="shell">
+      <div class="footer-top">
+        <a class="brand" href="#top">
+          <svg class="icon" width="29" height="29" aria-hidden="true"><use href="#i-sync-mark" /></svg>
+          <span>NextSync</span>
+        </a>
+        <p data-i18n="footer.tag">Tus archivos, en local. Cualquier servidor, en sincronía.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/gnacho/nextsync" target="_blank" rel="noopener">GitHub<svg class="icon" width="15" height="15" aria-hidden="true"><use href="#i-arrow-up-right" /></svg></a>
+        <a href="https://github.com/gnacho/nextsync/issues" target="_blank" rel="noopener"><span data-i18n="footer.issues">Reportar un problema</span><svg class="icon" width="15" height="15" aria-hidden="true"><use href="#i-arrow-up-right" /></svg></a>
+        <a href="https://github.com/gnacho/nextsync/releases" target="_blank" rel="noopener">Releases<svg class="icon" width="15" height="15" aria-hidden="true"><use href="#i-arrow-up-right" /></svg></a>
+        <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener"><span data-i18n="footer.license">Licencia GPL-3.0+</span><svg class="icon" width="15" height="15" aria-hidden="true"><use href="#i-arrow-up-right" /></svg></a>
+      </div>
+      <p class="footer-legal" data-i18n="footer.copy">NextSync es software libre (GPL-3.0+). Nextcloud es marca de Nextcloud GmbH; OpenCloud es un producto del Heinlein Group. Este sitio no está afiliado a ninguna de las dos empresas.</p>
     </div>
   </footer>
 
-  <dialog id="lightbox" aria-label="Captura ampliada" data-i18n-aria="shots.zoom">
-    <img id="lightboxImg" src="" alt="" />
-    <button class="lightbox-close" id="lightboxClose" aria-label="Cerrar" data-i18n-aria="misc.close">&#10005;</button>
+  <dialog class="lightbox" id="lightbox" aria-label="Captura ampliada" data-i18n-aria="shots.zoom">
+    <button type="button" class="icon-button lightbox-close" id="lightboxClose" aria-label="Cerrar" data-i18n-aria="misc.close">
+      <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-x" /></svg>
+    </button>
+    <img id="lightboxImg" alt="" />
+    <p id="lightboxCaption"></p>
   </dialog>
 
   <script defer src="https://stat.domatix.com/script.js" data-website-id="0fd3377e-8bba-4651-96e4-82faee5896be"></script>
-  <script src="i18n.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="i18n.js?v=15"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
