@@ -15,9 +15,10 @@
 //! `retention_days`, exactly like `DailyFileHandler`.
 //!
 //! # Deviations from `storage/log.py` (motivated)
-//! - `append(line)` receives an already formatted line; the Python `logging`
-//!   formatter (timestamp + level) lives outside this module, so emitters
-//!   build the full line themselves. There is no `%`-style argument formatting
+//! - `append(line)` receives the message without a timestamp; the logger
+//!   prefixes an RFC 3339 timestamp (local time by default, injectable via
+//!   `timestamp_provider`) before redaction and storage. There is no
+//!   `%`-style argument formatting
 //!   (`test_numeric_format_arguments_remain_numeric` does not apply).
 //! - The daily date defaults to UTC (`utc_date_string`, no `chrono`
 //!   dependency) instead of `dt.date.today()` (local). `date_provider` is
@@ -41,6 +42,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use glib::DateTime;
+
 use crate::util::paths::state_dir;
 use crate::util::redact::Redact;
 
@@ -52,6 +55,8 @@ pub const DEFAULT_RETENTION_DAYS: i64 = 30;
 pub const DEFAULT_PREFIX: &str = "nextsync";
 /// How many trailing bytes to read per backward seek when tailing a file.
 const TAIL_BLOCK_SIZE: usize = 8 * 1024;
+/// RFC 3339 timestamp with a numeric offset (`2026-11-01T17:31:05+01:00`).
+const TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%:z";
 
 /// Options controlling a [`LogBuffer`].
 #[derive(Clone)]
@@ -68,6 +73,9 @@ pub struct LogBufferOptions {
     pub live_history_lines: usize,
     /// Returns the current day as `YYYY-MM-DD`. Defaults to UTC.
     pub date_provider: Option<Rc<dyn Fn() -> String>>,
+    /// Returns the current timestamp as an RFC 3339 string. Defaults to local
+    /// time with its numeric offset.
+    pub timestamp_provider: Option<Rc<dyn Fn() -> String>>,
 }
 
 impl Default for LogBufferOptions {
@@ -79,6 +87,7 @@ impl Default for LogBufferOptions {
             retention_days: DEFAULT_RETENTION_DAYS,
             live_history_lines: DEFAULT_LIVE_HISTORY_LINES,
             date_provider: None,
+            timestamp_provider: None,
         }
     }
 }
@@ -92,6 +101,7 @@ struct Inner {
     retention_days: i64,
     live_history_lines: usize,
     date_provider: Rc<dyn Fn() -> String>,
+    timestamp_provider: Rc<dyn Fn() -> String>,
     live_history: VecDeque<String>,
     active_date: Option<String>,
     stream: Option<BufWriter<File>>,
@@ -141,6 +151,9 @@ impl LogBuffer {
         let date_provider = options
             .date_provider
             .unwrap_or_else(|| Rc::new(utc_date_string));
+        let timestamp_provider = options
+            .timestamp_provider
+            .unwrap_or_else(|| Rc::new(local_timestamp_string));
         Self {
             inner: Rc::new(RefCell::new(Inner {
                 directory: options.directory,
@@ -149,6 +162,7 @@ impl LogBuffer {
                 retention_days: options.retention_days.clamp(1, 365),
                 live_history_lines: options.live_history_lines,
                 date_provider,
+                timestamp_provider,
                 live_history: VecDeque::with_capacity(options.live_history_lines.min(1024)),
                 active_date: None,
                 stream: None,
@@ -199,10 +213,20 @@ impl LogBuffer {
         }
     }
 
-    /// Append a formatted line to the log: redacted, kept in memory, written to
-    /// disk (when enabled) and broadcast to subscribers.
+    /// Append a message to the log: prefixed with an RFC 3339 timestamp,
+    /// redacted, kept in memory, written to disk (when enabled) and broadcast
+    /// to subscribers.
     pub fn append(&self, line: &str) {
-        let safe = Redact::redact_line(line);
+        let timestamp = {
+            let inner = self.inner.borrow();
+            (inner.timestamp_provider)()
+        };
+        let line = if timestamp.is_empty() {
+            line.to_owned()
+        } else {
+            format!("{timestamp} {line}")
+        };
+        let safe = Redact::redact_line(&line);
         {
             let mut inner = self.inner.borrow_mut();
             if inner.live_history.len() == inner.live_history_lines {
@@ -432,6 +456,21 @@ fn utc_date_string() -> String {
     civil_date_from_seconds(seconds)
 }
 
+/// The current local timestamp as RFC 3339 with a numeric offset.
+///
+/// Falls back to UTC with `Z` when the local time zone cannot be resolved.
+fn local_timestamp_string() -> String {
+    DateTime::now_local()
+        .and_then(|date_time| date_time.format(TIMESTAMP_FORMAT))
+        .map(|formatted| formatted.to_string())
+        .unwrap_or_else(|_| {
+            DateTime::now_utc()
+                .and_then(|date_time| date_time.format("%Y-%m-%dT%H:%M:%SZ"))
+                .map(|formatted| formatted.to_string())
+                .unwrap_or_default()
+        })
+}
+
 /// `YYYY-MM-DD` for a Unix timestamp, computed from the days since the epoch
 /// (Howard Hinnant's `civil_from_days`, no `chrono` dependency).
 fn civil_date_from_seconds(seconds: u64) -> String {
@@ -459,12 +498,19 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
+    const TEST_TIMESTAMP: &str = "2026-08-05T12:34:56+02:00";
+
     fn options(directory: &Path) -> LogBufferOptions {
         LogBufferOptions {
             directory: directory.to_path_buf(),
             prefix: "test".to_owned(),
+            timestamp_provider: Some(Rc::new(|| TEST_TIMESTAMP.to_owned())),
             ..Default::default()
         }
+    }
+
+    fn timestamped(line: &str) -> String {
+        format!("{TEST_TIMESTAMP} {line}")
     }
 
     fn provider(day: Rc<RefCell<String>>) -> Rc<dyn Fn() -> String> {
@@ -496,13 +542,13 @@ mod tests {
         logger.append("second");
         assert_eq!(
             *received.borrow(),
-            vec!["first".to_owned(), "second".to_owned()]
+            vec![timestamped("first"), timestamped("second")]
         );
         subscription.unsubscribe();
         logger.append("third");
         assert_eq!(
             *received.borrow(),
-            vec!["first".to_owned(), "second".to_owned()]
+            vec![timestamped("first"), timestamped("second")]
         );
         logger.close();
     }
@@ -516,7 +562,7 @@ mod tests {
         });
         logger.append("live only");
         assert!(logger.line_count() == 1);
-        assert_eq!(logger.tail(500), vec!["live only".to_owned()]);
+        assert_eq!(logger.tail(500), vec![timestamped("live only")]);
         assert_eq!(daily_names(directory.path()), Vec::<String>::new());
         logger.close();
     }
@@ -545,7 +591,11 @@ mod tests {
         assert_eq!(logger.line_count(), 3);
         assert_eq!(
             logger.tail(10),
-            vec!["three".to_owned(), "four".to_owned(), "five".to_owned()]
+            vec![
+                timestamped("three"),
+                timestamped("four"),
+                timestamped("five")
+            ]
         );
         logger.close();
     }
@@ -562,8 +612,29 @@ mod tests {
         // The buffer must expose exactly what Redact::redact_line produces for
         // the same input (the contract the redactor will enforce when Fase 1
         // secrets land).
-        assert_eq!(logger.tail(10), vec![Redact::redact_line(line)]);
+        assert_eq!(
+            logger.tail(10),
+            vec![Redact::redact_line(&timestamped(line))]
+        );
         logger.close();
+    }
+
+    #[test]
+    fn daily_file_lines_start_with_the_timestamp() {
+        let directory = tempfile::tempdir().unwrap();
+        let day = Rc::new(RefCell::new("2026-08-05".to_owned()));
+        let logger = LogBuffer::with_options(LogBufferOptions {
+            date_provider: Some(provider(day)),
+            ..options(directory.path())
+        });
+        logger.append("folder · Synchronization completed");
+        logger.close();
+        let path = directory.path().join("test-2026-08-05.log");
+        let content = fs::read_to_string(path).unwrap();
+        assert_eq!(
+            content,
+            format!("{}\n", timestamped("folder · Synchronization completed"))
+        );
     }
 
     #[test]
@@ -674,7 +745,7 @@ mod tests {
         logger.close();
         assert_eq!(logger.line_count(), 0);
         logger.append("after");
-        assert_eq!(*received.borrow(), vec!["before".to_owned()]);
+        assert_eq!(*received.borrow(), vec![timestamped("before")]);
     }
 
     #[test]
