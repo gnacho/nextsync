@@ -361,7 +361,7 @@ impl AccountView {
                 on_install_engine: {
                     let provider = account.provider;
                     let folder_runtime = folder_runtime.clone();
-                    if crate::ui::setup::engine_present_for(provider) {
+                    if crate::ui::setup::engine_present_for(provider, true) {
                         None
                     } else {
                         Some(Rc::new(move |parent: &gtk4::Widget| {
