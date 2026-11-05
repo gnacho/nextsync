@@ -149,6 +149,13 @@ pub fn reconcile(
 
         match (l, r, j) {
             (Some(l), Some(r), Some(j)) => {
+                // Directories carry no content: a changed mtime only means a
+                // child appeared or vanished. Conflicting them renamed whole
+                // folders (and their contents) on the user's disk.
+                if l.is_dir && r.is_dir {
+                    actions.push(Action::RecordOnly { rel: key.to_string() });
+                    continue;
+                }
                 let remote_changed = r.etag != j.etag;
                 let local_changed =
                     l.size != j.size || l.mtime != j.mtime || (j.inode != 0 && l.inode != j.inode);
@@ -268,6 +275,27 @@ fn sort_plan(actions: &mut [Action]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directories_never_conflict_even_when_both_sides_changed() {
+        // A directory's mtime moves when a child appears or vanishes, so both
+        // sides always look "changed". That must never rename the folder.
+        let mut local = ldir("docs");
+        local.mtime = 500;
+        let mut remote = rdir("docs");
+        remote.mtime = Some(900);
+        remote.etag = "different".into();
+        let mut entry = db("docs", 0, 100, "old", None);
+        entry.mtime = 100;
+        entry.etag = "old".into();
+        let actions = reconcile(&[local], &[remote], &[entry], true);
+        assert_eq!(actions.len(), 1);
+        assert!(
+            matches!(actions[0], Action::RecordOnly { .. }),
+            "expected RecordOnly, got {:?}",
+            actions[0]
+        );
+    }
 
     fn loc(rel: &str, size: u64, mtime: i64, inode: u64) -> LocalEntry {
         LocalEntry {

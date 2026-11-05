@@ -295,6 +295,11 @@ impl Engine {
             Action::Conflict { rel } => {
                 progress("conflict", rel);
                 let path = self.local_path(rel);
+                if path.is_dir() {
+                    // Directories carry no content, so a conflict on one is a
+                    // planner artefact. Renaming it would move the whole tree.
+                    return Ok(());
+                }
                 if path.exists() {
                     let mut target = path.with_file_name(conflict_name(&path)?);
                     let mut n = 2;
