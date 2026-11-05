@@ -4,7 +4,9 @@ use crate::db::{DbEntry, StateDb};
 use crate::http::{percent_encode_path, HttpClient, HttpOptions, RemoteEntry};
 use crate::local::{scan_local, LocalEntry};
 use crate::reconcile::{reconcile, Action};
-use crate::{CancelToken, EngineConfig, Error, ExitState, Progress, ProgressSink, Provider, Result};
+use crate::{
+    CancelToken, EngineConfig, Error, ExitState, Progress, ProgressSink, Provider, Result,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -96,8 +98,7 @@ impl Engine {
             return Ok(summary);
         }
 
-        let loc: BTreeMap<&str, &LocalEntry> =
-            local.iter().map(|e| (e.rel.as_str(), e)).collect();
+        let loc: BTreeMap<&str, &LocalEntry> = local.iter().map(|e| (e.rel.as_str(), e)).collect();
         let rem: BTreeMap<&str, &RemoteEntry> =
             remote.iter().map(|e| (e.path.as_str(), e)).collect();
         let mut processed = 0u32;
@@ -111,7 +112,9 @@ impl Engine {
                 continue;
             }
             processed += 1;
-            match self.apply(&http, &endpoints, action, &loc, &rem, &db, sink, processed, cancel) {
+            match self.apply(
+                &http, &endpoints, action, &loc, &rem, &db, sink, processed, cancel,
+            ) {
                 Ok(()) => match action {
                     Action::Download { .. } => summary.downloaded += 1,
                     Action::Upload { .. } => summary.uploaded += 1,
@@ -142,12 +145,7 @@ impl Engine {
         Ok(summary)
     }
 
-    fn guard_deletes(
-        &self,
-        plan: &[Action],
-        local: &[LocalEntry],
-        db: &StateDb,
-    ) -> Result<()> {
+    fn guard_deletes(&self, plan: &[Action], local: &[LocalEntry], db: &StateDb) -> Result<()> {
         if !self.cfg.delete_guard.enabled {
             return Ok(());
         }
@@ -164,7 +162,9 @@ impl Engine {
                 "local folder is empty but the journal is not; refusing to delete".into(),
             ));
         }
-        if deletes >= self.cfg.delete_guard.min_group && ratio > self.cfg.delete_guard.max_delete_ratio {
+        if deletes >= self.cfg.delete_guard.min_group
+            && ratio > self.cfg.delete_guard.max_delete_ratio
+        {
             return Err(Error::Safety(format!(
                 "{deletes} of {total} actions are deletions (limit {:.0}%)",
                 self.cfg.delete_guard.max_delete_ratio * 100.0
@@ -205,7 +205,9 @@ impl Engine {
                 let _ = http.mkcol(&self.url(ep, rel));
                 self.record(db, action, loc, rem)
             }
-            Action::Download { rel, etag, mtime, .. } => {
+            Action::Download {
+                rel, etag, mtime, ..
+            } => {
                 progress("download", rel);
                 let url = self.url(ep, rel);
                 let dest = self.local_path(rel);
@@ -345,7 +347,10 @@ impl Engine {
         let path = self.local_path(rel);
         let meta = std::fs::symlink_metadata(&path).ok();
         let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-        let size = meta.as_ref().map(|m| if is_dir { 0 } else { m.len() }).unwrap_or(0);
+        let size = meta
+            .as_ref()
+            .map(|m| if is_dir { 0 } else { m.len() })
+            .unwrap_or(0);
         let mtime = meta
             .as_ref()
             .and_then(|m| m.modified().ok())
@@ -362,7 +367,6 @@ impl Engine {
             inode: inode_of_meta(meta.as_ref()),
         })
     }
-
 
     fn ensure_remote_root(&self, http: &HttpClient) -> Result<()> {
         let segments: Vec<&str> = self
@@ -452,7 +456,10 @@ impl Engine {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            sink.event(Progress::new("checking", if prefix.is_empty() { "/" } else { &prefix }));
+            sink.event(Progress::new(
+                "checking",
+                if prefix.is_empty() { "/" } else { &prefix },
+            ));
             let entries = match http.propfind(&url, "1") {
                 Ok(e) => e,
                 Err(Error::NotFound(_)) => {
@@ -473,7 +480,10 @@ impl Engine {
                 };
                 entry.path = rel.clone();
                 if entry.is_dir {
-                    queue.push((rel.clone(), format!("{}/{}", ep.remote_root, percent_encode_path(&rel))));
+                    queue.push((
+                        rel.clone(),
+                        format!("{}/{}", ep.remote_root, percent_encode_path(&rel)),
+                    ));
                 }
                 out.push(entry);
             }
@@ -538,13 +548,13 @@ fn resolve_space(http: &HttpClient, base: &str) -> Result<String> {
         .get("value")
         .and_then(|v| v.as_array())
         .ok_or_else(|| Error::Config("graph: no drives".into()))?;
-    let personal = drives.iter().find(|d| {
-        d.get("driveType").and_then(|v| v.as_str()) == Some("personal")
-    });
+    let personal = drives
+        .iter()
+        .find(|d| d.get("driveType").and_then(|v| v.as_str()) == Some("personal"));
     let chosen = personal.or_else(|| {
-        drives.iter().find(|d| {
-            d.get("driveType").and_then(|v| v.as_str()) != Some("virtual")
-        })
+        drives
+            .iter()
+            .find(|d| d.get("driveType").and_then(|v| v.as_str()) != Some("virtual"))
     });
     chosen
         .and_then(|d| d.get("id").and_then(|v| v.as_str()))
@@ -559,7 +569,11 @@ pub fn conflict_name(path: &std::path::Path) -> Result<String> {
 }
 
 pub fn conflict_name_n(path: &std::path::Path, n: u32) -> Result<String> {
-    let suffix = if n == 1 { String::new() } else { format!(" {n}") };
+    let suffix = if n == 1 {
+        String::new()
+    } else {
+        format!(" {n}")
+    };
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -632,6 +646,9 @@ mod tests {
     #[test]
     fn joins_remote_paths() {
         assert_eq!(join_remote("https://h/a", ""), "https://h/a");
-        assert_eq!(join_remote("https://h/a", "/Docs/x y"), "https://h/a/Docs/x%20y");
+        assert_eq!(
+            join_remote("https://h/a", "/Docs/x y"),
+            "https://h/a/Docs/x%20y"
+        );
     }
 }

@@ -183,7 +183,11 @@ impl Default for CancelToken {
 pub enum Error {
     Auth(String),
     NotFound(String),
-    Http { status: u16, url: String, body: String },
+    Http {
+        status: u16,
+        url: String,
+        body: String,
+    },
     Transport(String),
     Io(std::io::Error),
     Db(rusqlite::Error),

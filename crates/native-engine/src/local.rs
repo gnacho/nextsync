@@ -96,9 +96,11 @@ fn excluded(rel: &str, name: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
     if !cfg.sync_hidden_files && name.starts_with('.') && name != "." {
         return true;
     }
-    cfg.exclude_patterns
-        .iter()
-        .any(|p| matches_pattern(p, rel) || matches_pattern(p, name) || (is_dir && matches_pattern(p, &format!("{rel}/"))))
+    cfg.exclude_patterns.iter().any(|p| {
+        matches_pattern(p, rel)
+            || matches_pattern(p, name)
+            || (is_dir && matches_pattern(p, &format!("{rel}/")))
+    })
 }
 
 /// Minimal glob: `*` (any run), `?` (one char). Everything else literal.

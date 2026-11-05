@@ -892,7 +892,9 @@ pub(crate) fn native_engine_row(
 ) -> libadwaita::SwitchRow {
     let row = libadwaita::SwitchRow::builder()
         .title(t("Use the native synchronization engine"))
-        .subtitle(t("Sync without nextcloudcmd or opencloudcmd. Recommended. Experimental."))
+        .subtitle(t(
+            "Sync without nextcloudcmd or opencloudcmd. Recommended. Experimental.",
+        ))
         .active(account.sync.native_engine)
         .build();
     let store = store.clone();

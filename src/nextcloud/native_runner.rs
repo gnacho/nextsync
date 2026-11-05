@@ -17,9 +17,7 @@ struct ChannelSink(async_channel::Sender<SyncProgress>);
 
 impl ProgressSink for ChannelSink {
     fn event(&self, p: Progress) {
-        let _ = self
-            .0
-            .send_blocking(SyncProgress::new(p.action, p.path));
+        let _ = self.0.send_blocking(SyncProgress::new(p.action, p.path));
     }
 }
 
@@ -67,8 +65,8 @@ impl NativeEngineRunner {
             self.folder.remote_path.clone(),
         );
         cfg.space_id = self.folder.space_id.clone();
-        cfg.trust_invalid_certificates = self.account.trust_invalid_certificates
-            || self.network.trust_invalid_certificates;
+        cfg.trust_invalid_certificates =
+            self.account.trust_invalid_certificates || self.network.trust_invalid_certificates;
         cfg.proxy = self
             .account
             .custom_proxy
@@ -183,7 +181,10 @@ mod tests {
     fn config_maps_account_and_network_settings() {
         let (tx, _rx) = async_channel::bounded(4);
         let runner = NativeEngineRunner::new(
-            account(crate::nextcloud::driver::Provider::OpenCloud, "https://cloud.example.com/"),
+            account(
+                crate::nextcloud::driver::Provider::OpenCloud,
+                "https://cloud.example.com/",
+            ),
             folder("/tmp/ignored"),
             NetworkConfig::default(),
             tx,
@@ -219,7 +220,8 @@ mod tests {
     #[test]
     #[ignore]
     fn native_engine_runs_through_app_wiring() {
-        let url = std::env::var("NXS_E2E_NC_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".into());
+        let url =
+            std::env::var("NXS_E2E_NC_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".into());
         let password = std::env::var("NXS_E2E_PASS").unwrap_or_else(|_| "admin1234".into());
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("runner.txt"), b"runner wiring").expect("write file");

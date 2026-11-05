@@ -201,7 +201,10 @@ pub fn parse_multistatus(xml: &str, request_url: &str) -> Result<Vec<RemoteEntry
     let doc = Document::parse(xml).map_err(|e| Error::Xml(e.to_string()))?;
     let prefix = url_prefix(request_url);
     let mut out = Vec::new();
-    for resp in doc.descendants().filter(|n| n.has_tag_name(("DAV:", "response"))) {
+    for resp in doc
+        .descendants()
+        .filter(|n| n.has_tag_name(("DAV:", "response")))
+    {
         let href = resp
             .descendants()
             .find(|n| n.has_tag_name(("DAV:", "href")))
@@ -223,7 +226,10 @@ pub fn parse_multistatus(xml: &str, request_url: &str) -> Result<Vec<RemoteEntry
         let mut etag = String::new();
         let mut fileid = None;
         let mut mtime = None;
-        for propstat in resp.descendants().filter(|n| n.has_tag_name(("DAV:", "propstat"))) {
+        for propstat in resp
+            .descendants()
+            .filter(|n| n.has_tag_name(("DAV:", "propstat")))
+        {
             let ok = propstat
                 .descendants()
                 .find(|n| n.has_tag_name(("DAV:", "status")))
@@ -240,13 +246,22 @@ pub fn parse_multistatus(xml: &str, request_url: &str) -> Result<Vec<RemoteEntry
                 .flat_map(|p| p.children().filter(|c| c.is_element()))
             {
                 match prop.tag_name().name() {
-                    "getetag" => etag = prop.text().unwrap_or_default().trim().trim_matches('"').to_string(),
+                    "getetag" => {
+                        etag = prop
+                            .text()
+                            .unwrap_or_default()
+                            .trim()
+                            .trim_matches('"')
+                            .to_string()
+                    }
                     "getcontentlength" => {
                         size = prop.text().unwrap_or_default().trim().parse().unwrap_or(0)
                     }
                     "getlastmodified" => mtime = prop.text().and_then(parse_http_date),
                     "resourcetype" => {
-                        is_dir = prop.children().any(|c| c.has_tag_name(("DAV:", "collection")))
+                        is_dir = prop
+                            .children()
+                            .any(|c| c.has_tag_name(("DAV:", "collection")))
                     }
                     "fileid" => fileid = prop.text().map(|t| t.trim().to_string()),
                     _ => {}
@@ -318,8 +333,16 @@ pub fn base64_encode(input: &[u8]) -> String {
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -327,10 +350,12 @@ pub fn base64_encode(input: &[u8]) -> String {
 pub fn parse_http_date(value: &str) -> Option<i64> {
     let v = value.trim();
     let month = |m: &str| {
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-            .iter()
-            .position(|x| x.eq_ignore_ascii_case(m))
-            .map(|i| i as i64 + 1)
+        [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ]
+        .iter()
+        .position(|x| x.eq_ignore_ascii_case(m))
+        .map(|i| i as i64 + 1)
     };
     let parts: Vec<&str> = v.split_whitespace().collect();
     if parts.len() < 5 {
@@ -389,7 +414,10 @@ mod tests {
         assert_eq!(file.size, 12);
         assert_eq!(file.etag, "ghi");
         let mtime = file.mtime.expect("mtime parsed");
-        assert!(mtime > 1_700_000_000 && mtime < 1_900_000_000, "mtime {mtime}");
+        assert!(
+            mtime > 1_700_000_000 && mtime < 1_900_000_000,
+            "mtime {mtime}"
+        );
     }
 
     #[test]

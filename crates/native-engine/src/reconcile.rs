@@ -7,16 +7,41 @@ use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Download { rel: String, etag: String, size: u64, mtime: Option<i64> },
-    Upload { rel: String },
-    DeleteLocal { rel: String },
-    DeleteRemote { rel: String },
-    MkdirLocal { rel: String },
-    MkdirRemote { rel: String },
-    MoveLocal { from: String, to: String },
-    MoveRemote { from: String, to: String },
-    Conflict { rel: String },
-    RecordOnly { rel: String },
+    Download {
+        rel: String,
+        etag: String,
+        size: u64,
+        mtime: Option<i64>,
+    },
+    Upload {
+        rel: String,
+    },
+    DeleteLocal {
+        rel: String,
+    },
+    DeleteRemote {
+        rel: String,
+    },
+    MkdirLocal {
+        rel: String,
+    },
+    MkdirRemote {
+        rel: String,
+    },
+    MoveLocal {
+        from: String,
+        to: String,
+    },
+    MoveRemote {
+        from: String,
+        to: String,
+    },
+    Conflict {
+        rel: String,
+    },
+    RecordOnly {
+        rel: String,
+    },
 }
 
 impl Action {
@@ -35,7 +60,10 @@ impl Action {
     }
 
     pub fn is_delete(&self) -> bool {
-        matches!(self, Action::DeleteLocal { .. } | Action::DeleteRemote { .. })
+        matches!(
+            self,
+            Action::DeleteLocal { .. } | Action::DeleteRemote { .. }
+        )
     }
 
     pub fn is_write(&self) -> bool {
@@ -72,8 +100,12 @@ pub fn reconcile(
             if r.is_dir {
                 continue;
             }
-            let Some(fid) = r.fileid.as_deref() else { continue };
-            let Some(old) = by_fileid.get(fid) else { continue };
+            let Some(fid) = r.fileid.as_deref() else {
+                continue;
+            };
+            let Some(old) = by_fileid.get(fid) else {
+                continue;
+            };
             if old.path == r.path {
                 continue;
             }
@@ -117,11 +149,12 @@ pub fn reconcile(
         match (l, r, j) {
             (Some(l), Some(r), Some(j)) => {
                 let remote_changed = r.etag != j.etag;
-                let local_changed = l.size != j.size
-                    || l.mtime != j.mtime
-                    || (j.inode != 0 && l.inode != j.inode);
+                let local_changed =
+                    l.size != j.size || l.mtime != j.mtime || (j.inode != 0 && l.inode != j.inode);
                 if l.is_dir != r.is_dir || (remote_changed && local_changed) {
-                    actions.push(Action::Conflict { rel: key.to_string() });
+                    actions.push(Action::Conflict {
+                        rel: key.to_string(),
+                    });
                 } else if remote_changed && !l.is_dir {
                     actions.push(Action::Download {
                         rel: key.to_string(),
@@ -130,9 +163,13 @@ pub fn reconcile(
                         mtime: r.mtime,
                     });
                 } else if local_changed && !l.is_dir {
-                    actions.push(Action::Upload { rel: key.to_string() });
+                    actions.push(Action::Upload {
+                        rel: key.to_string(),
+                    });
                 } else {
-                    actions.push(Action::RecordOnly { rel: key.to_string() });
+                    actions.push(Action::RecordOnly {
+                        rel: key.to_string(),
+                    });
                 }
             }
             (Some(l), None, Some(_)) => {
@@ -140,28 +177,40 @@ pub fn reconcile(
                     continue;
                 }
                 let _ = l;
-                actions.push(Action::DeleteLocal { rel: key.to_string() });
+                actions.push(Action::DeleteLocal {
+                    rel: key.to_string(),
+                });
             }
             (None, Some(_r), Some(_)) => {
                 if remote_scan_complete {
-                    actions.push(Action::DeleteRemote { rel: key.to_string() });
+                    actions.push(Action::DeleteRemote {
+                        rel: key.to_string(),
+                    });
                 }
             }
             (None, None, Some(_)) => {
                 if remote_scan_complete {
-                    actions.push(Action::DeleteRemote { rel: key.to_string() });
+                    actions.push(Action::DeleteRemote {
+                        rel: key.to_string(),
+                    });
                 }
             }
             (Some(l), None, None) => {
                 if l.is_dir {
-                    actions.push(Action::MkdirRemote { rel: key.to_string() });
+                    actions.push(Action::MkdirRemote {
+                        rel: key.to_string(),
+                    });
                 } else {
-                    actions.push(Action::Upload { rel: key.to_string() });
+                    actions.push(Action::Upload {
+                        rel: key.to_string(),
+                    });
                 }
             }
             (None, Some(r), None) => {
                 if r.is_dir {
-                    actions.push(Action::MkdirLocal { rel: key.to_string() });
+                    actions.push(Action::MkdirLocal {
+                        rel: key.to_string(),
+                    });
                 } else {
                     actions.push(Action::Download {
                         rel: key.to_string(),
@@ -175,9 +224,13 @@ pub fn reconcile(
                 if (l.is_dir && r.is_dir)
                     || (!l.is_dir && !r.is_dir && l.size == r.size && same_mtime(l.mtime, r.mtime))
                 {
-                    actions.push(Action::RecordOnly { rel: key.to_string() });
+                    actions.push(Action::RecordOnly {
+                        rel: key.to_string(),
+                    });
                 } else {
-                    actions.push(Action::Conflict { rel: key.to_string() });
+                    actions.push(Action::Conflict {
+                        rel: key.to_string(),
+                    });
                 }
             }
             (None, None, None) => {}
@@ -311,7 +364,9 @@ mod tests {
     fn new_local_uploads_new_remote_downloads() {
         let acts = reconcile(&[loc("l", 1, 1, 1)], &[rem("r", "e", None)], &[], true);
         assert!(acts.contains(&Action::Upload { rel: "l".into() }));
-        assert!(acts.iter().any(|a| matches!(a, Action::Download { rel, .. } if rel == "r")));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::Download { rel, .. } if rel == "r")));
     }
 
     #[test]
@@ -369,7 +424,12 @@ mod tests {
 
     #[test]
     fn incomplete_remote_scan_never_deletes() {
-        let acts = reconcile(&[loc("a", 1, 1, 1)], &[], &[db("a", 1, 1, "e", None)], false);
+        let acts = reconcile(
+            &[loc("a", 1, 1, 1)],
+            &[],
+            &[db("a", 1, 1, "e", None)],
+            false,
+        );
         assert!(!acts.iter().any(|a| a.is_delete()));
     }
 }

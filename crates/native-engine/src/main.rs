@@ -61,7 +61,14 @@ fn main() {
         eprintln!("missing --local");
         std::process::exit(64);
     };
-    let mut cfg = EngineConfig::new(provider, url, user, password, local, get("remote").unwrap_or_default());
+    let mut cfg = EngineConfig::new(
+        provider,
+        url,
+        user,
+        password,
+        local,
+        get("remote").unwrap_or_default(),
+    );
     cfg.space_id = get("space-id");
     cfg.dry_run = flags.iter().any(|f| f == "dry-run");
     cfg.sync_hidden_files = !flags.iter().any(|f| f == "no-hidden");

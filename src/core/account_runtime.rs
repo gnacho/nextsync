@@ -971,14 +971,7 @@ impl AccountRuntime {
             return;
         }
         let (runner, progress_rx) =
-            FolderRuntime::engine_for(
-                &self.account,
-                &folder,
-                &self.network,
-                None,
-                None,
-                None,
-            );
+            FolderRuntime::engine_for(&self.account, &folder, &self.network, None, None, None);
         let runtime = FolderRuntime::new(
             &self.account,
             folder,

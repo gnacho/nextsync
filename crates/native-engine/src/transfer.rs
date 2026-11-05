@@ -2,10 +2,10 @@
 
 use crate::http::HttpClient;
 use crate::{CancelToken, Error, Result};
+use sha1::{Digest, Sha1};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use sha1::{Digest, Sha1};
 
 const CHUNK: u64 = 10 * 1024 * 1024;
 const CHECKSUM_LIMIT: u64 = 100 * 1024 * 1024;
@@ -78,11 +78,23 @@ pub fn upload(
     if size >= threshold {
         match provider {
             crate::Provider::Nextcloud => chunked_v2(
-                client, local, upload_root, dest_url, mtime, max_retries, cancel,
+                client,
+                local,
+                upload_root,
+                dest_url,
+                mtime,
+                max_retries,
+                cancel,
             ),
-            crate::Provider::OpenCloud => {
-                tus(client, local, space_root, dest_url, mtime, max_retries, cancel)
-            }
+            crate::Provider::OpenCloud => tus(
+                client,
+                local,
+                space_root,
+                dest_url,
+                mtime,
+                max_retries,
+                cancel,
+            ),
         }
     } else {
         let mut last = None;
@@ -408,7 +420,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("a.txt");
         std::fs::write(&p, b"abc").unwrap();
-        assert_eq!(sha1_hex(&p).unwrap(), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            sha1_hex(&p).unwrap(),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
     }
 
     #[test]
