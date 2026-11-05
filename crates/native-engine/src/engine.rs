@@ -732,6 +732,7 @@ mod tests {
             etag: "e1".into(),
             fileid: None,
             mtime: Some(10),
+            checksum: None,
         }]
         .into_iter()
         .filter(|e| !crate::local::is_excluded(&e.path, e.is_dir, &engine.cfg))

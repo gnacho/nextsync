@@ -9,11 +9,14 @@ Todas las versiones notables de NextSync se documentan aquí. El formato sigue [
 - The native Rust engine is the default for every account. Configurations written by older versions move over once through the schema v8 migration; turning the switch off in Settings still falls back to `nextcloudcmd` or `opencloudcmd` (#262).
 - The setup wizard no longer blocks finishing when the external client is missing, and the folder menu only offers to install it for accounts that opted out of the native engine (#262).
 - The README and the landing describe the engine the app actually runs, including what the first run does on an account that the external client synchronized before (#262).
+- Engine hardening: bytes done and total during transfers, downloads and chunked uploads that resume, download verification against the server checksum, `Retry-After` on rate limits, and a chunked upload whose final step no longer reports a discarded failure as success (#264).
+- Flathub metadata, manifest and screenshot set, with every icon under the `io.github.gnacho.nextsync` namespace (#264).
 
 ### Fixed
 
 - The native engine builds its HTTP client with the system root certificates. Without them every run panicked before the first request and every folder reported a sync error (0.41 shipped it broken behind the opt-in switch) (#262).
 - The sync exclusions apply to the remote listing and the journal, not only to the local scan. An excluded file that exists on the server was downloaded and, because the local scan never reports it, proposed as a remote deletion on the next run (#262).
+- OpenCloud TUS uploads are created on the destination collection with a bare file name. A path in the metadata is rejected with 412, so any nested file above the chunk threshold failed to upload and took its folder down with it (#262).
 
 ## [0.41.0] - 2026-11-05
 
