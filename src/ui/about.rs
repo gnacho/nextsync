@@ -62,7 +62,7 @@ pub fn build_about_dialog(version: &str) -> libadwaita::AboutDialog {
     dialog.add_link(t("Complete changelog"), CHANGELOG_URL);
     dialog.add_acknowledgement_section(
         Some(t("Synchronization Engine")),
-        &["Nextcloud nextcloudcmd"],
+        &["native-engine", "Nextcloud and OpenCloud WebDAV protocol"],
     );
     dialog.add_acknowledgement_section(
         Some(t("Desktop Technologies")),

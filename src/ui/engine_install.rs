@@ -20,7 +20,7 @@ use crate::util::i18n::t;
 
 /// The translated dialog body for one provider/plan pair (pure, testable).
 pub(crate) fn install_dialog_text(provider: Provider, plan: &InstallPlan) -> String {
-    let hint = engine_install_hint(provider, false).unwrap_or_default();
+    let hint = engine_install_hint(provider, false, false).unwrap_or_default();
     match plan {
         InstallPlan::Automatic { command, .. } => {
             format!(
@@ -140,7 +140,7 @@ pub fn present_engine_install_dialog(
                     // did not have on `$PATH`; re-check before declaring
                     // success and keep the manual fallback otherwise.
                     let ran_ok = matches!(&outcome, Ok(Ok(output)) if output.status.success());
-                    if ran_ok && engine_present_for(provider) {
+                    if ran_ok && engine_present_for(provider, false) {
                         dialog_w.force_close();
                         on_installed();
                         return;

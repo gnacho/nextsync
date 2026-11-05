@@ -459,13 +459,13 @@ fn build_welcome_page(ctx: &SetupContext) {
     provider_group.add(&ctx.widgets.provider_row);
     content.append(&provider_group);
 
-    update_provider_warning(&ctx.widgets.provider_warning, Provider::default());
+    update_provider_warning(&ctx.widgets.provider_warning, Provider::default(), true);
     content.append(&ctx.widgets.provider_warning);
 
     let warning = ctx.widgets.provider_warning.clone();
     let provider_row = ctx.widgets.provider_row.clone();
     provider_row.connect_selected_notify(move |row| {
-        update_provider_warning(&warning, provider_from_combo(row));
+        update_provider_warning(&warning, provider_from_combo(row), true);
     });
 
     let continue_button = gtk4::Button::with_label(t("Continue"));
@@ -479,6 +479,7 @@ fn build_welcome_page(ctx: &SetupContext) {
             update_provider_warning(
                 &ctx.widgets.provider_warning,
                 provider_from_combo(&ctx.widgets.provider_row),
+                true,
             );
             ctx.stack.set_visible_child_name("server");
         });
@@ -1429,7 +1430,7 @@ fn finish_setup(ctx: &SetupContext) {
     // provider in the state is the freshly selected one, so switching
     // providers re-evaluates the check for the new engine.
     let provider = ctx.state.borrow().provider;
-    if engine_install_hint(provider, engine_present_for(provider)).is_some() {
+    if engine_install_hint(provider, engine_present_for(provider, true), true).is_some() {
         // Issue #218: the blocking dialog offers one-click installation of
         // the provider's engine package; once installed, the finish gate
         // passes on the next attempt.
@@ -1663,7 +1664,11 @@ fn fill_first_sync_template(template: &str, account: &str, count: usize, folders
 }
 
 /// Whether the given provider's sync binary is missing, for the welcome banner.
-fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider) {
+fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider, native: bool) {
+    if native {
+        banner.set_revealed(false);
+        return;
+    }
     match provider {
         Provider::Nextcloud if find_binary("nextcloudcmd").is_none() => {
             banner.set_title(
@@ -1683,7 +1688,10 @@ fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider) {
 
 /// Whether the selected provider's sync binary is available on `$PATH`
 /// (issue #210; reused by the install dialog, issue #218).
-pub(crate) fn engine_present_for(provider: Provider) -> bool {
+pub(crate) fn engine_present_for(provider: Provider, native: bool) -> bool {
+    if native {
+        return true;
+    }
     match provider {
         Provider::Nextcloud => find_binary("nextcloudcmd").is_some(),
         Provider::OpenCloud => find_binary("opencloudcmd").is_some(),
@@ -1698,8 +1706,9 @@ pub(crate) fn engine_present_for(provider: Provider) -> bool {
 pub(crate) fn engine_install_hint(
     provider: Provider,
     engine_present: bool,
+    native: bool,
 ) -> Option<&'static str> {
-    if engine_present {
+    if native || engine_present {
         return None;
     }
     match provider {
@@ -2525,14 +2534,14 @@ mod tests {
     fn engine_install_hint_blocks_only_when_the_binary_is_missing() {
         use crate::nextcloud::driver::Provider;
         assert!(
-            engine_install_hint(Provider::Nextcloud, true).is_none(),
+            engine_install_hint(Provider::Nextcloud, true, false).is_none(),
             "an installed engine never blocks the setup"
         );
         assert!(
-            engine_install_hint(Provider::OpenCloud, true).is_none(),
+            engine_install_hint(Provider::OpenCloud, true, false).is_none(),
             "an installed engine never blocks the setup"
         );
-        let nextcloud = engine_install_hint(Provider::Nextcloud, false)
+        let nextcloud = engine_install_hint(Provider::Nextcloud, false, false)
             .expect("a missing Nextcloud engine blocks the setup");
         assert!(
             nextcloud.contains("nextcloudcmd"),
@@ -2542,7 +2551,7 @@ mod tests {
             nextcloud.contains("nextcloud-client"),
             "the hint names the Arch package: {nextcloud}"
         );
-        let opencloud = engine_install_hint(Provider::OpenCloud, false)
+        let opencloud = engine_install_hint(Provider::OpenCloud, false, false)
             .expect("a missing OpenCloud engine blocks the setup");
         assert!(
             opencloud.contains("opencloudcmd"),
