@@ -59,62 +59,18 @@ package() {
     cd "$pkgname-$pkgver"
     install -Dm755 target/release/nextsync "$pkgdir/usr/bin/nextsync"
 
-    # Full-color SVGs live in scalable/apps.
-    local colored=(
-        io.github.gnacho.nextsync
-        io.github.gnacho.nextsync-folder
-        nextsync-activity-debug
-        nextsync-activity-error
-        nextsync-activity-info
-        nextsync-activity-ok
-        nextsync-activity-warning
-        nextsync-conflict-warning
-        nextsync-menu-info
-        nextsync-menu-log
-        nextsync-menu-open
-        nextsync-menu-quit
-        nextsync-row-battery
-        nextsync-row-error
-        nextsync-row-not-configured
-        nextsync-row-offline
-        nextsync-row-ok
-        nextsync-row-paused
-        nextsync-row-syncing
-        nextsync-state-globe
-        nextsync-state-globe-off
-        nextsync-status-battery
-        nextsync-status-error
-        nextsync-status-offline
-        nextsync-status-ok
-        nextsync-status-paused
-        nextsync-status-syncing
-        nextsync-tab-conflicts
-        nextsync-tab-deletions
-        nextsync-tab-recent
-        nextsync-tray-cloud
-        nextsync-tray-cloud-alert
-        nextsync-tray-cloud-check
-        nextsync-tray-cloud-off
-        nextsync-tray-cloud-sync
-        nextsync-tray-settings
-    )
-    for icon in "${colored[@]}"; do
-        install -Dm644 "data/icons/$icon.svg" \
-            "$pkgdir/usr/share/icons/hicolor/scalable/apps/$icon.svg"
-    done
-
-    # Symbolic (currentColor) SVGs: hicolor only indexes symbolic/apps, never
-    # symbolic/status — installing under status makes the icons unresolvable.
-    local symbolic=(
-        io.github.gnacho.nextsync-symbolic
-        nextsync-info-symbolic
-        nextsync-list-checks-symbolic
-        nextsync-settings-2-symbolic
-        nextsync-theme-auto-symbolic
-    )
-    for icon in "${symbolic[@]}"; do
-        install -Dm644 "data/icons/$icon.svg" \
-            "$pkgdir/usr/share/icons/hicolor/symbolic/apps/$icon.svg"
+        # Icons: full-color SVGs go to scalable/apps, symbolic (currentColor)
+    # ones to symbolic/apps (hicolor only indexes symbolic/apps, never
+    # symbolic/status). Installed by glob from the source tree so icon
+    # renames (Flathub naming) can never desync this list.
+    local svg base
+    for svg in data/icons/*.svg; do
+        base=$(basename "$svg" .svg)
+        if [[ "$base" == *-symbolic ]]; then
+            install -Dm644 "$svg" "$pkgdir/usr/share/icons/hicolor/symbolic/apps/$base.svg"
+        else
+            install -Dm644 "$svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$base.svg"
+        fi
     done
 
     install -Dm644 data/io.github.gnacho.nextsync.desktop \
