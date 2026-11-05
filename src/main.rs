@@ -321,10 +321,10 @@ fn main() {
                     *tray_slot.borrow_mut() = Some(tray);
                     tray_subscription.borrow_mut().replace(subscription);
                 }
-                Err(_) => {
+                Err(error) => {
                     // No DBus session bus or StatusNotifierHost: keep running
                     // without a tray.
-                    eprintln!("nextsync: tray unavailable, continuing without it");
+                    eprintln!("nextsync: tray unavailable ({error:?}), continuing without it");
                 }
             }
         });
