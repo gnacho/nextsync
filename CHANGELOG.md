@@ -2,6 +2,15 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.42.2] - 2026-11-05
+
+### Changed
+
+- Downloads and uploads now run in parallel with a bounded worker pool
+  (`NATIVE_DOWNLOAD_WORKERS` and `NATIVE_UPLOAD_WORKERS`, default 4).
+- Remote metadata is refreshed with one `Depth: 1` listing per touched
+  directory instead of one `PROPFIND Depth: 0` per transferred file.
+
 ## [0.42.0] - 2026-11-05
 
 ### Added
