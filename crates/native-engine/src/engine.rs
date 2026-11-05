@@ -70,9 +70,8 @@ impl Engine {
         // can be skipped. Both Nextcloud and OpenCloud bump the root ETag when
         // any descendant changes, so this still sees nested edits.
         let root_etag = self.root_etag(&http, &endpoints)?;
-        let reusable = !db_entries.is_empty()
-            && root_etag.is_some()
-            && db.get_meta("root_etag")? == root_etag;
+        let reusable =
+            !db_entries.is_empty() && root_etag.is_some() && db.get_meta("root_etag")? == root_etag;
         let (remote, complete) = if reusable {
             log::info!("root etag unchanged, reusing the journal instead of walking the tree");
             let entries = db_entries
@@ -98,6 +97,13 @@ impl Engine {
                 }
             }
         };
+        // Drop everything the engine is configured to ignore before planning.
+        // The local scan already skips these, so keeping them in the remote set
+        // would turn every ignored entry into a server-side deletion (#271).
+        let remote: Vec<RemoteEntry> = remote
+            .into_iter()
+            .filter(|entry| !crate::local::ignored(&entry.path, entry.is_dir, &self.cfg))
+            .collect();
         let local = scan_local(&self.cfg.local_root, &self.cfg)?;
         let plan = reconcile(&local, &remote, &db_entries, complete);
 
@@ -334,8 +340,10 @@ impl Engine {
         if deletes == 0 {
             return Ok(());
         }
-        let total = plan.len().max(1);
-        let ratio = deletes as f64 / total as f64;
+        let remote_deletes = plan
+            .iter()
+            .filter(|a| matches!(a, Action::DeleteRemote { .. }))
+            .count();
         let known = db.count()?;
         let local_tracked = local.len();
         if known > 0 && local_tracked == 0 {
@@ -343,11 +351,18 @@ impl Engine {
                 "local folder is empty but the journal is not; refusing to delete".into(),
             ));
         }
-        if deletes >= self.cfg.delete_guard.min_group
-            && ratio > self.cfg.delete_guard.max_delete_ratio
-        {
+        // Ratio over the tracked tree, not over the plan: a large folder with a
+        // handful of deletions must still be measurable (#271).
+        let total = plan.len().max(local_tracked).max(known).max(1);
+        let ratio = deletes as f64 / total as f64;
+        // Two independent trips: a large share of the tree, or an absolute
+        // stampede on the server. A plain count limit would block every
+        // ordinary 5-file deletion for good, so the absolute rule is set where
+        // it only fires on a mass event (#271).
+        const MASS_REMOTE_DELETE: usize = 1000;
+        if ratio > self.cfg.delete_guard.max_delete_ratio || remote_deletes >= MASS_REMOTE_DELETE {
             return Err(Error::Safety(format!(
-                "{deletes} of {total} actions are deletions (limit {:.0}%)",
+                "{deletes} of {total} tracked entries would be deleted ({remote_deletes} on the server, limit {:.0}% or {MASS_REMOTE_DELETE} server deletions)",
                 self.cfg.delete_guard.max_delete_ratio * 100.0
             )));
         }
@@ -630,7 +645,13 @@ impl Engine {
 
     /// Read back the authoritative remote state after a transfer.
     /// Refresh every entry of one directory with a single Depth:1 listing.
-    fn refresh_dir(&self, http: &HttpClient, ep: &Endpoints, db: &StateDb, dir: &str) -> Result<()> {
+    fn refresh_dir(
+        &self,
+        http: &HttpClient,
+        ep: &Endpoints,
+        db: &StateDb,
+        dir: &str,
+    ) -> Result<()> {
         let url = if dir.is_empty() {
             ep.remote_root.clone()
         } else {

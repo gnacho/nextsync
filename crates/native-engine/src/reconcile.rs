@@ -74,6 +74,28 @@ impl Action {
 
 const MTIME_TOLERANCE: i64 = 2;
 
+/// True when some ancestor of `key` exists locally as a file. The remote side
+/// then describes a subtree that the local side holds as one file, which is a
+/// type mismatch, never a deletion (#271).
+fn shadowed_by_local_file(key: &str, local: &BTreeMap<&str, &LocalEntry>) -> bool {
+    let mut prefix = String::new();
+    for segment in key.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        if prefix == key {
+            break;
+        }
+        if let Some(entry) = local.get(prefix.as_str()) {
+            if !entry.is_dir {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn reconcile(
     local: &[LocalEntry],
     remote: &[RemoteEntry],
@@ -184,18 +206,20 @@ pub fn reconcile(
                 });
             }
             (None, Some(_r), Some(_)) => {
-                if remote_scan_complete {
+                // Never delete a remote entry whose path is shadowed locally by
+                // a file: a type mismatch (file here, directory there) says the
+                // two sides disagree, not that the user deleted anything (#271).
+                if remote_scan_complete && !shadowed_by_local_file(key, &loc) {
                     actions.push(Action::DeleteRemote {
                         rel: key.to_string(),
                     });
                 }
             }
             (None, None, Some(_)) => {
-                if remote_scan_complete {
-                    actions.push(Action::DeleteRemote {
-                        rel: key.to_string(),
-                    });
-                }
+                // Gone on both sides: the journal entry is stale, there is
+                // nothing to delete anywhere. Deleting here used to fire a
+                // no-op DELETE per pruned entry (#271).
+                continue;
             }
             (Some(l), None, None) => {
                 if l.is_dir {
@@ -393,8 +417,19 @@ mod tests {
 
     #[test]
     fn missing_local_deletes_remote() {
-        let acts = reconcile(&[], &[], &[db("a", 1, 1, "e", None)], true);
+        let acts = reconcile(
+            &[],
+            &[rem("a", "e9", None)],
+            &[db("a", 1, 1, "e", None)],
+            true,
+        );
         assert_eq!(acts, vec![Action::DeleteRemote { rel: "a".into() }]);
+    }
+
+    #[test]
+    fn entry_gone_on_both_sides_produces_no_action() {
+        let acts = reconcile(&[], &[], &[db("a", 1, 1, "e", None)], true);
+        assert!(acts.is_empty(), "expected no actions, got {acts:?}");
     }
 
     #[test]
