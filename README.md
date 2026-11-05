@@ -77,6 +77,21 @@ The rewrite in Rust happened for practical reasons: several accounts and several
 
 Both providers go through the same engine, so a new one is a small provider layer, not an architecture change. Legacy mode is still there per folder: a switch in Settings delegates that folder to `nextcloudcmd` or `opencloudcmd` when one of those clients is installed, for comparison or as an escape hatch. Server push notifications (`notify_push`) apply to Nextcloud; accounts without push fall back to a polling interval.
 
+## Measured performance
+
+Numbers from a real account against a real server, not a synthetic benchmark. Desktop with an NVMe disk and a wired connection, over HTTPS with the system certificate store. Folder: 3,541 files in 241 folders, 7.1 GB.
+
+| Pass | Time | Transfers | Peak memory |
+|---|---|---|---|
+| First sync into an empty folder | 11 min 42 s | 3,541 downloads, 0 errors | 13 MB |
+| Second sync, nothing changed | 15.2 s | 0 | 14 MB |
+
+The first pass averaged about 10 MB/s, and the link was the limit: CPU stayed low the whole time. The second pass only walks the tree and compares ETags, so it scales with the number of entries (around 250 per second here) instead of their size.
+
+Writes, checked on a scratch folder: three files uploaded including one above the chunking threshold, byte for byte identical on the server; a local edit produced exactly one upload; a local delete propagated to the server.
+
+Two honest caveats. Transfers are sequential, one connection at a time, so a high latency link with many small files will feel slower than the MB/s number suggests. And the second pass reads the full tree from the server every time: it is a comparison, not a change feed.
+
 ## Limitations
 
 NextSync keeps full local mirrors. It does not do everything the official clients do:

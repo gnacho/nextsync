@@ -77,6 +77,21 @@ La reescritura en Rust llegó por razones prácticas: varias cuentas y varios pr
 
 Los dos proveedores pasan por el mismo motor, así que uno nuevo es una capa pequeña de proveedor, no un cambio de arquitectura. El modo heredado sigue disponible por carpeta: un interruptor en Ajustes delega esa carpeta a `nextcloudcmd` o `opencloudcmd` cuando alguno de esos clientes está instalado, para comparar o como salida de emergencia. Las notificaciones push del servidor (`notify_push`) aplican a Nextcloud; las cuentas sin push recurren a un intervalo de sondeo.
 
+## Rendimiento medido
+
+Datos de una cuenta real contra un servidor real, no una prueba sintética. Escritorio con disco NVMe y conexión por cable, sobre HTTPS con el almacén de certificados del sistema. Carpeta: 3.541 ficheros en 241 carpetas, 7,1 GB.
+
+| Pasada | Tiempo | Transferencias | Memoria pico |
+|---|---|---|---|
+| Primera sincronización sobre carpeta vacía | 11 min 42 s | 3.541 descargas, 0 errores | 13 MB |
+| Segunda, sin cambios | 15,2 s | 0 | 14 MB |
+
+La primera pasada promedió unos 10 MB/s y el límite fue el enlace: la CPU se mantuvo baja todo el tiempo. La segunda solo recorre el árbol y compara ETags, así que escala con el número de entradas (unas 250 por segundo aquí) y no con su tamaño.
+
+Escritura, comprobada en una carpeta temporal: tres ficheros subidos, uno de ellos por encima del umbral de troceado, idénticos byte a byte en el servidor; una edición local generó exactamente una subida; un borrado local se propagó al servidor.
+
+Dos matices honestos. Las transferencias son secuenciales, una conexión cada vez, así que un enlace con latencia alta y muchos ficheros pequeños se notará más lento de lo que sugiere el dato de MB/s. Y la segunda pasada lee el árbol completo del servidor cada vez: es una comparación, no un flujo de cambios.
+
 ## Limitaciones
 
 NextSync mantiene espejos locales completos. No hace todo lo que hacen los clientes oficiales:
