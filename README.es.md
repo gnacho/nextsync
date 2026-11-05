@@ -31,9 +31,9 @@
 
 ## Qué es
 
-Tus archivos viven en tu disco. Cuando tu ordenador y tu servidor tienen que ponerse de acuerdo sobre qué ha cambiado, NextSync llama al motor oficial de línea de comandos de tu plataforma y lo envuelve en una experiencia de escritorio de verdad: cuentas, configuración por carpeta, progreso en vivo, resolución de conflictos y un icono de bandeja que refleja lo que de verdad está pasando.
+Tus archivos viven en tu disco. Cuando tu ordenador y tu servidor tienen que ponerse de acuerdo sobre qué ha cambiado, NextSync reconcilia ambos lados con su propio motor de sincronización, escrito en Rust y ejecutado en el mismo proceso que la app: cuentas, configuración por carpeta, progreso en vivo, resolución de conflictos y un icono de bandeja que refleja lo que de verdad está pasando.
 
-Es ingeniería aburrida a propósito. La lógica de reconciliación se queda en los motores oficiales, que arrastran años de casos límite. Todo lo que NextSync añade es pegamento de escritorio: cuándo ejecutar, qué mostrar y qué hacer cuando algo falla.
+No hace falta instalar nada más. El motor habla WebDAV con Nextcloud y OpenCloud directamente, mantiene su propio journal, sube por trozos (chunked v2 en Nextcloud, TUS en OpenCloud) y reanuda las transferencias interrumpidas. Si alguna vez necesitas el comportamiento anterior, Ajustes conserva un interruptor para delegar una carpeta al cliente oficial de línea de comandos.
 
 ## Por qué existe
 
@@ -46,7 +46,7 @@ La reescritura en Rust llegó por razones prácticas: varias cuentas y varios pr
 **Sincronización**
 
 - Varias cuentas y varias carpetas por cuenta, cada una mapeada a su ruta remota o su espacio de OpenCloud.
-- Reconciliación bidireccional con los motores oficiales, con transferencias delta y copias en conflicto.
+- Reconciliación bidireccional con el motor Rust integrado, con transferencias delta y copias en conflicto.
 - Un sondeo remoto que comprueba primero el ETag de la carpeta y se salta el escaneo si el servidor no ha cambiado. El ETag sobrevive a los reinicios.
 - Un planificador que agrupa los disparadores en una única cola, nunca lanza dos motores sobre la misma carpeta y nunca re-ejecuta una carpeta por los eventos de su propia sincronización.
 
@@ -72,10 +72,18 @@ La reescritura en Rust llegó por razones prácticas: varias cuentas y varios pr
 
 | Proveedor | Motor | Inicio de sesión |
 |---|---|---|
-| Nextcloud | `nextcloudcmd` | Login Flow v2 en el navegador, o contraseña de aplicación |
-| OpenCloud | `opencloudcmd` | Contraseña de aplicación desde la web del servidor |
+| Nextcloud | Nativo, en proceso | Login Flow v2 en el navegador, o contraseña de aplicación |
+| OpenCloud | Nativo, en proceso | Contraseña de aplicación desde la web del servidor |
 
-Ambos motores se esconden detrás del mismo trait pequeño, así que un proveedor nuevo es un constructor de comandos, no un cambio de arquitectura. Las notificaciones push del servidor (`notify_push`) aplican a Nextcloud; las cuentas sin push recurren a un intervalo de sondeo.
+Los dos proveedores pasan por el mismo motor, así que uno nuevo es una capa pequeña de proveedor, no un cambio de arquitectura. El modo heredado sigue disponible por carpeta: un interruptor en Ajustes delega esa carpeta a `nextcloudcmd` o `opencloudcmd` cuando alguno de esos clientes está instalado, para comparar o como salida de emergencia. Las notificaciones push del servidor (`notify_push`) aplican a Nextcloud; las cuentas sin push recurren a un intervalo de sondeo.
+
+## Limitaciones
+
+NextSync mantiene espejos locales completos. No hace todo lo que hacen los clientes oficiales:
+
+- Sin sistema de archivos virtual: los ficheros se descargan siempre enteros, no hay modo solo en línea ni descarga bajo demanda.
+- Sin cifrado cliente-servidor (E2E). Si tus carpetas cifradas en el servidor dependen del cliente oficial para descifrar, aquí no se sincronizarán.
+- Sin límites de ancho de banda: no hay tope de subida ni de bajada, solo la opción de bajo impacto que baja la prioridad del proceso.
 
 ## Instalación
 
@@ -87,7 +95,7 @@ Descarga el `.pkg.tar.zst` de la [última release](https://github.com/gnacho/nex
 sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst
 ```
 
-El paquete depende de `gtk4` y `libadwaita`. Para cuentas Nextcloud instala `nextcloud-client` (aporta `nextcloudcmd`); para cuentas OpenCloud, el `opencloudcmd` oficial.
+El paquete depende de `gtk4` y `libadwaita`. Trae su propio motor de sincronización, así que no hace falta ningún cliente externo. Los paquetes opcionales `nextcloud-client` y `opencloud-desktop` solo sirven si quieres pasar una carpeta a modo heredado.
 
 ### Desde el código fuente
 

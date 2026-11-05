@@ -31,9 +31,9 @@
 
 ## What it is
 
-You keep your files on your disk. When your computer and your server need to agree on what changed, NextSync calls the official command line engine for your platform and wraps it in a real desktop experience: accounts, per-folder configuration, live progress, conflict resolution, and a tray icon that reflects what is actually going on.
+You keep your files on your disk. When your computer and your server need to agree on what changed, NextSync reconciles both sides with its own sync engine, written in Rust and running in the same process as the app: accounts, per-folder configuration, live progress, conflict resolution, and a tray icon that reflects what is actually going on.
 
-It is deliberately boring engineering. The reconciliation logic stays in the official engines, which carry years of edge cases behind them. Everything NextSync adds is desktop glue: when to run, what to show, and what to do when something goes wrong.
+Nothing else needs to be installed. The engine speaks WebDAV to Nextcloud and OpenCloud directly, keeps its own journal, uploads in chunks (chunked v2 on Nextcloud, TUS on OpenCloud) and resumes interrupted transfers. If you ever need the old behaviour, Settings still has a switch to delegate a folder to the official command line client instead.
 
 ## Why it exists
 
@@ -46,7 +46,7 @@ The rewrite in Rust happened for practical reasons: several accounts and several
 **Synchronization**
 
 - Multiple accounts, and multiple folders per account, each mapped to its own remote path or OpenCloud space.
-- Bidirectional reconciliation through the official engines, with delta transfers and conflicted copies.
+- Bidirectional reconciliation through the built-in Rust engine, with delta transfers and conflicted copies.
 - A remote poll that checks the folder ETag first and skips the scan when the server did not change. The ETag survives restarts.
 - A scheduler that coalesces triggers into one queue, never runs two engines on the same folder, and never re-runs a folder because of its own sync events.
 
@@ -72,10 +72,18 @@ The rewrite in Rust happened for practical reasons: several accounts and several
 
 | Provider | Engine | Sign in |
 |---|---|---|
-| Nextcloud | `nextcloudcmd` | Login Flow v2 in your browser, or app password |
-| OpenCloud | `opencloudcmd` | App password from the server web UI |
+| Nextcloud | Native, in process | Login Flow v2 in your browser, or app password |
+| OpenCloud | Native, in process | App password from the server web UI |
 
-Both engines sit behind the same small trait, so a new provider is a command builder, not an architecture change. Server push notifications (`notify_push`) apply to Nextcloud; accounts without push fall back to a polling interval.
+Both providers go through the same engine, so a new one is a small provider layer, not an architecture change. Legacy mode is still there per folder: a switch in Settings delegates that folder to `nextcloudcmd` or `opencloudcmd` when one of those clients is installed, for comparison or as an escape hatch. Server push notifications (`notify_push`) apply to Nextcloud; accounts without push fall back to a polling interval.
+
+## Limitations
+
+NextSync keeps full local mirrors. It does not do everything the official clients do:
+
+- No virtual file system: files are always downloaded in full, there is no online-only mode or on-demand hydration.
+- No client-side end-to-end encryption (E2E). If your server-side encrypted folders rely on the official client to decrypt, they will not sync here.
+- No bandwidth limits: there is no upload or download cap, only the low impact option that lowers process priority.
 
 ## Install
 
@@ -87,7 +95,7 @@ Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/
 sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst
 ```
 
-The package depends on `gtk4` and `libadwaita`. For Nextcloud accounts install `nextcloud-client` (it provides `nextcloudcmd`); for OpenCloud accounts, the official `opencloudcmd`.
+The package depends on `gtk4` and `libadwaita`. It brings its own sync engine, so no external client is required. The optional `nextcloud-client` and `opencloud-desktop` packages are only useful if you want to switch a folder to legacy mode.
 
 ### From source
 

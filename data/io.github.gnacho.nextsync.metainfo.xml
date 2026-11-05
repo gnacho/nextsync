@@ -14,11 +14,37 @@
   <description>
     <p>
       NextSync is a GNOME-native desktop companion for keeping complete local
-      mirrors of your Nextcloud accounts. It delegates the heavy lifting to the
-      proven command-line sync engine and adds the desktop integration: system
+      mirrors of your Nextcloud accounts. It syncs with its own Rust engine,
+      which speaks WebDAV directly, and adds the desktop integration: system
       tray, live folder status, conflict resolution and deletion review.
     </p>
   </description>
+  <branding>
+    <color type="primary" scheme_preference="light">#0082c8</color>
+    <color type="primary" scheme_preference="dark">#4aa8d8</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The main window in the dark theme, in English</caption>
+      <caption xml:lang="es">La ventana principal con el tema oscuro, en inglés</caption>
+      <image type="source">https://raw.githubusercontent.com/gnacho/nextsync/main/data/screenshots/main-en-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Two accounts and their folder status, in Spanish</caption>
+      <caption xml:lang="es">Dos cuentas y el estado de sus carpetas, en español</caption>
+      <image type="source">https://raw.githubusercontent.com/gnacho/nextsync/main/data/screenshots/main-es-light.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Per-folder settings: exclusions, retries and the deletion guard</caption>
+      <caption xml:lang="es">Ajustes por carpeta: exclusiones, reintentos y la guardia de borrados</caption>
+      <image type="source">https://raw.githubusercontent.com/gnacho/nextsync/main/data/screenshots/settings-es-light.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Activity view with the result of each synchronization</caption>
+      <caption xml:lang="es">Vista de actividad con el resultado de cada sincronización</caption>
+      <image type="source">https://raw.githubusercontent.com/gnacho/nextsync/main/data/screenshots/activity-es-light.png</image>
+    </screenshot>
+  </screenshots>
   <categories>
     <category>Network</category>
     <category>FileTransfer</category>
