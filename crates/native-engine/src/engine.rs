@@ -62,7 +62,7 @@ impl Engine {
         }
 
         let db = StateDb::open(&self.cfg.db_path())?;
-        let db_entries = db.load_all()?;
+        let db_entries = self.prune_excluded(db.load_all()?, &db)?;
 
         sink.event(Progress::new("checking", "/"));
         let (remote, complete) = match self.discover_remote(&http, &endpoints, sink, cancel) {
@@ -73,6 +73,14 @@ impl Engine {
                 (Vec::new(), false)
             }
         };
+        // The local scan already skips excluded names; the remote listing has
+        // to do the same. Otherwise an excluded file that lives on the server
+        // is downloaded on the first run and, because the local scan cannot
+        // see it, planned as a remote deletion on the next one.
+        let remote: Vec<RemoteEntry> = remote
+            .into_iter()
+            .filter(|e| !crate::local::is_excluded(&e.path, e.is_dir, &self.cfg))
+            .collect();
         let local = scan_local(&self.cfg.local_root, &self.cfg)?;
         let plan = reconcile(&local, &remote, &db_entries, complete);
 
@@ -143,6 +151,23 @@ impl Engine {
         db.set_meta("last_sync", &crate::http::now_epoch().to_string())?;
         let _ = total_actions;
         Ok(summary)
+    }
+
+    /// Drop journal rows for paths that are excluded now.
+    ///
+    /// A row for an excluded path would otherwise make `reconcile` propose a
+    /// remote deletion (the local scan never reports it) and would inflate the
+    /// delete guard's idea of what the folder contained.
+    fn prune_excluded(&self, entries: Vec<DbEntry>, db: &StateDb) -> Result<Vec<DbEntry>> {
+        let mut kept = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if crate::local::is_excluded(&entry.path, entry.is_dir, &self.cfg) {
+                db.remove(&entry.path)?;
+            } else {
+                kept.push(entry);
+            }
+        }
+        Ok(kept)
     }
 
     fn guard_deletes(&self, plan: &[Action], local: &[LocalEntry], db: &StateDb) -> Result<()> {
@@ -666,6 +691,55 @@ mod tests {
         assert_eq!(
             join_remote("https://h/a", "/Docs/x y"),
             "https://h/a/Docs/x%20y"
+        );
+    }
+
+    /// Regression: an excluded path in the journal and in the remote listing
+    /// used to become a download plus, on the next run, a remote deletion,
+    /// because the local scan never reports excluded names.
+    #[test]
+    fn excluded_paths_never_reach_the_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = EngineConfig::new(
+            Provider::Nextcloud,
+            "https://cloud.example.com",
+            "alice",
+            "secret",
+            dir.path(),
+            "",
+        );
+        let engine = Engine::new(cfg);
+        let db = StateDb::open(&engine.cfg.db_path()).unwrap();
+        let stale = DbEntry {
+            path: ".hidden/photo.jpg".into(),
+            is_dir: false,
+            size: 5,
+            mtime: 10,
+            etag: "e1".into(),
+            fileid: None,
+            inode: 7,
+        };
+        db.upsert(&stale).unwrap();
+
+        let kept = engine.prune_excluded(db.load_all().unwrap(), &db).unwrap();
+        assert!(kept.is_empty(), "excluded journal rows are dropped");
+        assert_eq!(db.count().unwrap(), 0, "and removed from the journal");
+
+        let remote: Vec<RemoteEntry> = vec![RemoteEntry {
+            path: ".hidden/photo.jpg".into(),
+            is_dir: false,
+            size: 5,
+            etag: "e1".into(),
+            fileid: None,
+            mtime: Some(10),
+        }]
+        .into_iter()
+        .filter(|e| !crate::local::is_excluded(&e.path, e.is_dir, &engine.cfg))
+        .collect();
+        let plan = reconcile(&[], &remote, &kept, true);
+        assert!(
+            plan.is_empty(),
+            "no download and no deletion for an excluded path: {plan:?}"
         );
     }
 }

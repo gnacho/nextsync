@@ -41,7 +41,6 @@ fn walk(
     for entry in rd {
         let entry = entry?;
         let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
         let meta = std::fs::symlink_metadata(&path)?;
         if meta.file_type().is_symlink() {
             continue;
@@ -58,7 +57,7 @@ fn walk(
             continue;
         }
         let is_dir = meta.is_dir();
-        if excluded(&rel, &name, is_dir, cfg) {
+        if is_excluded(&rel, is_dir, cfg) {
             continue;
         }
         let mtime = meta
@@ -92,15 +91,31 @@ fn inode_of(_meta: &std::fs::Metadata) -> u64 {
     0
 }
 
-fn excluded(rel: &str, name: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
-    if !cfg.sync_hidden_files && name.starts_with('.') && name != "." {
+fn excluded(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
+    // Any hidden path component counts, not just the last one: remote
+    // listings hand over full relative paths, while the local walk prunes a
+    // hidden directory before descending into it.
+    if !cfg.sync_hidden_files && rel.split('/').any(|c| c.starts_with('.') && c != ".") {
         return true;
     }
     cfg.exclude_patterns.iter().any(|p| {
         matches_pattern(p, rel)
-            || matches_pattern(p, name)
+            || rel.split('/').any(|c| matches_pattern(p, c))
             || (is_dir && matches_pattern(p, &format!("{rel}/")))
     })
+}
+
+/// Whether a path is outside synchronization by configuration.
+///
+/// The local scan uses it, and so must the remote listing and the journal:
+/// an excluded name that exists on the server used to be planned as a
+/// download, and then, because the local scan never sees it, as a remote
+/// deletion on the next run. The journal itself is always excluded.
+pub fn is_excluded(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
+    if rel == ".nextsync" || rel.starts_with(".nextsync/") {
+        return true;
+    }
+    excluded(rel, is_dir, cfg)
 }
 
 /// Minimal glob: `*` (any run), `?` (one char). Everything else literal.
@@ -186,5 +201,32 @@ mod tests {
         assert!(matches_pattern("build*", "build-x"));
         assert!(!matches_pattern("*.tmp", "a.txt"));
         assert!(matches_pattern("a?c", "abc"));
+    }
+
+    /// Regression: the journal and the remote listing must use the same
+    /// exclusions as the local scan, or an excluded file that exists on the
+    /// server is downloaded and later proposed as a remote deletion.
+    #[test]
+    fn journal_and_remote_paths_use_the_local_exclusions() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = cfg(dir.path());
+        assert!(is_excluded(".hidden/photo.jpg", false, &c));
+        assert!(is_excluded("Personal/.hidden/photo.jpg", false, &c));
+        assert!(matches_pattern("node_modules", "node_modules"));
+        assert!(!is_excluded("Personal/photo.jpg", false, &c));
+
+        let mut with_hidden = cfg(dir.path());
+        with_hidden.sync_hidden_files = true;
+        assert!(!is_excluded(
+            "Personal/.hidden/photo.jpg",
+            false,
+            &with_hidden
+        ));
+        assert!(is_excluded(".nextsync/state.db", false, &with_hidden));
+
+        let mut with_pattern = cfg(dir.path());
+        with_pattern.exclude_patterns = vec!["node_modules".into()];
+        assert!(is_excluded("node_modules/a.js", false, &with_pattern));
+        assert!(!is_excluded("other/a.js", false, &with_pattern));
     }
 }
