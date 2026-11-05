@@ -90,15 +90,15 @@ pub struct TrayCallbacks {
 /// else (paused, battery, plain offline) keeps the plain cloud.
 pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'static str {
     if presentation.icon_key == "offline" && state == AppState::Unconfigured {
-        "nextsync-tray-cloud-off"
+        "io.github.gnacho.nextsync.tray-cloud-off"
     } else if presentation.icon_key == "ok" {
-        "nextsync-tray-cloud-check"
+        "io.github.gnacho.nextsync.tray-cloud-check"
     } else if presentation.icon_key == "syncing" {
-        "nextsync-tray-cloud-sync"
+        "io.github.gnacho.nextsync.tray-cloud-sync"
     } else if presentation.icon_key == "error" {
-        "nextsync-tray-cloud-alert"
+        "io.github.gnacho.nextsync.tray-cloud-alert"
     } else {
-        "nextsync-tray-cloud"
+        "io.github.gnacho.nextsync.tray-cloud"
     }
 }
 
@@ -108,13 +108,13 @@ pub fn icon_name_for(state: AppState, presentation: &TrayPresentation) -> &'stat
 /// kept for parity and as the reference for the packaged status icons.
 pub fn status_icon_key_to_name(icon_key: &str) -> &'static str {
     match icon_key {
-        "ok" => "nextsync-status-ok",
-        "syncing" => "nextsync-status-syncing",
-        "paused" => "nextsync-status-paused",
-        "battery" => "nextsync-status-battery",
-        "offline" => "nextsync-status-offline",
-        "error" => "nextsync-status-error",
-        _ => "nextsync-tray-cloud",
+        "ok" => "io.github.gnacho.nextsync.status-ok",
+        "syncing" => "io.github.gnacho.nextsync.status-syncing",
+        "paused" => "io.github.gnacho.nextsync.status-paused",
+        "battery" => "io.github.gnacho.nextsync.status-battery",
+        "offline" => "io.github.gnacho.nextsync.status-offline",
+        "error" => "io.github.gnacho.nextsync.status-error",
+        _ => "io.github.gnacho.nextsync.tray-cloud",
     }
 }
 
@@ -172,7 +172,7 @@ impl TrayItem {
         let quit = self.actions.clone();
         let mut items: Vec<MenuItem<Self>> = vec![StandardItem {
             label: t("Open NextSync").into(),
-            icon_name: "nextsync-menu-open".into(),
+            icon_name: "io.github.gnacho.nextsync.menu-open".into(),
             activate: Box::new(move |_this: &mut Self| {
                 let _ = open.try_send(TrayAction::Open);
             }),
@@ -187,7 +187,7 @@ impl TrayItem {
                     // and Conflicts"): renaming the menu item must not change
                     // the window title (issue #32).
                     label: t("Log").into(),
-                    icon_name: "nextsync-menu-log".into(),
+                    icon_name: "io.github.gnacho.nextsync.menu-log".into(),
                     activate: Box::new(move |_this: &mut Self| {
                         let _ = conflicts.try_send(TrayAction::Conflicts);
                     }),
@@ -199,7 +199,7 @@ impl TrayItem {
         items.push(
             StandardItem {
                 label: t("Quit").into(),
-                icon_name: "nextsync-menu-quit".into(),
+                icon_name: "io.github.gnacho.nextsync.menu-quit".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = quit.try_send(TrayAction::Quit);
                 }),
@@ -212,7 +212,7 @@ impl TrayItem {
                 // Same dialog (and same Lucide info icon) as the window's
                 // hamburger menu (issue #155); the item closes the menu.
                 label: t("About").into(),
-                icon_name: "nextsync-menu-info".into(),
+                icon_name: "io.github.gnacho.nextsync.menu-info".into(),
                 activate: Box::new(move |_this: &mut Self| {
                     let _ = about.try_send(TrayAction::About);
                 }),
@@ -454,30 +454,30 @@ mod tests {
     #[test]
     fn icon_name_follows_the_python_tray_glyph_choice() {
         let (unconfigured, _rx) = item_with(AppState::Unconfigured);
-        assert_eq!(unconfigured.icon_name(), "nextsync-tray-cloud-off");
+        assert_eq!(unconfigured.icon_name(), "io.github.gnacho.nextsync.tray-cloud-off");
 
         let (offline, _rx) = item_with(AppState::Offline);
-        assert_eq!(offline.icon_name(), "nextsync-tray-cloud");
+        assert_eq!(offline.icon_name(), "io.github.gnacho.nextsync.tray-cloud");
 
         // Everything synced and OK gets the cloud-check glyph (issue #76).
         let (idle, _rx) = item_with(AppState::IdleOk);
-        assert_eq!(idle.icon_name(), "nextsync-tray-cloud-check");
+        assert_eq!(idle.icon_name(), "io.github.gnacho.nextsync.tray-cloud-check");
 
         // A running or queued sync shows the swirl (issue #87).
         let (syncing, _rx) = item_with(AppState::Syncing);
-        assert_eq!(syncing.icon_name(), "nextsync-tray-cloud-sync");
+        assert_eq!(syncing.icon_name(), "io.github.gnacho.nextsync.tray-cloud-sync");
         let (queued, _rx) = item_with(AppState::SyncQueued);
-        assert_eq!(queued.icon_name(), "nextsync-tray-cloud-sync");
+        assert_eq!(queued.icon_name(), "io.github.gnacho.nextsync.tray-cloud-sync");
 
         // Problem states show cloud-alert (issue #87).
         let (error, _rx) = item_with(AppState::Error);
-        assert_eq!(error.icon_name(), "nextsync-tray-cloud-alert");
+        assert_eq!(error.icon_name(), "io.github.gnacho.nextsync.tray-cloud-alert");
         let (auth, _rx) = item_with(AppState::AuthRequired);
-        assert_eq!(auth.icon_name(), "nextsync-tray-cloud-alert");
+        assert_eq!(auth.icon_name(), "io.github.gnacho.nextsync.tray-cloud-alert");
 
         // Paused keeps the plain cloud.
         let (paused, _rx) = item_with(AppState::PausedUser);
-        assert_eq!(paused.icon_name(), "nextsync-tray-cloud");
+        assert_eq!(paused.icon_name(), "io.github.gnacho.nextsync.tray-cloud");
     }
 
     #[test]
@@ -510,15 +510,15 @@ mod tests {
     #[test]
     fn status_icon_key_mapping_covers_all_keys() {
         for (key, name) in [
-            ("ok", "nextsync-status-ok"),
-            ("syncing", "nextsync-status-syncing"),
-            ("paused", "nextsync-status-paused"),
-            ("battery", "nextsync-status-battery"),
-            ("offline", "nextsync-status-offline"),
-            ("error", "nextsync-status-error"),
+            ("ok", "io.github.gnacho.nextsync.status-ok"),
+            ("syncing", "io.github.gnacho.nextsync.status-syncing"),
+            ("paused", "io.github.gnacho.nextsync.status-paused"),
+            ("battery", "io.github.gnacho.nextsync.status-battery"),
+            ("offline", "io.github.gnacho.nextsync.status-offline"),
+            ("error", "io.github.gnacho.nextsync.status-error"),
         ] {
             assert_eq!(status_icon_key_to_name(key), name);
         }
-        assert_eq!(status_icon_key_to_name("bogus"), "nextsync-tray-cloud");
+        assert_eq!(status_icon_key_to_name("bogus"), "io.github.gnacho.nextsync.tray-cloud");
     }
 }

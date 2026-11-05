@@ -140,7 +140,7 @@ impl ConflictResolverWindow {
         recent_box.append(&clamp(&recent_scroller));
         let recent_page = stack.add_named(&recent_box, Some("recent"));
         recent_page.set_title(Some(t("Recent")));
-        recent_page.set_icon_name(Some("nextsync-tab-recent"));
+        recent_page.set_icon_name(Some("io.github.gnacho.nextsync.tab-recent"));
 
         // ---- Conflicts page -------------------------------------------------
         let conflicts_box = gtk4::Box::builder()
@@ -150,7 +150,7 @@ impl ConflictResolverWindow {
         conflicts_box.set_margin_top(4);
         conflicts_box.set_margin_bottom(4);
         let empty_state = libadwaita::StatusPage::builder()
-            .icon_name("nextsync-activity-ok")
+            .icon_name("io.github.gnacho.nextsync.activity-ok")
             .title(t("No Conflicts"))
             .description(t(
                 "No Nextcloud conflicted copies were found in this folder.",
@@ -177,7 +177,7 @@ impl ConflictResolverWindow {
         conflicts_box.append(&clamp(&conflict_scroller));
         let conflicts_page = stack.add_named(&conflicts_box, Some("conflicts"));
         conflicts_page.set_title(Some(t("Conflicts")));
-        conflicts_page.set_icon_name(Some("nextsync-tab-conflicts"));
+        conflicts_page.set_icon_name(Some("io.github.gnacho.nextsync.tab-conflicts"));
 
         // ---- Deletions page -------------------------------------------------
         let deletions_box = gtk4::Box::builder()
@@ -187,7 +187,7 @@ impl ConflictResolverWindow {
         deletions_box.set_margin_top(4);
         deletions_box.set_margin_bottom(4);
         let deletions_empty = libadwaita::StatusPage::builder()
-            .icon_name("nextsync-tab-deletions")
+            .icon_name("io.github.gnacho.nextsync.tab-deletions")
             .title(t("No deleted files to resolve"))
             .description(t(
                 "The deletion guard has not flagged any files in this folder.",
@@ -214,7 +214,7 @@ impl ConflictResolverWindow {
         deletions_box.append(&deletion_clamp);
         let deletions_page = stack.add_named(&deletions_box, Some("deletions"));
         deletions_page.set_title(Some(t("Deletions")));
-        deletions_page.set_icon_name(Some("nextsync-tab-deletions"));
+        deletions_page.set_icon_name(Some("io.github.gnacho.nextsync.tab-deletions"));
 
         switcher.set_stack(Some(&stack));
         toolbar.set_content(Some(&stack));
@@ -551,7 +551,7 @@ fn build_conflict_row(conflict: &ConflictFile, target: &ReloadTarget) -> gtk4::L
         .build();
 
     let icon = gtk4::Image::builder()
-        .icon_name("nextsync-conflict-warning")
+        .icon_name("io.github.gnacho.nextsync.conflict-warning")
         .pixel_size(24)
         .valign(gtk4::Align::Start)
         .build();

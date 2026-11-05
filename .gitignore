@@ -1,2 +1,9 @@
 /target
 src/nextsync-*
+
+# packaging leftovers
+AUDIT-V118.md
+GATES.md
+nextsync-*.tar.gz
+nextsync-*-x86_64.pkg.tar.zst
+pkg/
