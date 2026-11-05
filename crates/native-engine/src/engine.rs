@@ -129,6 +129,7 @@ impl Engine {
         let mut processed = 0u32;
         let mut refresh: BTreeSet<String> = BTreeSet::new();
         let mut download_jobs: Vec<&Action> = Vec::new();
+        let mut upload_jobs: Vec<&Action> = Vec::new();
 
         for action in &plan {
             if cancel.is_cancelled() {
@@ -143,6 +144,12 @@ impl Engine {
                 // runtime of a cold pass, so they run later in a pool (issue
                 // #268).
                 download_jobs.push(action);
+                continue;
+            }
+            if matches!(action, Action::Upload { .. }) {
+                // Uploads are independent too, and the first pass of a new
+                // server is dominated by them (issue #268).
+                upload_jobs.push(action);
                 continue;
             }
             processed += 1;
@@ -222,6 +229,66 @@ impl Engine {
                 }
             });
             summary.downloaded += done.load(std::sync::atomic::Ordering::SeqCst);
+            if let Ok(dirs) = dirs.into_inner() {
+                refresh.extend(dirs);
+            }
+            if let Ok(failures) = failures.into_inner() {
+                summary.errors += failures.len() as u32;
+                if let Some(message) = failures
+                    .iter()
+                    .find_map(|f| f.strip_prefix("auth:").map(str::to_string))
+                {
+                    return Err(Error::Auth(message));
+                }
+            }
+        }
+
+        if !upload_jobs.is_empty() {
+            let workers = std::env::var("NATIVE_UPLOAD_WORKERS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(4usize)
+                .clamp(1, 8)
+                .min(upload_jobs.len());
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let done = std::sync::atomic::AtomicU32::new(0);
+            let failures = std::sync::Mutex::new(Vec::<String>::new());
+            let dirs = std::sync::Mutex::new(BTreeSet::<String>::new());
+            std::thread::scope(|scope| {
+                for _ in 0..workers {
+                    scope.spawn(|| loop {
+                        if cancel.is_cancelled() {
+                            break;
+                        }
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some(action) = upload_jobs.get(index) else {
+                            break;
+                        };
+                        match self.run_upload(&http, &endpoints, action, &loc, sink, cancel) {
+                            Ok(dir) => {
+                                done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                if let Ok(mut dirs) = dirs.lock() {
+                                    dirs.insert(dir);
+                                }
+                            }
+                            Err(Error::Auth(m)) => {
+                                if let Ok(mut failures) = failures.lock() {
+                                    failures.push(format!("auth:{m}"));
+                                }
+                                break;
+                            }
+                            Err(Error::Cancelled) => break,
+                            Err(e) => {
+                                eprintln!("{} failed: {e}", action.rel());
+                                if let Ok(mut failures) = failures.lock() {
+                                    failures.push(e.to_string());
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            summary.uploaded += done.load(std::sync::atomic::Ordering::SeqCst);
             if let Ok(dirs) = dirs.into_inner() {
                 refresh.extend(dirs);
             }
@@ -324,6 +391,48 @@ impl Engine {
             checksum.as_deref(),
             *mtime,
             total,
+            self.cfg.max_retries,
+            cancel,
+            sink,
+            rel,
+        )?;
+        Ok(parent_dir(rel))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_upload(
+        &self,
+        http: &HttpClient,
+        ep: &Endpoints,
+        action: &Action,
+        loc: &BTreeMap<&str, &LocalEntry>,
+        sink: &dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<String> {
+        let Action::Upload { rel } = action else {
+            return Err(Error::Config("not an upload action".into()));
+        };
+        sink.event(Progress {
+            action: "upload".to_string(),
+            path: rel.clone(),
+            processed: 0,
+            bytes_done: 0,
+            bytes_total: 0,
+        });
+        let Some(entry) = loc.get(rel.as_str()) else {
+            return Err(Error::Config(format!("missing local {rel}")));
+        };
+        let url = self.url(ep, rel);
+        let path = self.local_path(rel);
+        crate::transfer::upload(
+            http,
+            &path,
+            &url,
+            self.cfg.provider,
+            &ep.upload_root,
+            &ep.space_root,
+            entry.mtime,
+            self.cfg.chunk_threshold,
             self.cfg.max_retries,
             cancel,
             sink,
