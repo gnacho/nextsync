@@ -91,7 +91,7 @@ impl NativeEngineRunner {
 impl SyncRunner for NativeEngineRunner {
     fn start(
         &mut self,
-        _reasons: &[crate::core::triggers::Trigger],
+        reasons: &[crate::core::triggers::Trigger],
         on_finished: Box<dyn FnOnce(SyncOutcome) + 'static>,
     ) {
         let Some(source) = self.credentials.clone() else {
@@ -113,6 +113,24 @@ impl SyncRunner for NativeEngineRunner {
                 return;
             }
         };
+        // Issue #189 for the native engine: a bare remote interval asks the
+        // server for the folder root ETag first. When it did not move there is
+        // nothing to discover, and a big folder stops monopolizing the queue
+        // with a full tree walk every interval.
+        if interval_can_skip(reasons) {
+            if let Ok(Some(fresh)) = crate::nextcloud::sync_engine::ProductionEtagProbe::run(
+                &self.account,
+                &self.folder,
+                &password,
+            ) {
+                let previous = crate::core::etag_store::read_etag(&self.folder.id);
+                if etag_unchanged(previous.as_deref(), &fresh) {
+                    glib::spawn_future_local(async move { on_finished(SyncOutcome::Success) });
+                    return;
+                }
+                crate::core::etag_store::write_etag(&self.folder.id, &fresh);
+            }
+        }
         let engine = Engine::new(self.config(&password));
         let sink = ChannelSink(self.progress.clone());
         let cancel = self.cancel.clone();
@@ -143,6 +161,17 @@ impl SyncRunner for NativeEngineRunner {
     fn cancel(&mut self) {
         self.cancel.cancel();
     }
+}
+
+/// A bare remote interval is the only trigger that may skip the run when the
+/// folder root ETag did not move: manual, local, push and resume triggers
+/// always reconcile (issue #189).
+fn interval_can_skip(reasons: &[crate::core::triggers::Trigger]) -> bool {
+    matches!(reasons, [crate::core::triggers::Trigger::RemoteInterval])
+}
+
+fn etag_unchanged(previous: Option<&str>, fresh: &str) -> bool {
+    previous == Some(fresh)
 }
 
 #[cfg(test)]
@@ -258,5 +287,30 @@ mod tests {
         assert!(summary.uploaded >= 1, "expected the file to be uploaded");
         let event = rx.try_recv().expect("progress event");
         assert!(!event.action.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod etag_gate_tests {
+    use super::{etag_unchanged, interval_can_skip};
+    use crate::core::triggers::Trigger;
+
+    #[test]
+    fn only_a_bare_remote_interval_may_skip() {
+        assert!(interval_can_skip(&[Trigger::RemoteInterval]));
+        assert!(!interval_can_skip(&[Trigger::Manual]));
+        assert!(!interval_can_skip(&[Trigger::Startup]));
+        assert!(!interval_can_skip(&[
+            Trigger::RemoteInterval,
+            Trigger::Manual
+        ]));
+        assert!(!interval_can_skip(&[]));
+    }
+
+    #[test]
+    fn an_unchanged_etag_skips_but_a_missing_one_never_does() {
+        assert!(etag_unchanged(Some("\"abc\""), "\"abc\""));
+        assert!(!etag_unchanged(None, "\"abc\""));
+        assert!(!etag_unchanged(Some("\"old\""), "\"new\""));
     }
 }
