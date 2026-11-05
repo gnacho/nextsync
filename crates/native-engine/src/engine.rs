@@ -65,12 +65,37 @@ impl Engine {
         let db_entries = db.load_all()?;
 
         sink.event(Progress::new("checking", "/"));
-        let (remote, complete) = match self.discover_remote(&http, &endpoints, sink, cancel) {
-            Ok(v) => v,
-            Err(e) => {
-                // A failed or partial scan must never drive deletions.
-                log::warn!("remote discovery failed: {e}");
-                (Vec::new(), false)
+        // Fast path: when the sync root ETag did not move, the server tree is
+        // the same one the journal already describes, so the full PROPFIND walk
+        // can be skipped. Both Nextcloud and OpenCloud bump the root ETag when
+        // any descendant changes, so this still sees nested edits.
+        let root_etag = self.root_etag(&http, &endpoints)?;
+        let reusable = !db_entries.is_empty()
+            && root_etag.is_some()
+            && db.get_meta("root_etag")? == root_etag;
+        let (remote, complete) = if reusable {
+            log::info!("root etag unchanged, reusing the journal instead of walking the tree");
+            let entries = db_entries
+                .iter()
+                .map(|e| RemoteEntry {
+                    path: e.path.clone(),
+                    is_dir: e.is_dir,
+                    size: e.size,
+                    etag: e.etag.clone(),
+                    fileid: e.fileid.clone(),
+                    mtime: Some(e.mtime),
+                    checksum: None,
+                })
+                .collect();
+            (entries, true)
+        } else {
+            match self.discover_remote(&http, &endpoints, sink, cancel) {
+                Ok(v) => v,
+                Err(e) => {
+                    // A failed or partial scan must never drive deletions.
+                    log::warn!("remote discovery failed: {e}");
+                    (Vec::new(), false)
+                }
             }
         };
         let local = scan_local(&self.cfg.local_root, &self.cfg)?;
@@ -140,6 +165,9 @@ impl Engine {
         } else {
             ExitState::Success
         };
+        if let Some(etag) = self.root_etag(&http, &endpoints)? {
+            db.set_meta("root_etag", &etag)?;
+        }
         db.set_meta("last_sync", &crate::http::now_epoch().to_string())?;
         let _ = total_actions;
         Ok(summary)
@@ -460,6 +488,23 @@ impl Engine {
                     upload_root: format!("{}/dav/spaces/{}", self.cfg.base_url, space),
                     space_root: format!("{}/dav/spaces/{}", self.cfg.base_url, space),
                 })
+            }
+        }
+    }
+
+    /// ETag of the sync root. `None` when the server does not report one or
+    /// the probe fails, which disables the fast path for this run.
+    fn root_etag(&self, http: &HttpClient, ep: &Endpoints) -> Result<Option<String>> {
+        match http.propfind(&ep.remote_root, "0") {
+            Ok(entries) => Ok(entries
+                .first()
+                .map(|e| e.etag.trim_matches('"').to_string())
+                .filter(|etag| !etag.is_empty())),
+            Err(Error::NotFound(_)) => Ok(None),
+            Err(Error::Auth(m)) => Err(Error::Auth(m)),
+            Err(e) => {
+                log::warn!("root etag probe failed: {e}");
+                Ok(None)
             }
         }
     }
