@@ -2837,3 +2837,7 @@ msgstr "Usar el motor de sincronización nativo"
 #: src/ui/settings.rs
 msgid "Sync without nextcloudcmd or opencloudcmd. Recommended. Experimental."
 msgstr "Sincroniza sin nextcloudcmd ni opencloudcmd. Recomendado. Experimental."
+
+#: src/ui/setup.rs
+msgid "An account with the same server and username already exists."
+msgstr "Ya existe una cuenta con el mismo servidor y usuario."
