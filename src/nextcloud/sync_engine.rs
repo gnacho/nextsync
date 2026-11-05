@@ -690,6 +690,8 @@ fn drain_stream(
                     let processed =
                         processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     let _ = progress.try_send(SyncProgress {
+                        bytes_done: 0,
+                        bytes_total: 0,
                         action: parsed.action,
                         path: parsed.path,
                         processed,

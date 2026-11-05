@@ -17,7 +17,11 @@ struct ChannelSink(async_channel::Sender<SyncProgress>);
 
 impl ProgressSink for ChannelSink {
     fn event(&self, p: Progress) {
-        let _ = self.0.send_blocking(SyncProgress::new(p.action, p.path));
+        let mut progress = SyncProgress::new(p.action, p.path);
+        progress.processed = p.processed;
+        progress.bytes_done = p.bytes_done;
+        progress.bytes_total = p.bytes_total;
+        let _ = self.0.send_blocking(progress);
     }
 }
 

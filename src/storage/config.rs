@@ -169,6 +169,7 @@ pub struct SyncConfig {
     pub exclude_patterns_enabled: bool,
     pub exclude_patterns: Vec<String>,
     /// Use the in-process native engine instead of the external command.
+    /// Enabled by default: the external CLI is a documented escape hatch.
     pub native_engine: bool,
     /// Sync dotfiles. The command line tools need an explicit flag for this.
     pub sync_hidden_files: bool,
@@ -187,7 +188,7 @@ impl Default for SyncConfig {
             detailed_output: true,
             exclude_patterns_enabled: true,
             exclude_patterns: DEFAULT_PATTERNS.iter().map(|s| s.to_string()).collect(),
-            native_engine: false,
+            native_engine: true,
             sync_hidden_files: false,
         }
     }
@@ -1098,7 +1099,7 @@ fn validate_sync(raw: Option<&Value>) -> Result<SyncConfig, ConfigError> {
         detailed_output: get_bool(obj, "detailed_output", true),
         exclude_patterns_enabled: get_bool(obj, "exclude_patterns_enabled", true),
         exclude_patterns,
-        native_engine: get_bool(obj, "native_engine", false),
+        native_engine: get_bool(obj, "native_engine", true),
         sync_hidden_files: get_bool(obj, "sync_hidden_files", false),
     })
 }

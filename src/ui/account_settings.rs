@@ -90,7 +90,7 @@ pub fn build_account_settings_panel(
         .margin_bottom(8)
         .build();
     let globe = gtk4::Image::builder()
-        .icon_name("nextsync-state-globe")
+        .icon_name("io.github.gnacho.nextsync.state-globe")
         .pixel_size(18)
         .build();
     status_row.append(&globe);

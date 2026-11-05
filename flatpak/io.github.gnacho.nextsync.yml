@@ -1,0 +1,48 @@
+id: io.github.gnacho.nextsync
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: nextsync
+
+finish-args:
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # The app mirrors user folders, so it needs the home directory.
+  - --filesystem=home
+  # Credentials live in the Secret Service.
+  - --talk-name=org.freedesktop.secrets
+  # Desktop notifications and the StatusNotifier tray item.
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+
+modules:
+  - name: nextsync
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/nextsync/cargo
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --verbose
+      - install -Dm755 target/release/nextsync /app/bin/nextsync
+      - install -Dm644 data/io.github.gnacho.nextsync.desktop /app/share/applications/io.github.gnacho.nextsync.desktop
+      - install -Dm644 data/io.github.gnacho.nextsync.metainfo.xml /app/share/metainfo/io.github.gnacho.nextsync.metainfo.xml
+      - |
+        for icon in data/icons/*.svg; do
+          name=$(basename "$icon")
+          case "$name" in
+            *-symbolic.svg) install -Dm644 "$icon" "/app/share/icons/hicolor/symbolic/apps/$name" ;;
+            *) install -Dm644 "$icon" "/app/share/icons/hicolor/scalable/apps/$name" ;;
+          esac
+        done
+    sources:
+      - type: archive
+        url: https://github.com/gnacho/nextsync/archive/refs/tags/v0.41.0.tar.gz
+        sha256: 792c8b605f6dd1a49a003f51c24648f389f2b20a93ccc6499a67d58ac1b5ba5f
+      - cargo-sources.json

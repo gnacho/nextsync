@@ -16,17 +16,17 @@
 use std::fmt;
 
 /// Icon used when the level is `INFO` and the message announces success.
-const OK_ICON: &str = "nextsync-activity-ok";
+const OK_ICON: &str = "io.github.gnacho.nextsync.activity-ok";
 /// Fallback icon when a level is unknown.
-const FALLBACK_ICON: &str = "nextsync-activity-info";
+const FALLBACK_ICON: &str = "io.github.gnacho.nextsync.activity-info";
 
 /// Level → icon mapping, mirroring the Python `LEVEL_ICONS` dict.
 pub const LEVEL_ICONS: [(&str, &str); 5] = [
-    ("DEBUG", "nextsync-activity-debug"),
-    ("INFO", "nextsync-activity-info"),
-    ("WARNING", "nextsync-activity-warning"),
-    ("ERROR", "nextsync-activity-error"),
-    ("CRITICAL", "nextsync-activity-error"),
+    ("DEBUG", "io.github.gnacho.nextsync.activity-debug"),
+    ("INFO", "io.github.gnacho.nextsync.activity-info"),
+    ("WARNING", "io.github.gnacho.nextsync.activity-warning"),
+    ("ERROR", "io.github.gnacho.nextsync.activity-error"),
+    ("CRITICAL", "io.github.gnacho.nextsync.activity-error"),
 ];
 
 /// The icon name for a log level (fallback `nextsync-activity-info`).
@@ -160,7 +160,7 @@ mod tests {
         );
         assert_eq!(entry.level, "INFO");
         assert_eq!(entry.message, "Synchronization completed successfully.");
-        assert_eq!(entry.icon_name, "nextsync-activity-ok");
+        assert_eq!(entry.icon_name, "io.github.gnacho.nextsync.activity-ok");
     }
 
     #[test]
@@ -174,18 +174,21 @@ mod tests {
     fn warning_has_warning_icon() {
         let entry = parse_activity_line("2026-08-07 14:12:41 WARNING Push unavailable");
         assert_eq!(entry.level, "WARNING");
-        assert_eq!(entry.icon_name, "nextsync-activity-warning");
+        assert_eq!(
+            entry.icon_name,
+            "io.github.gnacho.nextsync.activity-warning"
+        );
     }
 
     #[test]
     fn error_and_critical_have_their_icons() {
         assert_eq!(
             parse_activity_line("2026-08-07 14:12:41 ERROR Sync failed").icon_name,
-            "nextsync-activity-error"
+            "io.github.gnacho.nextsync.activity-error"
         );
         assert_eq!(
             parse_activity_line("2026-08-07 14:12:41 CRITICAL Keyring locked").icon_name,
-            "nextsync-activity-error"
+            "io.github.gnacho.nextsync.activity-error"
         );
     }
 
@@ -194,7 +197,7 @@ mod tests {
         let entry = parse_activity_line(
             "2026-08-07 14:12:41 INFO    SYNCHRONIZATION COMPLETED SUCCESSFULLY",
         );
-        assert_eq!(entry.icon_name, "nextsync-activity-ok");
+        assert_eq!(entry.icon_name, "io.github.gnacho.nextsync.activity-ok");
     }
 
     #[test]
@@ -202,7 +205,7 @@ mod tests {
         let entry = parse_activity_line(
             "2026-08-07 14:12:41 INFO    nacho@host · /home/user/Files: Sincronización completada",
         );
-        assert_eq!(entry.icon_name, "nextsync-activity-ok");
+        assert_eq!(entry.icon_name, "io.github.gnacho.nextsync.activity-ok");
     }
 
     #[test]
@@ -210,7 +213,7 @@ mod tests {
         let entry = parse_activity_line(
             "2026-08-07 14:12:41 INFO    alice@host · /home/alice/Nextcloud: Synchronization completed with conflicts",
         );
-        assert_eq!(entry.icon_name, "nextsync-activity-ok");
+        assert_eq!(entry.icon_name, "io.github.gnacho.nextsync.activity-ok");
     }
 
     #[test]
@@ -218,7 +221,7 @@ mod tests {
         let entry = parse_activity_line("nextcloudcmd started");
         assert_eq!(entry.level, "INFO");
         assert_eq!(entry.message, "nextcloudcmd started");
-        assert_eq!(entry.icon_name, "nextsync-activity-info");
+        assert_eq!(entry.icon_name, "io.github.gnacho.nextsync.activity-info");
     }
 
     #[test]
@@ -230,11 +233,29 @@ mod tests {
 
     #[test]
     fn level_icon_has_the_python_defaults() {
-        assert_eq!(level_icon("DEBUG"), "nextsync-activity-debug");
-        assert_eq!(level_icon("INFO"), "nextsync-activity-info");
-        assert_eq!(level_icon("WARNING"), "nextsync-activity-warning");
-        assert_eq!(level_icon("ERROR"), "nextsync-activity-error");
-        assert_eq!(level_icon("CRITICAL"), "nextsync-activity-error");
-        assert_eq!(level_icon("nope"), "nextsync-activity-info");
+        assert_eq!(
+            level_icon("DEBUG"),
+            "io.github.gnacho.nextsync.activity-debug"
+        );
+        assert_eq!(
+            level_icon("INFO"),
+            "io.github.gnacho.nextsync.activity-info"
+        );
+        assert_eq!(
+            level_icon("WARNING"),
+            "io.github.gnacho.nextsync.activity-warning"
+        );
+        assert_eq!(
+            level_icon("ERROR"),
+            "io.github.gnacho.nextsync.activity-error"
+        );
+        assert_eq!(
+            level_icon("CRITICAL"),
+            "io.github.gnacho.nextsync.activity-error"
+        );
+        assert_eq!(
+            level_icon("nope"),
+            "io.github.gnacho.nextsync.activity-info"
+        );
     }
 }

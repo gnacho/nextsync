@@ -236,11 +236,11 @@
       <div class="principle-list">
         <article class="principle">
           <svg class="icon" width="25" height="25" aria-hidden="true"><use href="#i-server" /></svg>
-          <div><h3 data-i18n="pillars.p1t">Agnóstico de servidor</h3><p data-i18n="pillars.p1d">NextSync no habla el protocolo de un fabricante: delega la sincronización en el CLI oficial del servidor (nextcloudcmd, opencloudcmd). La experiencia de escritorio es la misma para todos.</p></div>
+          <div><h3 data-i18n="pillars.p1t">Agnóstico de servidor</h3><p data-i18n="pillars.p1d">NextSync habla WebDAV con Nextcloud y OpenCloud desde su propio motor en Rust, sin depender del cliente de escritorio de cada fabricante. La experiencia es la misma para los dos.</p></div>
         </article>
         <article class="principle">
           <svg class="icon" width="25" height="25" aria-hidden="true"><use href="#i-cloud" /></svg>
-          <div><h3 data-i18n="pillars.p2t">El motor oficial hace el trabajo</h3><p data-i18n="pillars.p2d">La sincronización, los conflictos y la seguridad son del motor CLI. NextSync añade la capa GNOME y cubre lo que el CLI deja abierto, como la guardia de borrados masivos.</p></div>
+          <div><h3 data-i18n="pillars.p2t">El motor hace el trabajo</h3><p data-i18n="pillars.p2d">La sincronización, los conflictos y la seguridad corren dentro de la app, con su propio journal y subida por trozos. Encima, la capa GNOME: cola, progreso y guardia de borrados masivos.</p></div>
         </article>
         <article class="principle">
           <svg class="icon" width="25" height="25" aria-hidden="true"><use href="#i-key-round" /></svg>
@@ -253,7 +253,7 @@
       <div class="section-intro sticky-intro">
         <span class="section-label">NextSync / GNOME</span>
         <h2 id="features-title" data-i18n="features.title">Lo que hace por ti</h2>
-        <p data-i18n="features.lead">Una capa de escritorio cuidada sobre los motores oficiales. Ni más, ni menos.</p>
+        <p data-i18n="features.lead">Una capa de escritorio cuidada sobre un motor de sincronización propio. Ni más, ni menos.</p>
         <a class="text-link" href="#shots"><span data-i18n="features.seeUi">Ver la interfaz</span>
           <svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-arrow-right" /></svg>
         </a>
@@ -445,7 +445,7 @@
           <p data-i18n="install.note">Descarga el paquete .pkg.tar.zst más reciente desde GitHub Releases y ajusta el nombre del fichero.</p>
         </div>
         <div class="install-details">
-          <article><h3 data-i18n="install.r1t">Requisitos</h3><p data-i18n="install.r1d">Linux con GNOME (o un escritorio con bandeja StatusNotifier). Para cuentas Nextcloud hace falta nextcloudcmd (paquete nextcloud-client en Arch); para OpenCloud, el CLI oficial opencloudcmd.</p></article>
+          <article><h3 data-i18n="install.r1t">Requisitos</h3><p data-i18n="install.r1d">Linux con GNOME (o un escritorio con bandeja StatusNotifier). El motor de sincronización va dentro: no hace falta instalar nextcloudcmd ni opencloudcmd.</p></article>
           <article><h3 data-i18n="install.r2t">Desde el código fuente</h3><p data-i18n="install.r2d">El repo se compila con Cargo: cargo build --release y la batería se comprueba con cargo test. También hay PKGBUILD para generar el paquete localmente.</p></article>
         </div>
       </div>
@@ -464,8 +464,9 @@
       <div class="faq-list">
         <details><summary><span data-i18n="faq.q1">¿Es un producto oficial de Nextcloud?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a1">No. NextSync es un proyecto independiente y no oficial, sin afiliación con Nextcloud GmbH ni con el Heinlein Group. Nextcloud es una marca registrada de Nextcloud GmbH.</p></details>
         <details><summary><span data-i18n="faq.q2">¿Soporta archivos virtuales?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a2">No. NextSync mantiene espejos locales completos de las carpetas que elijas; no trabaja con ficheros bajo demanda.</p></details>
-        <details><summary><span data-i18n="faq.q3">¿Qué servidores soporta?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a3">Nextcloud y OpenCloud hoy, a través de sus CLI oficiales de sincronización. Cualquier plataforma que publique un CLI así puede añadirse detrás de la misma abstracción.</p></details>
+        <details><summary><span data-i18n="faq.q3">¿Qué servidores soporta?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a3">Nextcloud y OpenCloud hoy, con el motor propio de la app por WebDAV. Cualquier servidor con WebDAV estándar puede añadirse detrás de la misma capa.</p></details>
         <details><summary><span data-i18n="faq.q4">¿Envía telemetría?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a4">No. Sin telemetría, sin analítica y sin informes de fallos remotos.</p></details>
+        <details><summary><span data-i18n="faq.q5">¿Qué no hace?</span><svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-chevron-down" /></svg></summary><p data-i18n="faq.a5">No hay sistema de archivos virtual ni descarga bajo demanda, no hay cifrado cliente-servidor (E2E) y no hay límites de ancho de banda. Los espejos son completos y las credenciales viven en el llavero del sistema.</p></details>
       </div>
     </section>
   </main>
