@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="Estado de CI"></a>
-    <img src="https://img.shields.io/badge/version-0.41.0-blue?style=flat-square" alt="Versión 0.2.32">
+    <img src="https://img.shields.io/badge/version-0.42.0-blue?style=flat-square" alt="Versión 0.42.0">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 o posterior">
   </p>
 </div>
@@ -39,16 +39,34 @@ No hace falta instalar nada más. El motor habla WebDAV con Nextcloud y OpenClou
 
 NextSync empezó siendo [nextsync-py](https://github.com/gnacho/nextsync-py), una pequeña app en Python y GTK que envolvía el motor oficial de línea de comandos de Nextcloud en una experiencia de escritorio de verdad. Funcionaba lo bastante bien como para correr cada día, pero todo pagaba el peaje de Python: un intérprete que llevar encima, un arranque que esperar y tipado dinámico que convertía los errores de lifetime de GObject en sorpresas en tiempo de ejecución en vez de en errores de compilación.
 
-La reescritura en Rust llegó por razones prácticas: varias cuentas y varios proveedores en una sola app, un único binario pequeño y un código donde los callbacks asíncronos y los lifetimes de GObject no pueden morder en tiempo de ejecución. La filosofía del envoltorio siguió intacta y la capa de escritorio se reconstruyó por el camino.
+La reescritura en Rust llegó por razones prácticas: varias cuentas y varios proveedores en una sola app, un único binario pequeño y un código donde los callbacks asíncronos y los lifetimes de GObject no pueden morder en tiempo de ejecución. La capa de escritorio se reconstruyó por el camino.
+
+Durante un tiempo la reconciliación siguió siendo de los clientes oficiales de línea de comandos. Arrastran años de casos límite, pero también arrastran Qt y un segundo programa que instalar y actualizar. Desde la 0.42 el motor es parte de NextSync: la ventana y la sincronización comparten un proceso, un registro y una misma idea de qué ha cambiado.
+
+## El motor de sincronización
+
+**Descubrimiento.** El motor recorre el árbol remoto con `PROPFIND`, compara ETags para ver qué cambió en el servidor y usa los identificadores de archivo del servidor para detectar renombrados en vez de leerlos como un borrado más una subida. El lado local es un recorrido normal del sistema de archivos. El plan sale de comparar tres estados: lo que hay en disco, lo que hay en el servidor y lo que dejó anotado la última pasada.
+
+**Registro.** Cada carpeta guarda su propio registro de lo sincronizado: ruta, tamaño, fecha de modificación, ETag e identificador de archivo. Ese registro es la memoria que necesita el motor para distinguir un archivo nuevo de uno que borraste aquí y para no transferir nada que no haya cambiado. Es de la app, no la base de datos de otro programa.
+
+**Transferencias.** Los archivos pequeños viajan en una sola petición. Los grandes usan subidas por trozos en Nextcloud y TUS en OpenCloud, ambas reanudables. Las descargas van a un archivo temporal y se renombran al terminar, conservando la fecha de modificación que anuncia el servidor. Una pasada se puede cancelar y los reintentos esperan más en errores del servidor y límites de peticiones.
+
+**Conflictos.** Cuando han cambiado los dos lados, tu copia local se conserva con el mismo nombre `(Nextcloud conflicted copy <fecha>)` que la app ya entiende y la versión remota se descarga al lado. El resolutor de conflictos funciona igual que antes.
+
+**Seguridad.** El motor se niega a propagar un borrado con pinta de borrado masivo: una pasada que fuera a borrar más de la quinta parte de su plan se detiene antes de tocar nada, y no aplica ningún borrado cuando el listado remoto llegó incompleto. La revisión de borrados de la app sigue por encima y detiene la pasada antes de que empiece.
+
+**Tras actualizar.** Las cuentas existentes pasan una sola vez. La primera pasada arranca con el registro vacío y compara tamaño y fecha de modificación en ambos lados: lo que coincide se anota sin transferir y lo que difiere conserva las dos copias como copia en conflicto para que decidas. Un registro vacío no tiene nada que borrar, así que la primera pasada no puede eliminar nada.
+
+**Vuelta atrás.** Ajustes mantiene un interruptor por cuenta. Si lo desactivas, esa cuenta vuelve a `nextcloudcmd` u `opencloudcmd` en la siguiente pasada. Los archivos virtuales y el cifrado en el cliente siguen sin implementarse.
 
 ## Qué hace
 
 **Sincronización**
 
 - Varias cuentas y varias carpetas por cuenta, cada una mapeada a su ruta remota o su espacio de OpenCloud.
-- Reconciliación bidireccional con el motor Rust integrado, con transferencias delta y copias en conflicto.
-- Un sondeo remoto que comprueba primero el ETag de la carpeta y se salta el escaneo si el servidor no ha cambiado. El ETag sobrevive a los reinicios.
-- Un planificador que agrupa los disparadores en una única cola, nunca lanza dos motores sobre la misma carpeta y nunca re-ejecuta una carpeta por los eventos de su propia sincronización.
+- Reconciliación bidireccional con motor propio, con transferencias delta y copias en conflicto.
+- Un planificador que agrupa los disparadores en una única cola, nunca lanza dos sincronizaciones sobre la misma carpeta y nunca re-ejecuta una carpeta por los eventos de su propia sincronización.
+- Notificaciones push del servidor donde el servidor las soporta, con un intervalo de sondeo como alternativa.
 
 **Escritorio**
 
@@ -92,7 +110,7 @@ NextSync mantiene espejos locales completos. No hace todo lo que hacen los clien
 Descarga el `.pkg.tar.zst` de la [última release](https://github.com/gnacho/nextsync/releases/latest) e instálalo:
 
 ```bash
-sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
 ```
 
 El paquete depende de `gtk4` y `libadwaita`. Trae su propio motor de sincronización, así que no hace falta ningún cliente externo. Los paquetes opcionales `nextcloud-client` y `opencloud-desktop` solo sirven si quieres pasar una carpeta a modo heredado.
@@ -118,7 +136,7 @@ El binario queda en `target/release/nextsync`. Se incluye un `PKGBUILD` por si p
 
 ## Los borrados viajan en ambos sentidos
 
-La sincronización también replica borrados. Si una carpeta desaparece en local, desaparece en el servidor, y al revés. Guarda una copia de seguridad independiente de lo que sea importante y nunca apuntes un segundo motor de sincronización a la misma carpeta local. La revisión de borrados para los desastres evidentes, pero una revisión no es una copia de seguridad.
+La sincronización también replica borrados. Si una carpeta desaparece en local, desaparece en el servidor, y al revés. El motor ya frena un borrado con pinta de borrado masivo y la app te pregunta antes de propagarlo, pero una revisión no es una copia de seguridad: guarda una copia independiente de lo que sea importante y nunca apuntes un segundo motor de sincronización a la misma carpeta local.
 
 ## Ficheros en disco
 

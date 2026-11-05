@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/version-0.41.0-blue?style=flat-square" alt="Version 0.2.32">
+    <img src="https://img.shields.io/badge/version-0.42.0-blue?style=flat-square" alt="Version 0.42.0">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 or later">
   </p>
 </div>
@@ -39,16 +39,34 @@ Nothing else needs to be installed. The engine speaks WebDAV to Nextcloud and Op
 
 NextSync started as [nextsync-py](https://github.com/gnacho/nextsync-py), a small Python and GTK app that wrapped the official Nextcloud command line engine in a proper desktop experience. It worked well enough to run every day, but everything paid the Python tax: an interpreter to ship, a startup to wait for, and dynamic typing that turned GObject lifetime mistakes into runtime surprises instead of compiler errors.
 
-The rewrite in Rust happened for practical reasons: several accounts and several providers in a single app, one small binary, and a codebase where async callbacks and GObject lifetimes cannot bite at runtime. The wrapper philosophy carried over intact and the desktop layer was rebuilt along the way.
+The rewrite in Rust happened for practical reasons: several accounts and several providers in a single app, one small binary, and a codebase where async callbacks and GObject lifetimes cannot bite at runtime. The desktop layer was rebuilt along the way.
+
+For a while the reconciliation still belonged to the official command line clients. They carry years of edge cases, but they also carry Qt and a second program to keep installed and updated. Since 0.42 the engine is part of NextSync, so the window and the synchronization share one process, one journal and one idea of what changed.
+
+## The sync engine
+
+**Discovery.** The engine walks the remote tree with `PROPFIND`, compares ETags to see what changed on the server, and uses the server file ids to notice renames instead of reading them as a delete plus an upload. The local side is a plain filesystem walk. The plan comes from comparing three states: what is on disk, what is on the server, and what the last run left recorded.
+
+**Journal.** Each folder keeps its own record of what was synchronized: path, size, modification time, ETag and file id. That record is the memory the engine needs to tell a new file from a file you deleted here, and to avoid transferring anything that did not change. It belongs to the app, not to another program's database.
+
+**Transfers.** Small files travel in one request. Large ones use chunked uploads on Nextcloud and TUS on OpenCloud, both resumable. Downloads stream to a temporary file and are renamed when complete, keeping the modification time the server reports. A run can be cancelled, and retries back off on server errors and rate limits.
+
+**Conflicts.** When both sides changed, your local copy is kept under the same `(Nextcloud conflicted copy <date>)` name the app already understands, and the remote version is downloaded next to it. The conflict resolver works exactly as before.
+
+**Safety.** The engine refuses to propagate a deletion that looks like a mass deletion: a run that would delete more than a fifth of its plan stops before touching anything, and no deletion is applied at all when the remote listing came back incomplete. The app's own delete review sits on top of that and still stops a run before it starts.
+
+**After upgrading.** Existing accounts move over once. The first run starts with an empty journal and compares size and modification time on both sides: what matches is recorded without transferring, and what differs keeps both copies as a conflicted copy so you can decide. An empty journal has nothing to delete, so the first run cannot remove anything.
+
+**Fallback.** Settings keeps a per-account switch. Turn it off and that account goes back to `nextcloudcmd` or `opencloudcmd` on its next run. Virtual files and client side encryption are still not implemented.
 
 ## What it does
 
 **Synchronization**
 
 - Multiple accounts, and multiple folders per account, each mapped to its own remote path or OpenCloud space.
-- Bidirectional reconciliation through the built-in Rust engine, with delta transfers and conflicted copies.
-- A remote poll that checks the folder ETag first and skips the scan when the server did not change. The ETag survives restarts.
-- A scheduler that coalesces triggers into one queue, never runs two engines on the same folder, and never re-runs a folder because of its own sync events.
+- Bidirectional reconciliation with its own engine, with delta transfers and conflicted copies.
+- A scheduler that coalesces triggers into one queue, never runs two synchronizations on the same folder, and never re-runs a folder because of its own sync events.
+- Server push notifications where the server supports them, with a polling interval as the fallback.
 
 **Desktop**
 
@@ -92,7 +110,7 @@ NextSync keeps full local mirrors. It does not do everything the official client
 Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/nextsync/releases/latest) and install it:
 
 ```bash
-sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
 ```
 
 The package depends on `gtk4` and `libadwaita`. It brings its own sync engine, so no external client is required. The optional `nextcloud-client` and `opencloud-desktop` packages are only useful if you want to switch a folder to legacy mode.
@@ -118,7 +136,7 @@ The binary lands in `target/release/nextsync`. A `PKGBUILD` is included if you p
 
 ## Deletions travel both ways
 
-Sync mirrors deletions too. If a folder disappears locally, it disappears on the server, and the other way around. Keep an independent backup of anything important, and never point a second sync engine at the same local folder. The deletion review stops obvious disasters, but a review is not a backup.
+Sync mirrors deletions too. If a folder disappears locally, it disappears on the server, and the other way around. The engine already stops a deletion that looks like a mass deletion, and the app asks you before propagating one, but a review is not a backup: keep an independent copy of anything important and never point a second sync engine at the same local folder.
 
 ## Files on disk
 

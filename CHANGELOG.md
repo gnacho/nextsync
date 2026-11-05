@@ -1,6 +1,14 @@
 # Changelog
 
-Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
+Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.01 por release desde 0.41.0** (decisión del usuario, 5-Nov-2026; sustituye al +0.0.2 anterior).
+
+## [0.42.0] - 2026-11-05
+
+### Changed
+
+- The native Rust engine is the default for every account. Configurations written by older versions move over once through the schema v8 migration; turning the switch off in Settings still falls back to `nextcloudcmd` or `opencloudcmd` (#262).
+- The setup wizard no longer blocks finishing when the external client is missing, and the folder menu only offers to install it for accounts that opted out of the native engine (#262).
+- The README and the landing describe the engine the app actually runs, including what the first run does on an account that the external client synchronized before (#262).
 
 ## [0.41.0] - 2026-11-05
 

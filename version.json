@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.41.0",
+  "version": "0.42.0",
   "mandatory": false,
-  "summary": "Native sync engine: Nextcloud and OpenCloud synchronize without nextcloudcmd or opencloudcmd.",
+  "summary": "The native sync engine is now the default: Nextcloud and OpenCloud synchronize without nextcloudcmd or opencloudcmd.",
   "changelog": [
-    "New Rust sync engine that replaces the command line clients: WebDAV discovery, its own SQLite journal, per file progress, conflict names the existing resolver reads, a delete guard and cancellation.",
-    "Chunked uploads on Nextcloud and TUS uploads on OpenCloud, with resume, plus streaming downloads that keep the mtime.",
-    "Opt-in per account in Settings, so existing accounts keep using nextcloudcmd or opencloudcmd until the switch is turned on.",
-    "Removes the Qt dependency and the need for a sync client installed on the host, which is the blocker for a Flatpak build."
+    "Every account uses the native Rust engine. Existing configurations move over once, and turning the switch off in Settings still falls back to the external command line client.",
+    "The first run on an account synchronized by the old client records what matches, keeps differences as conflicted copies and deletes nothing.",
+    "The setup wizard no longer requires the external client to finish, and the folder menu only offers to install it for accounts that opted out."
   ],
   "released_at": "2026-11-05T00:00:00Z"
 }

@@ -277,7 +277,7 @@
         <article class="feature">
           <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-shield-alert" /></svg>
           <h3 data-i18n="features.f4t">Guardia de borrados</h3>
-          <p data-i18n="features.f4d">Un borrado masivo local bloquea la sincronización antes de que el motor lo propague al servidor. Los CLI oficiales no piden confirmación en modo no interactivo; NextSync sí.</p>
+          <p data-i18n="features.f4d">Un borrado masivo local bloquea la sincronización antes de que llegue al servidor. Los clientes oficiales no piden confirmación en modo no interactivo; NextSync sí.</p>
         </article>
         <article class="feature">
           <svg class="icon" width="23" height="23" aria-hidden="true"><use href="#i-panel-top" /></svg>
@@ -374,10 +374,10 @@
               <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span></span></td>
             </tr>
             <tr>
-              <th scope="row" data-i18n="compare.r3">Motor de sync = CLI oficial del servidor</th>
+              <th scope="row" data-i18n="compare.r3">Sincronización sin Qt</th>
               <td class="nextsync-col"><span class="status-cell yes"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-check" /></svg><span class="sr-only" data-i18n="compare.yes">Sí</span></span></td>
-              <td><span class="status-cell"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-minus" /></svg><span class="sr-only" data-i18n="compare.partial">Parcial</span><span data-i18n="compare.own1">(motor propio)</span></span></td>
-              <td><span class="status-cell"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-minus" /></svg><span class="sr-only" data-i18n="compare.partial">Parcial</span><span data-i18n="compare.own2">(motor propio)</span></span></td>
+              <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span><span data-i18n="compare.qt1">(Qt)</span></span></td>
+              <td><span class="status-cell no"><svg class="icon" width="17" height="17" aria-hidden="true"><use href="#i-x" /></svg><span class="sr-only" data-i18n="compare.no">No</span><span data-i18n="compare.qt2">(Qt)</span></span></td>
             </tr>
             <tr>
               <th scope="row" data-i18n="compare.r4">Archivos virtuales bajo demanda</th>
@@ -435,7 +435,7 @@
             <span>pacman / x86_64</span>
           </div>
           <div class="command-box">
-            <code id="installCmd">sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst</code>
+            <code id="installCmd">sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst</code>
             <button type="button" id="copyBtn" aria-label="Copiar comando" data-i18n-aria="install.copy">
               <svg class="icon i-copy" width="19" height="19" aria-hidden="true"><use href="#i-copy" /></svg>
               <svg class="icon i-copied" width="19" height="19" aria-hidden="true"><use href="#i-check-check" /></svg>
