@@ -2829,3 +2829,11 @@ msgstr "En distribuciones sin este paquete, instálalo desde el AUR (por ejemplo
 #: src/ui/engine_install.rs
 msgid "The installer crashed."
 msgstr "El instalador se cerró inesperadamente."
+
+#: src/ui/settings.rs
+msgid "Use the native synchronization engine"
+msgstr "Usar el motor de sincronización nativo"
+
+#: src/ui/settings.rs
+msgid "Sync without nextcloudcmd or opencloudcmd. Recommended. Experimental."
+msgstr "Sincroniza sin nextcloudcmd ni opencloudcmd. Recomendado. Experimental."

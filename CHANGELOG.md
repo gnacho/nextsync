@@ -2,6 +2,18 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.3.0] - 2026-11-05
+
+### Added
+
+- Native Rust sync engine, opt-in per account in Settings, that replaces
+  `nextcloudcmd` and `opencloudcmd`: WebDAV discovery, its own SQLite journal,
+  per-file progress, conflict handling compatible with the existing conflict
+  resolver, delete guard and cancellation.
+- Chunked uploads on Nextcloud and TUS uploads on OpenCloud, with resume.
+- Bandwidth-free, Qt-free synchronization: the Flatpak build no longer needs
+  the command line clients.
+
 ## [0.2.32] - 2026-09-18
 
 ### Changed

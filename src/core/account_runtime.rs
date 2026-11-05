@@ -369,8 +369,21 @@ impl FolderRuntime {
         network: &NetworkConfig,
         exclude_file: Option<std::path::PathBuf>,
         executable: Option<std::path::PathBuf>,
+        credentials: Option<std::sync::Arc<dyn crate::nextcloud::sync_engine::CredentialSource>>,
     ) -> (Box<dyn SyncRunner>, async_channel::Receiver<SyncProgress>) {
         let (tx, rx) = async_channel::bounded(256);
+        if account.sync.native_engine {
+            let mut runner = crate::nextcloud::native_runner::NativeEngineRunner::new(
+                account.clone(),
+                folder.clone(),
+                network.clone(),
+                tx,
+            );
+            if let Some(source) = credentials {
+                runner = runner.with_credentials(source);
+            }
+            return (Box::new(runner), rx);
+        }
         let engine = SyncEngine::new(
             account.clone(),
             folder.clone(),
@@ -958,7 +971,7 @@ impl AccountRuntime {
             return;
         }
         let (runner, progress_rx) =
-            FolderRuntime::engine_for(&self.account, &folder, &self.network, None, None);
+            FolderRuntime::engine_for(&self.account, &folder, &self.network, None, None, None);
         let runtime = FolderRuntime::new(
             &self.account,
             folder,

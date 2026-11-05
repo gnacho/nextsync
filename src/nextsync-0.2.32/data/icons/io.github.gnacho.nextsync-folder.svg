@@ -1,0 +1,20 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="128"
+  height="128"
+  viewBox="0 0 24 24"
+>
+  <defs>
+    <linearGradient id="folder" x1="4" y1="3" x2="21" y2="20" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62A0EA"/>
+      <stop offset="1" stop-color="#3584E4"/>
+    </linearGradient>
+  </defs>
+  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" fill="url(#folder)"/>
+  <circle cx="17.5" cy="17" r="4.9" fill="#fff"/>
+  <g transform="translate(11.5 10.4) scale(0.5)" fill="none" stroke="#6D4AFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15.251A4.5 4.5 0 0 0 17.5 8h-1.79A7 7 0 1 0 3 13.607" />
+    <path d="M7 11v4h4" />
+    <path d="M8 19a5 5 0 0 0 9-3 4.5 4.5 0 0 0-4.5-4.5 4.82 4.82 0 0 0-3.41 1.41L7 15" />
+  </g>
+</svg>

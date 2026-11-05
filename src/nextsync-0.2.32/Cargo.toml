@@ -1,0 +1,49 @@
+[workspace]
+members = ["crates/native-engine"]
+default-members = [".", "crates/native-engine"]
+resolver = "2"
+
+[package]
+name = "nextsync"
+version = "0.2.32"
+edition = "2021"
+rust-version = "1.83"
+license = "GPL-3.0-or-later"
+description = "NextSync - Nextcloud desktop client for GNOME (Rust rewrite)"
+
+[dependencies]
+native-engine = { path = "crates/native-engine" }
+async-channel = "2"
+data-encoding = "2"
+gio = "0.22"
+glib = { version = "0.22", features = ["futures"] }
+gtk4 = { version = "0.11", features = ["v4_22"] }
+ksni = { version = "0.3", features = ["blocking"] }
+notify-rust = "4"
+libadwaita = { version = "0.9", features = ["v1_5"] }
+notify = "8"
+rand = "0.10"
+roxmltree = "0.21"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rustls = "0.23"
+rustls-native-certs = "0.8"
+secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
+# ~3.2 pinned (not 3.x): ureq 3.3+/3.4 raised the MSRV to 1.85, above this
+# crate's declared rust-version = "1.83". ureq 3.2.0 is MSRV 1.71.1 and ships
+# rustls 0.23 (same TLS stack as the tungstenite push client). We disable the
+# default `rustls` feature (which would pull the `ring` provider into the
+# process and clash with the crate's `aws-lc-rs`) and configure the aws-lc-rs
+# CryptoProvider explicitly instead — the pattern ureq documents for
+# `rustls-no-provider`. See src/nextcloud/api.rs for the verified choice.
+ureq = { version = "~3.2", default-features = false, features = ["rustls-no-provider", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+zbus = "5"
+
+[dev-dependencies]
+tempfile = "3"
+# Local HTTP server for the api.rs integration tests (localhost only, no TLS,
+# default features are empty so no rustls 0.20/openssl are pulled in).
+tiny_http = "0.12"

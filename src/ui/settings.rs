@@ -656,6 +656,7 @@ fn build_sync_advanced_page(
     }
     let detailed_group = libadwaita::PreferencesGroup::new();
     detailed_group.add(&detailed_output_row(store, account_id, callbacks, account));
+    detailed_group.add(&native_engine_row(store, account_id, callbacks, account));
     page.add(&detailed_group);
     page.add(&deletion_guard_group(store, account_id, account, callbacks));
     page
@@ -883,6 +884,34 @@ fn build_advanced_page(
 
 /// Detailed-output switch row (account-owned, issue #56): reused by the
 /// account settings panel.
+pub(crate) fn native_engine_row(
+    store: &ConfigStore,
+    account_id: &str,
+    callbacks: &SettingsCallbacks,
+    account: &AccountConfig,
+) -> libadwaita::SwitchRow {
+    let row = libadwaita::SwitchRow::builder()
+        .title(t("Use the native synchronization engine"))
+        .subtitle(t(
+            "Sync without nextcloudcmd or opencloudcmd. Recommended. Experimental.",
+        ))
+        .active(account.sync.native_engine)
+        .build();
+    let store = store.clone();
+    let account_id = account_id.to_string();
+    let callbacks = callbacks.clone();
+    let guard = row.clone();
+    row.connect_active_notify(move |_| {
+        if let Err(error) = persist_account(&store, &account_id, |account| {
+            account.sync.native_engine = guard.is_active();
+        }) {
+            eprintln!("Settings: could not save native engine: {error}");
+        }
+        invoke(&callbacks.on_reconfigure);
+    });
+    row
+}
+
 pub(crate) fn detailed_output_row(
     store: &ConfigStore,
     account_id: &str,
