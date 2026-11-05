@@ -77,6 +77,11 @@ const MTIME_TOLERANCE: i64 = 2;
 /// True when some ancestor of `key` exists locally as a file. The remote side
 /// then describes a subtree that the local side holds as one file, which is a
 /// type mismatch, never a deletion (#271).
+/// True when the local side holds exactly that path as a file.
+fn local_file_at(key: &str, local: &BTreeMap<&str, &LocalEntry>) -> bool {
+    local.get(key).is_some_and(|entry| !entry.is_dir)
+}
+
 fn shadowed_by_local_file(key: &str, local: &BTreeMap<&str, &LocalEntry>) -> bool {
     let mut prefix = String::new();
     for segment in key.split('/') {
@@ -163,6 +168,15 @@ pub fn reconcile(
         if key == ".nextsync" || key.starts_with(".nextsync/") {
             continue;
         }
+        // A local file where the server has a collection shadows every child:
+        // downloading them would fail with ENOTDIR and re-download the WebDAV
+        // banner page (#271). The parent is reported as a conflict instead.
+        if let Some((dir, _)) = key.rsplit_once('/') {
+            let shadowed = local_file_at(dir, &loc) || shadowed_by_local_file(dir, &loc);
+            if shadowed {
+                continue;
+            }
+        }
         let l = loc.get(key);
         let r = rem.get(key);
         let j = jr.get(key);
@@ -184,6 +198,15 @@ pub fn reconcile(
                 // mtimes untouched. Treating that as a local edit queued the
                 // whole tree for upload, so only size and mtime decide here.
                 let local_changed = l.size != j.size || l.mtime != j.mtime;
+                // Directories carry no content: a changed mtime only means a
+                // child appeared or vanished. Conflicting one renamed a whole
+                // tree on disk, so they are always recorded, never resolved.
+                if l.is_dir && r.is_dir {
+                    actions.push(Action::RecordOnly {
+                        rel: key.to_string(),
+                    });
+                    continue;
+                }
                 if l.is_dir != r.is_dir || (remote_changed && local_changed) {
                     actions.push(Action::Conflict {
                         rel: key.to_string(),

@@ -96,7 +96,7 @@ fn inode_of(_meta: &std::fs::Metadata) -> u64 {
 /// and the remote listing so both sides agree on what the engine ignores: an
 /// entry missing from one side because it is ignored must never look like a
 /// deletion (#271).
-pub(crate) fn ignored(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
+pub fn ignored(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel);
     excluded(rel, name, is_dir, cfg)
 }
