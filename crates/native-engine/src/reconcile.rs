@@ -157,6 +157,12 @@ pub fn reconcile(
     };
 
     for key in keys {
+        // The journal lives inside the synced folder. It must never take part
+        // in reconciliation: an earlier run could have uploaded it, and with a
+        // complete remote listing the engine would then delete the local copy.
+        if key == ".nextsync" || key.starts_with(".nextsync/") {
+            continue;
+        }
         let l = loc.get(key);
         let r = rem.get(key);
         let j = jr.get(key);

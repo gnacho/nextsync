@@ -83,7 +83,7 @@ pub fn folder_status_color(state: AppState) -> Option<&'static str> {
 /// slash: the name is what matters, the slash is noise.
 pub fn remote_label(remote_path: &str) -> String {
     let folder = remote_path.trim_start_matches('/');
-    t("Local copy of {folder}").replace("{folder}", folder)
+    t("Remote folder: {folder}").replace("{folder}", folder)
 }
 
 /// The translated suffix for the folder's local used space ("{size} local",
@@ -737,8 +737,8 @@ mod tests {
         assert_eq!(label, "Sincronizado");
         let (_, label) = folder_status_presentation(AppState::Offline);
         assert_eq!(label, "Sin conexión");
-        assert_eq!(remote_label("/docs"), "Copia local de docs");
-        assert_eq!(remote_label("docs"), "Copia local de docs");
+        assert_eq!(remote_label("/docs"), "Carpeta remota: docs");
+        assert_eq!(remote_label("docs"), "Carpeta remota: docs");
         // Live progress line (issue #86): translated action plus counter.
         let mut progress =
             crate::nextcloud::nextcloudcmd_progress::SyncProgress::new("upload", "/tmp/a/b.txt");
@@ -898,14 +898,14 @@ mod tests {
                 None,
             );
             assert_eq!(row.row.title(), "a");
-            assert_eq!(row.row.subtitle().as_deref(), Some("Local copy of docs"));
+            assert_eq!(row.row.subtitle().as_deref(), Some("Remote folder: docs"));
             // The local-size suffix stays hidden until a size arrives and
             // leaves the subtitle alone (issue #43).
             assert!(!row.local_size.is_visible());
             row.set_local_size("12.4 KiB local");
             assert_eq!(row.local_size.label(), "12.4 KiB local");
             assert!(row.local_size.is_visible());
-            assert_eq!(row.row.subtitle().as_deref(), Some("Local copy of docs"));
+            assert_eq!(row.row.subtitle().as_deref(), Some("Remote folder: docs"));
             row.set_local_size("");
             assert!(!row.local_size.is_visible());
             // Outside the synchronized state the synced-in-local segment
@@ -926,7 +926,7 @@ mod tests {
                 Some("Waiting for another folder to finish…")
             );
             state.set(AppState::IdleOk, "ok");
-            assert_eq!(row.row.subtitle().as_deref(), Some("Local copy of docs"));
+            assert_eq!(row.row.subtitle().as_deref(), Some("Remote folder: docs"));
             // Live progress (issue #86): a progress event shows the line,
             // clearing it hides the label again.
             state.set_progress(Some(crate::nextcloud::sync_engine::SyncProgress {

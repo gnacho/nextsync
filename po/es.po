@@ -2739,8 +2739,8 @@ msgstr "Versión del servidor conservada en {count} archivo(s)"
 msgid "Resolve All Conflicts"
 msgstr "Resolver todos los conflictos"
 
-msgid "Local copy of {folder}"
-msgstr "Copia local de {folder}"
+msgid "Remote folder: {folder}"
+msgstr "Carpeta remota: {folder}"
 
 msgid "Waiting to synchronize"
 msgstr "A la espera"

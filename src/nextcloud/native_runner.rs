@@ -24,10 +24,7 @@ impl ProgressSink for ChannelSink {
         if progress.bytes_total > 0 {
             eprintln!(
                 "sync: {} {} ({}/{})",
-                progress.action,
-                progress.path,
-                progress.bytes_done,
-                progress.bytes_total
+                progress.action, progress.path, progress.bytes_done, progress.bytes_total
             );
         } else {
             eprintln!("sync: {} {}", progress.action, progress.path);
