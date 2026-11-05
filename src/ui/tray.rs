@@ -454,26 +454,44 @@ mod tests {
     #[test]
     fn icon_name_follows_the_python_tray_glyph_choice() {
         let (unconfigured, _rx) = item_with(AppState::Unconfigured);
-        assert_eq!(unconfigured.icon_name(), "io.github.gnacho.nextsync.tray-cloud-off");
+        assert_eq!(
+            unconfigured.icon_name(),
+            "io.github.gnacho.nextsync.tray-cloud-off"
+        );
 
         let (offline, _rx) = item_with(AppState::Offline);
         assert_eq!(offline.icon_name(), "io.github.gnacho.nextsync.tray-cloud");
 
         // Everything synced and OK gets the cloud-check glyph (issue #76).
         let (idle, _rx) = item_with(AppState::IdleOk);
-        assert_eq!(idle.icon_name(), "io.github.gnacho.nextsync.tray-cloud-check");
+        assert_eq!(
+            idle.icon_name(),
+            "io.github.gnacho.nextsync.tray-cloud-check"
+        );
 
         // A running or queued sync shows the swirl (issue #87).
         let (syncing, _rx) = item_with(AppState::Syncing);
-        assert_eq!(syncing.icon_name(), "io.github.gnacho.nextsync.tray-cloud-sync");
+        assert_eq!(
+            syncing.icon_name(),
+            "io.github.gnacho.nextsync.tray-cloud-sync"
+        );
         let (queued, _rx) = item_with(AppState::SyncQueued);
-        assert_eq!(queued.icon_name(), "io.github.gnacho.nextsync.tray-cloud-sync");
+        assert_eq!(
+            queued.icon_name(),
+            "io.github.gnacho.nextsync.tray-cloud-sync"
+        );
 
         // Problem states show cloud-alert (issue #87).
         let (error, _rx) = item_with(AppState::Error);
-        assert_eq!(error.icon_name(), "io.github.gnacho.nextsync.tray-cloud-alert");
+        assert_eq!(
+            error.icon_name(),
+            "io.github.gnacho.nextsync.tray-cloud-alert"
+        );
         let (auth, _rx) = item_with(AppState::AuthRequired);
-        assert_eq!(auth.icon_name(), "io.github.gnacho.nextsync.tray-cloud-alert");
+        assert_eq!(
+            auth.icon_name(),
+            "io.github.gnacho.nextsync.tray-cloud-alert"
+        );
 
         // Paused keeps the plain cloud.
         let (paused, _rx) = item_with(AppState::PausedUser);
@@ -519,6 +537,9 @@ mod tests {
         ] {
             assert_eq!(status_icon_key_to_name(key), name);
         }
-        assert_eq!(status_icon_key_to_name("bogus"), "io.github.gnacho.nextsync.tray-cloud");
+        assert_eq!(
+            status_icon_key_to_name("bogus"),
+            "io.github.gnacho.nextsync.tray-cloud"
+        );
     }
 }

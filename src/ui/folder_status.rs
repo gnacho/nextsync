@@ -25,18 +25,42 @@ use crate::util::i18n::{plural, t};
 /// `'static` lifetimes.
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("io.github.gnacho.nextsync.row-not-configured", t("Not Configured")),
+        AppState::Unconfigured => (
+            "io.github.gnacho.nextsync.row-not-configured",
+            t("Not Configured"),
+        ),
         AppState::IdleOk => ("io.github.gnacho.nextsync.row-ok", t("Synchronized")),
-        AppState::IdleManualOnly => ("io.github.gnacho.nextsync.row-paused", t("Automatic Sync Is Off")),
-        AppState::IdleNotSynced => ("io.github.gnacho.nextsync.row-paused", t("Not Synchronized Yet")),
-        AppState::SyncQueued => ("io.github.gnacho.nextsync.row-paused", t("Waiting to synchronize")),
+        AppState::IdleManualOnly => (
+            "io.github.gnacho.nextsync.row-paused",
+            t("Automatic Sync Is Off"),
+        ),
+        AppState::IdleNotSynced => (
+            "io.github.gnacho.nextsync.row-paused",
+            t("Not Synchronized Yet"),
+        ),
+        AppState::SyncQueued => (
+            "io.github.gnacho.nextsync.row-paused",
+            t("Waiting to synchronize"),
+        ),
         AppState::Syncing => ("io.github.gnacho.nextsync.row-syncing", t("Synchronizing…")),
         AppState::PausedUser => ("io.github.gnacho.nextsync.row-paused", t("Paused")),
-        AppState::PausedBattery => ("io.github.gnacho.nextsync.row-battery", t("Paused on Battery")),
+        AppState::PausedBattery => (
+            "io.github.gnacho.nextsync.row-battery",
+            t("Paused on Battery"),
+        ),
         AppState::Offline => ("io.github.gnacho.nextsync.row-offline", t("Offline")),
-        AppState::Error => ("io.github.gnacho.nextsync.row-error", t("Synchronization Error")),
-        AppState::AuthRequired => ("io.github.gnacho.nextsync.row-error", t("Credentials rejected")),
-        AppState::KeyringLocked => ("io.github.gnacho.nextsync.row-error", t("Password Keyring Locked")),
+        AppState::Error => (
+            "io.github.gnacho.nextsync.row-error",
+            t("Synchronization Error"),
+        ),
+        AppState::AuthRequired => (
+            "io.github.gnacho.nextsync.row-error",
+            t("Credentials rejected"),
+        ),
+        AppState::KeyringLocked => (
+            "io.github.gnacho.nextsync.row-error",
+            t("Password Keyring Locked"),
+        ),
         AppState::DeleteReview => ("io.github.gnacho.nextsync.row-error", t("Review Deletions")),
     }
 }
@@ -377,7 +401,9 @@ impl FolderStatusRow {
                 Some(t("Resolve conflicts")),
                 Some("folder.resolve-conflicts"),
             );
-            item.set_icon(&gio::ThemedIcon::new("io.github.gnacho.nextsync.list-checks-symbolic"));
+            item.set_icon(&gio::ThemedIcon::new(
+                "io.github.gnacho.nextsync.list-checks-symbolic",
+            ));
             menu.append_item(&item);
         }
         if actions.contains_key("review-deletions") {
@@ -414,7 +440,9 @@ impl FolderStatusRow {
         let pending_item = actions.contains_key("pending-changes").then(|| {
             let item =
                 gio::MenuItem::new(Some(t("Pending changes…")), Some("folder.pending-changes"));
-            item.set_icon(&gio::ThemedIcon::new("io.github.gnacho.nextsync.list-checks-symbolic"));
+            item.set_icon(&gio::ThemedIcon::new(
+                "io.github.gnacho.nextsync.list-checks-symbolic",
+            ));
             item
         });
         let popover = gtk4::PopoverMenu::from_model(Some(&menu));

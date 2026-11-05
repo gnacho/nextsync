@@ -2107,7 +2107,9 @@ fn hamburger_menu_model() -> gio::Menu {
     preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
     items.append_item(&preferences_item);
     let about_item = gio::MenuItem::new(Some(t("About")), Some("app.about"));
-    about_item.set_icon(&gio::ThemedIcon::new("io.github.gnacho.nextsync.info-symbolic"));
+    about_item.set_icon(&gio::ThemedIcon::new(
+        "io.github.gnacho.nextsync.info-symbolic",
+    ));
     items.append_item(&about_item);
     menu.append_section(None, &items);
     menu
@@ -2460,8 +2462,14 @@ mod tests {
     #[test]
     fn summary_light_maps_severity() {
         use crate::state::AppState;
-        assert_eq!(summary_light_for(AppState::IdleOk), "io.github.gnacho.nextsync.status-ok");
-        assert_eq!(summary_light_for(AppState::Syncing), "io.github.gnacho.nextsync.status-ok");
+        assert_eq!(
+            summary_light_for(AppState::IdleOk),
+            "io.github.gnacho.nextsync.status-ok"
+        );
+        assert_eq!(
+            summary_light_for(AppState::Syncing),
+            "io.github.gnacho.nextsync.status-ok"
+        );
         assert_eq!(
             summary_light_for(AppState::PausedUser),
             "io.github.gnacho.nextsync.status-paused"
@@ -2470,7 +2478,10 @@ mod tests {
             summary_light_for(AppState::Offline),
             "io.github.gnacho.nextsync.status-paused"
         );
-        assert_eq!(summary_light_for(AppState::Error), "io.github.gnacho.nextsync.status-error");
+        assert_eq!(
+            summary_light_for(AppState::Error),
+            "io.github.gnacho.nextsync.status-error"
+        );
         assert_eq!(
             summary_light_for(AppState::DeleteReview),
             "io.github.gnacho.nextsync.status-error"

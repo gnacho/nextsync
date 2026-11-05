@@ -174,7 +174,10 @@ mod tests {
     fn warning_has_warning_icon() {
         let entry = parse_activity_line("2026-08-07 14:12:41 WARNING Push unavailable");
         assert_eq!(entry.level, "WARNING");
-        assert_eq!(entry.icon_name, "io.github.gnacho.nextsync.activity-warning");
+        assert_eq!(
+            entry.icon_name,
+            "io.github.gnacho.nextsync.activity-warning"
+        );
     }
 
     #[test]
@@ -230,11 +233,29 @@ mod tests {
 
     #[test]
     fn level_icon_has_the_python_defaults() {
-        assert_eq!(level_icon("DEBUG"), "io.github.gnacho.nextsync.activity-debug");
-        assert_eq!(level_icon("INFO"), "io.github.gnacho.nextsync.activity-info");
-        assert_eq!(level_icon("WARNING"), "io.github.gnacho.nextsync.activity-warning");
-        assert_eq!(level_icon("ERROR"), "io.github.gnacho.nextsync.activity-error");
-        assert_eq!(level_icon("CRITICAL"), "io.github.gnacho.nextsync.activity-error");
-        assert_eq!(level_icon("nope"), "io.github.gnacho.nextsync.activity-info");
+        assert_eq!(
+            level_icon("DEBUG"),
+            "io.github.gnacho.nextsync.activity-debug"
+        );
+        assert_eq!(
+            level_icon("INFO"),
+            "io.github.gnacho.nextsync.activity-info"
+        );
+        assert_eq!(
+            level_icon("WARNING"),
+            "io.github.gnacho.nextsync.activity-warning"
+        );
+        assert_eq!(
+            level_icon("ERROR"),
+            "io.github.gnacho.nextsync.activity-error"
+        );
+        assert_eq!(
+            level_icon("CRITICAL"),
+            "io.github.gnacho.nextsync.activity-error"
+        );
+        assert_eq!(
+            level_icon("nope"),
+            "io.github.gnacho.nextsync.activity-info"
+        );
     }
 }

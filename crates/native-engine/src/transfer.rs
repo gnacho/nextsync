@@ -54,9 +54,8 @@ impl<'a> ProgressReporter<'a> {
     }
 
     fn emit(&mut self) {
-        self.sink.event(
-            Progress::new(self.action, self.path.clone()).with_bytes(self.done, self.total),
-        );
+        self.sink
+            .event(Progress::new(self.action, self.path.clone()).with_bytes(self.done, self.total));
         self.last = std::time::Instant::now();
     }
 }
@@ -642,7 +641,8 @@ mod chunk_resume_tests {
     #[test]
     #[ignore]
     fn chunked_resume_reuses_chunks_already_uploaded() {
-        let base = std::env::var("NXS_E2E_NC_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".into());
+        let base =
+            std::env::var("NXS_E2E_NC_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".into());
         let user = "admin";
         let pass = "admin1234";
         let opts = crate::http::HttpOptions {

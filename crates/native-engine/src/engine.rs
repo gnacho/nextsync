@@ -208,7 +208,11 @@ impl Engine {
                 self.record(db, action, loc, rem)
             }
             Action::Download {
-                rel, etag, mtime, checksum, ..
+                rel,
+                etag,
+                mtime,
+                checksum,
+                ..
             } => {
                 progress("download", rel);
                 let url = self.url(ep, rel);

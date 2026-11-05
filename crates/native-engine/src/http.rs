@@ -149,11 +149,7 @@ impl HttpClient {
     /// GET that may resume: sends `Range: bytes=<offset>-` when `offset > 0`.
     /// Returns the reader plus the status so the caller can tell 206 (resumed)
     /// from 200 (server ignored the range and restarted).
-    pub fn get_reader_from(
-        &self,
-        url: &str,
-        offset: u64,
-    ) -> Result<(Box<dyn Read + Send>, u16)> {
+    pub fn get_reader_from(&self, url: &str, offset: u64) -> Result<(Box<dyn Read + Send>, u16)> {
         let range;
         let headers: &[(&str, &str)] = if offset > 0 {
             range = format!("bytes={offset}-");
