@@ -172,8 +172,12 @@ pub fn reconcile(
         match (l, r, j) {
             (Some(l), Some(r), Some(j)) => {
                 let remote_changed = r.etag != j.etag;
-                let local_changed =
-                    l.size != j.size || l.mtime != j.mtime || (j.inode != 0 && l.inode != j.inode);
+                // A different inode does not mean different content: restoring
+                // a backup, copying with `cp -a` or moving a tree across
+                // filesystems changes every inode while leaving bytes and
+                // mtimes untouched. Treating that as a local edit queued the
+                // whole tree for upload, so only size and mtime decide here.
+                let local_changed = l.size != j.size || l.mtime != j.mtime;
                 if l.is_dir != r.is_dir || (remote_changed && local_changed) {
                     actions.push(Action::Conflict {
                         rel: key.to_string(),
