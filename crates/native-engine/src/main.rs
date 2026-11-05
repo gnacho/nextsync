@@ -70,6 +70,7 @@ fn main() {
         get("remote").unwrap_or_default(),
     );
     cfg.space_id = get("space-id");
+    cfg.db_path = get("db-path").map(std::path::PathBuf::from);
     cfg.dry_run = flags.iter().any(|f| f == "dry-run");
     cfg.sync_hidden_files = !flags.iter().any(|f| f == "no-hidden");
     cfg.trust_invalid_certificates = flags.iter().any(|f| f == "insecure");
