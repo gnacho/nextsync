@@ -154,7 +154,7 @@ impl AccountSummary {
 /// One OpenCloud space discovered over WebDAV.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenCloudSpace {
-    /// The space id (`--space` argument of `opencloudcmd`, a UUID).
+    /// The space id (a UUID).
     pub id: String,
     /// The space display name (`<d:displayname>`), when the server sends it.
     pub display_name: Option<String>,
@@ -352,9 +352,9 @@ impl NextcloudApi {
 
     /// Create the remote folder (and any missing parents) over WebDAV MKCOL.
     ///
-    /// `nextcloudcmd` fails silently (exit 1, no output) when `--path` points
-    /// at a folder that does not exist on the server, so the app must create
-    /// the target itself before the first sync. Idempotent per segment:
+    /// The engine reconciles against a remote path that must already exist on
+    /// the server, so the app creates the target itself before the first
+    /// sync. Idempotent per segment:
     /// 201 (created) and 405 (already exists) both succeed; 401/403 map to
     /// [`ApiError::AuthRejected`]; an empty `remote_path` (the account root)
     /// is a no-op.
@@ -471,7 +471,7 @@ impl NextcloudApi {
     /// folder's own ETag cheaply (mirrors the official client's `RequestEtagJob`).
     /// The app compares this against the last value it recorded: when it is
     /// unchanged, the folder's remote tree has not changed, so the full
-    /// `nextcloudcmd` reconciliation can be skipped. Returned `trimmed`; an
+    /// reconciliation can be skipped. Returned `trimmed`; an
     /// absent/empty `<getetag>` yields `Ok(None)`. Transport/auth errors keep
     /// their [`ApiError`] so the caller can decide (e.g. treat an unreachable
     /// server as "changed" to avoid skipping a real change).
@@ -991,17 +991,17 @@ impl NextcloudApi {
     /// avatar URL is judged by its final response.
     pub fn fetch_avatar(
         &self,
-        provider: crate::nextcloud::driver::Provider,
+        provider: crate::nextcloud::provider::Provider,
         server: &str,
         username: &str,
         password: &str,
     ) -> Result<Option<Vec<u8>>, ApiError> {
         let base = server.trim_end_matches('/');
         let url = match provider {
-            crate::nextcloud::driver::Provider::Nextcloud => {
+            crate::nextcloud::provider::Provider::Nextcloud => {
                 format!("{base}/avatar/{username}/64")
             }
-            crate::nextcloud::driver::Provider::OpenCloud => {
+            crate::nextcloud::provider::Provider::OpenCloud => {
                 format!("{base}/graph/v1.0/me/photo/$value")
             }
         };
@@ -2592,7 +2592,7 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(http));
         let avatar = api
             .fetch_avatar(
-                crate::nextcloud::driver::Provider::Nextcloud,
+                crate::nextcloud::provider::Provider::Nextcloud,
                 "https://cloud.example.com",
                 "alice",
                 "secret",
@@ -2613,7 +2613,7 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(http));
         let avatar = api
             .fetch_avatar(
-                crate::nextcloud::driver::Provider::OpenCloud,
+                crate::nextcloud::provider::Provider::OpenCloud,
                 "https://cloud.example.com",
                 "alice",
                 "token",
@@ -2634,7 +2634,7 @@ mod tests {
             let api = NextcloudApi::with_http(Box::new(FakeHttp::new(status, body)));
             let avatar = api
                 .fetch_avatar(
-                    crate::nextcloud::driver::Provider::Nextcloud,
+                    crate::nextcloud::provider::Provider::Nextcloud,
                     "https://cloud.example.com",
                     "alice",
                     "secret",
@@ -2651,7 +2651,7 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(FakeHttp::new(404, AVATAR_PNG)));
         let avatar = api
             .fetch_avatar(
-                crate::nextcloud::driver::Provider::Nextcloud,
+                crate::nextcloud::provider::Provider::Nextcloud,
                 "https://cloud.example.com",
                 "alice",
                 "secret",
@@ -2662,7 +2662,7 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(FakeHttp::new(404, b"[]")));
         let avatar = api
             .fetch_avatar(
-                crate::nextcloud::driver::Provider::Nextcloud,
+                crate::nextcloud::provider::Provider::Nextcloud,
                 "https://cloud.example.com",
                 "alice",
                 "secret",
@@ -2676,7 +2676,7 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(FakeHttp::new(401, b"")));
         assert_eq!(
             api.fetch_avatar(
-                crate::nextcloud::driver::Provider::Nextcloud,
+                crate::nextcloud::provider::Provider::Nextcloud,
                 "https://cloud.example.com",
                 "alice",
                 "wrong",
@@ -2687,7 +2687,7 @@ mod tests {
         let api = NextcloudApi::with_http(Box::new(FakeHttp::new(500, b"")));
         assert_eq!(
             api.fetch_avatar(
-                crate::nextcloud::driver::Provider::OpenCloud,
+                crate::nextcloud::provider::Provider::OpenCloud,
                 "https://cloud.example.com",
                 "alice",
                 "token",

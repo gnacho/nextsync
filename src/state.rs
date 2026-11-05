@@ -17,7 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
-use crate::nextcloud::sync_engine::SyncProgress;
+use crate::nextcloud::sync_progress::SyncProgress;
 
 /// Application-level state of one account (or folder) runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

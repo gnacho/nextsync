@@ -11,9 +11,8 @@
 //! - **Provider selector (new)**: the rewrite lets the user pick Nextcloud or
 //!   OpenCloud before entering any detail (plan Task 5.3). The Python wizard
 //!   is Nextcloud-only. For OpenCloud the sign-in asks for an **app password**
-//!   (the `--token` of `opencloudcmd`, HTTP Basic, no browser/device flow —
-//!   see `memory/opencloud.md`); the browser sign-in row is therefore hidden
-//!   for OpenCloud.
+//!   (HTTP Basic, no browser/device flow, see `memory/opencloud.md`). The
+//!   browser sign-in row is therefore hidden for OpenCloud.
 //! - **Browser flow v2 (port of `login_flow.py`)**: the "Sign in with
 //!   browser" row starts [`crate::nextcloud::login_flow::LoginFlowV2`]. The
 //!   HTTP work runs in `gio::spawn_blocking` and the polling timer is a
@@ -35,12 +34,9 @@
 //!   LibreGraph (`NextcloudApi::list_opencloud_spaces`, `GET
 //!   /graph/v1.0/drives`; the user's own personal space plus project spaces;
 //!   other users' personal spaces and the virtual shares aggregate are
-//!   excluded). The `opencloudcmd <url>` query mode
-//!   (`opencloud_list_spaces`, parsing the `Short ID | DisplayName | ID`
-//!   table verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp`) remains as
-//!   a fallback. The id is assigned from the discovery (never editable:
+//!   excluded). The id is assigned from the discovery (never editable:
 //!   without a discovered space the Add Folder dialog is blocked with an
-//!   inline error, because the driver requires a space id to sync).
+//!   inline error, because the engine requires a space id to sync).
 //! - **Not the app's main window**: the Python wizard is the first-run main
 //!   window and quits the application on close. In the rewrite it is a
 //!   secondary window opened from the main window, so closing it does not quit
@@ -62,13 +58,12 @@ use libadwaita::prelude::*;
 
 use crate::core::sync_safety::local_folder_is_empty;
 use crate::nextcloud::api::{ApiError, NextcloudApi};
-use crate::nextcloud::command::find_binary;
 use crate::nextcloud::credentials::{CredentialError, CredentialsStore};
-use crate::nextcloud::driver::{opencloud_list_spaces, Provider};
 use crate::nextcloud::login_flow::{
     LoginFlowError, LoginFlowResult, LoginFlowStart, LoginFlowV2, PollOutcome, MAX_POLLS,
     POLL_INTERVAL_SECONDS,
 };
+use crate::nextcloud::provider::Provider;
 use crate::storage::config::{
     account_id, default_sync_root, expanduser, normalize_remote_path, normalize_server_url,
     AccountConfig, Config, ConfigError, ConfigStore, FolderConfig,
@@ -180,7 +175,6 @@ impl BrowserFlowState {
 #[derive(Clone)]
 struct SetupWidgets {
     provider_row: libadwaita::ComboRow,
-    provider_warning: libadwaita::Banner,
     server_title: gtk4::Label,
     server_entry: libadwaita::EntryRow,
     trust_invalid: gtk4::CheckButton,
@@ -208,8 +202,6 @@ impl SetupWidgets {
             .build();
         let model = gtk4::StringList::new(&["Nextcloud", "OpenCloud"]);
         provider_row.set_model(Some(&model));
-
-        let provider_warning = libadwaita::Banner::new("");
 
         let server_title = title_label(t("Connect to Nextcloud"));
         let server_entry = libadwaita::EntryRow::new();
@@ -286,7 +278,6 @@ impl SetupWidgets {
 
         Self {
             provider_row,
-            provider_warning,
             server_title,
             server_entry,
             trust_invalid,
@@ -459,15 +450,6 @@ fn build_welcome_page(ctx: &SetupContext) {
     provider_group.add(&ctx.widgets.provider_row);
     content.append(&provider_group);
 
-    update_provider_warning(&ctx.widgets.provider_warning, Provider::default(), true);
-    content.append(&ctx.widgets.provider_warning);
-
-    let warning = ctx.widgets.provider_warning.clone();
-    let provider_row = ctx.widgets.provider_row.clone();
-    provider_row.connect_selected_notify(move |row| {
-        update_provider_warning(&warning, provider_from_combo(row), true);
-    });
-
     let continue_button = gtk4::Button::with_label(t("Continue"));
     continue_button.set_tooltip_text(Some(t("Continue to the next step")));
     continue_button.add_css_class("suggested-action");
@@ -476,11 +458,6 @@ fn build_welcome_page(ctx: &SetupContext) {
     {
         let ctx = ctx.clone();
         continue_button.connect_clicked(move |_| {
-            update_provider_warning(
-                &ctx.widgets.provider_warning,
-                provider_from_combo(&ctx.widgets.provider_row),
-                true,
-            );
             ctx.stack.set_visible_child_name("server");
         });
     }
@@ -983,9 +960,8 @@ fn browser_flow_failed(ctx: &SetupContext, error: &LoginFlowError) {
 
 /// Discover the OpenCloud spaces in the background and remember the first one.
 ///
-/// The native WebDAV listing (`PROPFIND /remote.php/dav/spaces/`) runs first;
-/// the `opencloudcmd` query mode remains as a fallback for servers where the
-/// WebDAV listing is unavailable.
+/// The spaces come from the LibreGraph listing
+/// (`NextcloudApi::list_opencloud_spaces`).
 fn start_space_discovery(ctx: &SetupContext, server: &str, username: &str, password: &str) {
     let server = server.to_string();
     let username = username.to_string();
@@ -1000,10 +976,7 @@ fn start_space_discovery(ctx: &SetupContext, server: &str, username: &str, passw
                     id: space.id,
                 })
                 .collect(),
-            Err(_) => match opencloud_list_spaces(&server, &username, &password, None) {
-                Ok(output) => parse_spaces_list(&output),
-                Err(_) => Vec::new(),
-            },
+            Err(_) => Vec::new(),
         }
     });
     let ctx = ctx.clone();
@@ -1424,26 +1397,6 @@ fn size_threshold_bytes(store: &ConfigStore) -> Option<u64> {
 /// Create the local roots, persist the account and the TLS trust choice, then
 /// invoke `on_complete` with the validated account and close the wizard.
 fn finish_setup(ctx: &SetupContext) {
-    // Issue #210: block the finish when the selected provider's sync engine
-    // is not installed. This is the single choke point every finish path
-    // (first-sync confirmation, resume, decision) goes through, and the
-    // provider in the state is the freshly selected one, so switching
-    // providers re-evaluates the check for the new engine.
-    let provider = ctx.state.borrow().provider;
-    if engine_install_hint(provider, engine_present_for(provider, true), true).is_some() {
-        // Issue #218: the blocking dialog offers one-click installation of
-        // the provider's engine package; once installed, the finish gate
-        // passes on the next attempt.
-        let window = ctx.window.clone();
-        crate::ui::engine_install::present_engine_install_dialog(
-            &ctx.window,
-            provider,
-            Rc::new(move || {
-                crate::ui::engine_install::present_engine_installed_dialog(&window);
-            }),
-        );
-        return;
-    }
     let (provider, server, username, authentication_type, folders, trust_invalid, size_confirmed) = {
         let state = ctx.state.borrow();
         (
@@ -1503,35 +1456,6 @@ fn finish_setup(ctx: &SetupContext) {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
-
-/// Parse the `opencloudcmd` "Listing spaces:" table into spaces.
-///
-/// The layout (`Short ID | DisplayName | ID`, pipe-separated, space-padded)
-/// was verified in `opencloud-eu/desktop` `src/cmd/cmd.cpp` `printSpaces`. The
-/// third column is the canonical space id that `opencloudcmd` accepts.
-fn parse_spaces_list(output: &str) -> Vec<SpaceInfo> {
-    let mut spaces = Vec::new();
-    for line in output.lines() {
-        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        if cells.len() != 3 {
-            continue;
-        }
-        if cells[0] == "Short ID" {
-            continue;
-        }
-        if cells.iter().all(|cell| cell.chars().all(|ch| ch == '-')) {
-            continue;
-        }
-        if cells[1].is_empty() || cells[2].is_empty() {
-            continue;
-        }
-        spaces.push(SpaceInfo {
-            id: cells[2].to_string(),
-            display_name: cells[1].to_string(),
-        });
-    }
-    spaces
-}
 
 /// Build the validated account from the wizard inputs.
 ///
@@ -1661,64 +1585,6 @@ fn fill_first_sync_template(template: &str, account: &str, count: usize, folders
         .replacen("{account}", account, 1)
         .replacen("{count}", &count.to_string(), 1)
         .replacen("{folders}", folders, 1)
-}
-
-/// Whether the given provider's sync binary is missing, for the welcome banner.
-fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider, native: bool) {
-    if native {
-        banner.set_revealed(false);
-        return;
-    }
-    match provider {
-        Provider::Nextcloud if find_binary("nextcloudcmd").is_none() => {
-            banner.set_title(
-                t("nextcloudcmd is missing. Install the nextcloud-desktop-cmd package before the first synchronization."),
-            );
-            banner.set_revealed(true);
-        }
-        Provider::OpenCloud if find_binary("opencloudcmd").is_none() => {
-            banner.set_title(
-                t("opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization."),
-            );
-            banner.set_revealed(true);
-        }
-        _ => banner.set_revealed(false),
-    }
-}
-
-/// Whether the selected provider's sync binary is available on `$PATH`
-/// (issue #210; reused by the install dialog, issue #218).
-pub(crate) fn engine_present_for(provider: Provider, native: bool) -> bool {
-    if native {
-        return true;
-    }
-    match provider {
-        Provider::Nextcloud => find_binary("nextcloudcmd").is_some(),
-        Provider::OpenCloud => find_binary("opencloudcmd").is_some(),
-    }
-}
-
-/// Issue #210: the setup must not present itself as ready when the selected
-/// provider's sync engine is not installed. Returns the actionable install
-/// hint to block the finish with, or `None` when the engine is present. Kept
-/// pure (binary presence passed in) so the policy is testable without a real
-/// `$PATH`; also the body of the install dialog (issue #218).
-pub(crate) fn engine_install_hint(
-    provider: Provider,
-    engine_present: bool,
-    native: bool,
-) -> Option<&'static str> {
-    if native || engine_present {
-        return None;
-    }
-    match provider {
-        Provider::Nextcloud => Some(t(
-            "nextcloudcmd is missing. Install the nextcloud-client package (it provides the sync engine) and finish the setup afterwards.",
-        )),
-        Provider::OpenCloud => Some(t(
-            "opencloudcmd is missing. Install the opencloud-desktop package (it provides the sync engine) and finish the setup afterwards.",
-        )),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1945,35 +1811,6 @@ mod tests {
     use tempfile::tempdir;
 
     // ---- pure helpers ------------------------------------------------------
-
-    #[test]
-    fn parse_spaces_list_extracts_table_rows() {
-        let output = concat!(
-            "Listing spaces:\n",
-            "Short ID | DisplayName | ID\n",
-            "--------------- | -------------------- | --------------------\n",
-            "space:abcd | Personal | space:abcd\n",
-            "space:1234 | Photos   | 4f2f-9e1b\n",
-        );
-        let spaces = parse_spaces_list(output);
-        assert_eq!(spaces.len(), 2);
-        assert_eq!(spaces[0].id, "space:abcd");
-        assert_eq!(spaces[0].display_name, "Personal");
-        assert_eq!(spaces[1].id, "4f2f-9e1b");
-        assert_eq!(spaces[1].display_name, "Photos");
-    }
-
-    #[test]
-    fn parse_spaces_list_ignores_noise() {
-        assert!(parse_spaces_list("").is_empty());
-        assert!(parse_spaces_list("error: Token not set").is_empty());
-        let header_only = concat!(
-            "Listing spaces:\n",
-            "Short ID | DisplayName | ID\n",
-            "--------------- | -------------------- | --------------------\n",
-        );
-        assert!(parse_spaces_list(header_only).is_empty());
-    }
 
     #[test]
     fn build_account_builds_nextcloud_account() {
@@ -2525,41 +2362,5 @@ mod tests {
         assert!(resolved.is_none());
         let resolved = wizard_remote_picker_password("https://x.example.net", "").unwrap();
         assert!(resolved.is_none());
-    }
-
-    /// Issue #210: finishing the setup with the selected provider's engine
-    /// missing is blocked with an actionable hint naming the package; with
-    /// the engine present there is no block at all.
-    #[test]
-    fn engine_install_hint_blocks_only_when_the_binary_is_missing() {
-        use crate::nextcloud::driver::Provider;
-        assert!(
-            engine_install_hint(Provider::Nextcloud, true, false).is_none(),
-            "an installed engine never blocks the setup"
-        );
-        assert!(
-            engine_install_hint(Provider::OpenCloud, true, false).is_none(),
-            "an installed engine never blocks the setup"
-        );
-        let nextcloud = engine_install_hint(Provider::Nextcloud, false, false)
-            .expect("a missing Nextcloud engine blocks the setup");
-        assert!(
-            nextcloud.contains("nextcloudcmd"),
-            "the hint names the binary: {nextcloud}"
-        );
-        assert!(
-            nextcloud.contains("nextcloud-client"),
-            "the hint names the Arch package: {nextcloud}"
-        );
-        let opencloud = engine_install_hint(Provider::OpenCloud, false, false)
-            .expect("a missing OpenCloud engine blocks the setup");
-        assert!(
-            opencloud.contains("opencloudcmd"),
-            "the hint names the binary: {opencloud}"
-        );
-        assert!(
-            opencloud.contains("opencloud-desktop"),
-            "the hint names the Arch package: {opencloud}"
-        );
     }
 }

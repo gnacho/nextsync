@@ -7,9 +7,8 @@
 //! cooldown. The periodic interval triggers live in [`SyncTimers`] (the
 //! Python `core/timers.py`).
 //!
-//! The actual `nextcloudcmd` run (credential lookup + process spawn) is
-//! plugged in through the [`SyncRunner`] trait, which will be implemented by
-//! the sync engine in Task 2.3. Timing goes through
+//! The actual reconciliation (credential lookup + native engine run) is
+//! plugged in through the [`SyncRunner`] trait. Timing goes through
 //! `crate::core::debounce::TimeoutSource`, so tests run without a GLib loop.
 //!
 //! Re-entrancy note: methods borrow the inner `Rc<RefCell<_>>` while running,
@@ -99,15 +98,9 @@ pub enum SyncOutcome {
     /// Offline for that account only: the machine has a network link but the
     /// specific server does not answer (issue #162).
     NetworkError,
-    /// The provider's sync binary (nextcloudcmd / opencloudcmd) is not
-    /// installed, so nothing can be synchronized. Distinct from Failed so the
-    /// UI can point at the real fix - installing the engine package - and the
-    /// ETag gate never reports a false success while the engine is missing
-    /// (issue #209).
-    EngineMissing,
 }
 
-/// Executes a reconciliation. Implemented by the sync engine in Task 2.3.
+/// Executes a reconciliation. Production uses the native engine runner.
 pub trait SyncRunner {
     /// Begin a reconciliation for the given reasons. `on_finished` must be
     /// invoked exactly once when the run ends, and never synchronously from
@@ -202,11 +195,8 @@ struct SchedulerInner {
     /// truthful after a real successful run.
     ever_synced: bool,
     /// Canonical local root this scheduler reconciles (issue #35): drives
-    /// the overlap-aware permit acquisition and the external-engine scan.
+    /// the overlap-aware permit acquisition.
     local_root: Option<std::path::PathBuf>,
-    /// Where to scan for external engine processes; `None` means the real
-    /// `/proc` (injectable for tests).
-    proc_scan_root: Option<std::path::PathBuf>,
     /// Skip syncs while the connection is metered (issue #40).
     skip_metered: bool,
     /// Whether the current connection is metered (issue #40).
@@ -274,7 +264,6 @@ impl Scheduler {
             delete_bypass_once: false,
             ever_synced: false,
             local_root: None,
-            proc_scan_root: None,
             skip_metered: true,
             metered: false,
             allowed_ssids: Vec::new(),
@@ -380,30 +369,11 @@ impl Scheduler {
         self.inner.borrow_mut().remote_push_ready = ready;
     }
 
-    /// Whether this folder's external sync journal knows any of `file_ids`.
-    ///
-    /// Used to route a `notify_file_id` push hint to exactly the folder that
-    /// contains the notified file, instead of re-syncing every folder of the
-    /// account (issue #183). Returns `false` when the folder has no local
-    /// root yet or the journal is unavailable; the caller then falls back to
-    /// the conservative fan-out.
-    pub fn has_file_ids(&self, file_ids: &[i64]) -> bool {
-        let root = self.inner.borrow().local_root.clone();
-        root.map(|root| crate::core::files_journal::contains_file_ids(&root, file_ids))
-            .unwrap_or(false)
-    }
-
     /// Share the run-active flag with the progress forwarder (issue #145):
     /// the forwarder must not repaint the label from stale events once a run
     /// has finished and cleared it.
     pub fn set_run_active(&self, flag: std::rc::Rc<std::cell::Cell<bool>>) {
         self.inner.borrow_mut().run_active = Some(flag);
-    }
-
-    /// Override the procfs directory scanned for external engine processes.
-    /// Production leaves this unset (the real `/proc`); tests inject a fake.
-    pub fn set_proc_scan_root(&self, proc_scan_root: Option<std::path::PathBuf>) {
-        self.inner.borrow_mut().proc_scan_root = proc_scan_root;
     }
 
     /// Replace the per-run completion callback (called once per finished run
@@ -848,28 +818,6 @@ impl SchedulerInner {
 
     fn begin_run(&mut self, reasons: Vec<Trigger>) -> StartAttempt {
         self.preparing = false;
-        // Issue #35: never race an external engine over the same tree. The
-        // scan is a cheap /proc walk; on a hit the run aborts with a clear
-        // error and the triggers stay queued for a later attempt.
-        if let Some(root) = self.local_root.clone() {
-            let engine = match &self.proc_scan_root {
-                Some(directory) => crate::core::proc_scan::find_external_engine_on_root_in(
-                    directory,
-                    std::process::id(),
-                    &root,
-                ),
-                None => crate::core::proc_scan::find_external_engine_on_root(&root),
-            };
-            if let Some(engine) = engine {
-                self.queue.extend(reasons.iter().copied());
-                let message = t(
-                    "Another synchronization engine ({name}) is already running on this folder. Close it and try again.",
-                )
-                .replacen("{name}", &engine, 1);
-                self.state.set(AppState::Error, message);
-                return StartAttempt::Aborted;
-            }
-        }
         if let Some(permit) = &self.permit {
             // Issue #35: acquire for the local root when known so another
             // scheduler on an overlapping folder is queued instead of run.
@@ -1023,22 +971,9 @@ impl SchedulerInner {
                 );
                 (false, false)
             }
-            SyncOutcome::EngineMissing => {
-                // Issue #209: the provider's sync binary is not installed.
-                // Nothing ran, so this is not a "ran" outcome; every later
-                // trigger re-checks the binary, so installing the engine
-                // package (e.g. nextcloud-client) recovers without a restart.
-                self.keyring_locked = false;
-                self.consecutive_failing_syncs += 1;
-                self.state.set(
-                    AppState::Error,
-                    t("Synchronization blocked: the sync engine is not installed"),
-                );
-                (false, false)
-            }
         };
         // Fase 3: after a successful run the guard baseline is refreshed so
-        // it reflects what nextcloudcmd just reconciled (Python: only for
+        // it reflects what the run just reconciled (Python: only for
         // `result.successful`, which covers conflicts too).
         if matches!(outcome, SyncOutcome::Success | SyncOutcome::Conflict)
             && self.delete_alert.is_none()
@@ -1315,7 +1250,7 @@ impl SchedulerInner {
         }
         // Fase 3: remove the local sync journals and record a fresh deletion
         // guard baseline so the guard stops blocking. With the journal gone
-        // nextcloudcmd treats the server as authoritative and re-downloads
+        // the next run treats the server as authoritative and re-downloads
         // the folder (delete_guard.rs).
         if let Some(guard) = &mut self.guard {
             let _ = guard.restore_from_server();
@@ -2027,40 +1962,6 @@ mod tests {
     }
 
     #[test]
-    fn external_engine_on_the_folder_aborts_the_run_with_a_clear_error() {
-        let (scheduler, source, runner) = make_scheduler(None);
-        let folder = tempfile::tempdir().expect("tempdir");
-        scheduler.set_local_root(Some(folder.path().to_path_buf()));
-        let proc = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(proc.path().join("7")).expect("mkdir");
-        let mut cmdline = b"/usr/bin/nextcloudcmd\0".to_vec();
-        cmdline.extend_from_slice(folder.path().to_string_lossy().as_bytes());
-        cmdline.push(0);
-        std::fs::write(proc.path().join("7").join("cmdline"), cmdline).expect("write");
-        scheduler.set_proc_scan_root(Some(proc.path().to_path_buf()));
-
-        scheduler.request(Trigger::Manual);
-        run_idle(&source);
-        // The run never starts; the triggers stay queued and the state
-        // carries the external-engine error.
-        assert_eq!(runner.0.borrow().start_calls, 0);
-        assert_eq!(scheduler.queue_len(), 1);
-        assert_eq!(scheduler.state().snapshot().state, AppState::Error);
-        let message = scheduler.state().snapshot().message.clone();
-        assert!(message.contains("nextcloudcmd"), "message was: {message}");
-    }
-
-    #[test]
-    fn scheduler_without_local_root_ignores_the_engine_scan() {
-        let (scheduler, source, runner) = make_scheduler(None);
-        // No local root declared: the scan never runs even with a live
-        // engine process pointing at some unrelated folder.
-        scheduler.request(Trigger::Manual);
-        run_idle(&source);
-        assert_eq!(runner.0.borrow().start_calls, 1);
-    }
-
-    #[test]
     fn overlapping_folder_waits_for_the_permit_even_with_free_slots() {
         let permit = SyncPermit::try_new(2).unwrap();
         let root = tempfile::tempdir().expect("tempdir");
@@ -2294,33 +2195,6 @@ mod tests {
         run_idle(&source);
         finish(&runner, SyncOutcome::Failed);
         assert_eq!(scheduler.state().snapshot().state, AppState::Error);
-    }
-
-    /// Issue #209: a missing sync engine binary (e.g. the user removed the
-    /// desktop package that provides nextcloudcmd) marks the folder Error
-    /// with a clear message, never reads as synchronized, and keeps retrying
-    /// on the next trigger once the engine is installed again.
-    #[test]
-    fn engine_missing_sets_error_and_recovers_on_retry() {
-        let (scheduler, source, runner) = make_scheduler(None);
-        scheduler.request(Trigger::Manual);
-        run_idle(&source);
-        finish(&runner, SyncOutcome::EngineMissing);
-        let snapshot = scheduler.state().snapshot();
-        assert_eq!(snapshot.state, AppState::Error);
-        assert!(
-            snapshot.message.contains("engine"),
-            "the row explains the missing engine: {}",
-            snapshot.message
-        );
-
-        // Installing the engine does not need an app restart: the next
-        // automatic trigger runs again and a real success clears the state.
-        scheduler.request(Trigger::RemoteInterval);
-        run_idle(&source);
-        assert_eq!(runner.0.borrow().start_calls, 2);
-        finish(&runner, SyncOutcome::Success);
-        assert_eq!(scheduler.state().snapshot().state, AppState::IdleOk);
     }
 
     /// Issue #162: an unreachable server (transport failure) marks the folder

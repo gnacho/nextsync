@@ -1,14 +1,13 @@
-//! `nextcloudcmd` progress parser.
+//! Sync progress events.
 //!
-//! Fase 2 (Task 2.3): parses the per-file operation lines that
-//! `nextcloudcmd` prints on stdout and turns them into [`SyncProgress`]
-//! events. Mirrors `nextcloud/nextcloudcmd_progress.py`: anything that does
-//! not look like a file operation is returned as `None` so the caller can
-//! forward the raw line verbatim without guessing.
+//! Parses per-file operation lines into [`SyncProgress`] events, the contract
+//! the UI consumes for live progress. Anything that does not look like a file
+//! operation is returned as `None` so the caller can forward the raw line
+//! verbatim without guessing.
 
-/// One parsed progress event from `nextcloudcmd` output.
+/// One parsed progress event.
 ///
-/// Mirrors `nextcloudcmd_progress.SyncProgress`: `processed` counts operations
+/// `processed` counts operations
 /// reported so far in the current sync when a total is unavailable; it starts
 /// at 1 for the first parsed line.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -45,7 +44,7 @@ impl SyncProgress {
         )
     }
 
-    /// Short human label, mirroring `nextcloudcmd_progress.describe_progress`.
+    /// Short human label.
     pub fn describe(&self) -> String {
         let mut text = if self.is_operation() && self.processed > 0 {
             format!("{}: {} ({})", self.action, self.path, self.processed)
@@ -76,9 +75,9 @@ pub fn human_bytes(bytes: u64, decimals: usize) -> String {
     format!("{} {}", text.replace('.', ","), UNITS[unit])
 }
 
-/// Normalized action for the raw action words printed by `nextcloudcmd`.
+/// Normalized action for the raw action words of the legacy engine.
 ///
-/// Mirror of the `_ACTION_ALIASES` mapping in `nextcloudcmd_progress.py`.
+/// Mirror of the `_ACTION_ALIASES` mapping of the original Python port.
 const ACTION_ALIASES: [(&str, &str); 13] = [
     ("downloading", "download"),
     ("download", "download"),
@@ -95,7 +94,7 @@ const ACTION_ALIASES: [(&str, &str); 13] = [
     ("conflicted copy", "conflict"),
 ];
 
-/// Parse one `nextcloudcmd` stdout line into a [`SyncProgress`], if possible.
+/// Parse one raw engine output line into a [`SyncProgress`], if possible.
 ///
 /// Two families of lines carry progress, both verified against real runs:
 ///
@@ -290,7 +289,7 @@ mod tests {
 
     #[test]
     fn parses_real_propagation_lines() {
-        // Verbatim lines captured from a nextcloudcmd run: transfers surface
+        // Verbatim lines captured from engine output: transfers surface
         // as "Completed propagation" with the propagator naming the action.
         let download = parse_progress_line(
             "Completed propagation of \"Akon - Right Now Na Na Na.mp3\" by OCC::PropagateDownloadFile(0x55acf9c79ec0) with status OCC::SyncFileItem::Success",

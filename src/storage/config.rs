@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::nextcloud::driver::Provider;
+use crate::nextcloud::provider::Provider;
 
 /// Current configuration schema version.
 pub const SCHEMA_VERSION: u32 = 7;
@@ -105,7 +105,7 @@ pub struct AccountConfig {
     pub server_url: String,
     pub login_name: String,
     pub authentication_type: String,
-    /// The sync engine this account uses (defaults to Nextcloud).
+    /// The server provider this account talks to (defaults to Nextcloud).
     pub provider: Provider,
     pub folders: Vec<FolderConfig>,
     pub sync: SyncConfig,
@@ -168,10 +168,7 @@ pub struct SyncConfig {
     pub detailed_output: bool,
     pub exclude_patterns_enabled: bool,
     pub exclude_patterns: Vec<String>,
-    /// Use the in-process native engine instead of the external command.
-    /// Enabled by default: the external CLI is a documented escape hatch.
-    pub native_engine: bool,
-    /// Sync dotfiles. The command line tools need an explicit flag for this.
+    /// Sync dotfiles.
     pub sync_hidden_files: bool,
 }
 
@@ -188,7 +185,6 @@ impl Default for SyncConfig {
             detailed_output: true,
             exclude_patterns_enabled: true,
             exclude_patterns: DEFAULT_PATTERNS.iter().map(|s| s.to_string()).collect(),
-            native_engine: true,
             sync_hidden_files: false,
         }
     }
@@ -1099,7 +1095,6 @@ fn validate_sync(raw: Option<&Value>) -> Result<SyncConfig, ConfigError> {
         detailed_output: get_bool(obj, "detailed_output", true),
         exclude_patterns_enabled: get_bool(obj, "exclude_patterns_enabled", true),
         exclude_patterns,
-        native_engine: get_bool(obj, "native_engine", true),
         sync_hidden_files: get_bool(obj, "sync_hidden_files", false),
     })
 }
@@ -1461,6 +1456,25 @@ mod tests {
         assert!(normalize_remote_path("/a?b").is_err());
         assert!(normalize_remote_path("/a#b").is_err());
         assert!(normalize_remote_path("\0").is_err());
+    }
+
+    // ---- sync config ----------------------------------------------------------
+
+    /// Settings written before the native engine became the only engine carry
+    /// a `native_engine` key. Loading them must ignore it silently instead of
+    /// failing the whole configuration.
+    #[test]
+    fn legacy_native_engine_key_is_ignored() {
+        for legacy in [true, false] {
+            let raw = serde_json::json!({
+                "native_engine": legacy,
+                "sync_hidden_files": true,
+            });
+            let sync = validate_sync(Some(&raw)).expect("legacy settings still load");
+            assert!(sync.sync_hidden_files);
+            let plain = validate_sync(None).expect("defaults load");
+            assert_eq!(sync.max_sync_retries, plain.max_sync_retries);
+        }
     }
 
     // ---- identities -----------------------------------------------------------

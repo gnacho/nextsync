@@ -41,7 +41,7 @@ use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::protocol::{CloseFrame, Message, Role, WebSocket, WebSocketConfig};
 use tungstenite::stream::MaybeTlsStream;
 
-use crate::nextcloud::driver::Provider;
+use crate::nextcloud::provider::Provider;
 use crate::nextcloud::push_protocol::{
     basic_authorization, header_values, parse_http_head, parse_push_capability, parse_url,
     validate_push_transport, verify_websocket_handshake, HttpHead, PushEndpoints,

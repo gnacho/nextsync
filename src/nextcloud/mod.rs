@@ -1,13 +1,11 @@
-//! Nextcloud integration: `nextcloudcmd` wrapper, credentials, sync engine
-//! and push protocol. Fases 1, 2 and 4.
+//! Nextcloud integration: WebDAV client, credentials, the native engine
+//! runner and the push protocol. Fases 1, 2 and 4.
 
 pub mod api;
-pub mod command;
 pub mod credentials;
-pub mod driver;
 pub mod login_flow;
 pub mod native_runner;
-pub mod nextcloudcmd_progress;
+pub mod provider;
 pub mod push;
 pub mod push_protocol;
-pub mod sync_engine;
+pub mod sync_progress;
