@@ -2,6 +2,29 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.42.0] - 2026-11-05
+
+### Added
+
+- Per-transfer byte progress: the status line now shows the file being
+  transferred and how many bytes are done out of the total.
+- Resumable downloads (HTTP `Range` plus a partial file on disk).
+- Download verification against the server `oc:checksums` SHA1.
+- Resumable chunked uploads on Nextcloud: a retry reuses the chunks already
+  on the server instead of starting over.
+- Honour `Retry-After` on 429 and 503, and retry `423`/`507` as transient.
+- Flatpak/Flathub preparation: AppStream metadata, screenshots, manifest and
+  icon names matching the application ID.
+
+### Fixed
+
+- TLS no longer panics on servers with a real certificate authority: the
+  engine loads the system root certificates.
+- Directories are never treated as conflicting, so a changed directory
+  timestamp no longer renames a whole folder to a conflicted copy.
+- The setup flow no longer requires `nextcloudcmd` when the native engine is
+  active.
+
 ## [0.41.0] - 2026-11-05
 
 ### Added
