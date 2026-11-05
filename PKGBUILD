@@ -63,40 +63,40 @@ package() {
     local colored=(
         io.github.gnacho.nextsync
         io.github.gnacho.nextsync-folder
-        nextsync-activity-debug
-        nextsync-activity-error
-        nextsync-activity-info
-        nextsync-activity-ok
-        nextsync-activity-warning
-        nextsync-conflict-warning
-        nextsync-menu-info
-        nextsync-menu-log
-        nextsync-menu-open
-        nextsync-menu-quit
-        nextsync-row-battery
-        nextsync-row-error
-        nextsync-row-not-configured
-        nextsync-row-offline
-        nextsync-row-ok
-        nextsync-row-paused
-        nextsync-row-syncing
-        nextsync-state-globe
-        nextsync-state-globe-off
-        nextsync-status-battery
-        nextsync-status-error
-        nextsync-status-offline
-        nextsync-status-ok
-        nextsync-status-paused
-        nextsync-status-syncing
-        nextsync-tab-conflicts
-        nextsync-tab-deletions
-        nextsync-tab-recent
-        nextsync-tray-cloud
-        nextsync-tray-cloud-alert
-        nextsync-tray-cloud-check
-        nextsync-tray-cloud-off
-        nextsync-tray-cloud-sync
-        nextsync-tray-settings
+        io.github.gnacho.nextsync.activity-debug
+        io.github.gnacho.nextsync.activity-error
+        io.github.gnacho.nextsync.activity-info
+        io.github.gnacho.nextsync.activity-ok
+        io.github.gnacho.nextsync.activity-warning
+        io.github.gnacho.nextsync.conflict-warning
+        io.github.gnacho.nextsync.menu-info
+        io.github.gnacho.nextsync.menu-log
+        io.github.gnacho.nextsync.menu-open
+        io.github.gnacho.nextsync.menu-quit
+        io.github.gnacho.nextsync.row-battery
+        io.github.gnacho.nextsync.row-error
+        io.github.gnacho.nextsync.row-not-configured
+        io.github.gnacho.nextsync.row-offline
+        io.github.gnacho.nextsync.row-ok
+        io.github.gnacho.nextsync.row-paused
+        io.github.gnacho.nextsync.row-syncing
+        io.github.gnacho.nextsync.state-globe
+        io.github.gnacho.nextsync.state-globe-off
+        io.github.gnacho.nextsync.status-battery
+        io.github.gnacho.nextsync.status-error
+        io.github.gnacho.nextsync.status-offline
+        io.github.gnacho.nextsync.status-ok
+        io.github.gnacho.nextsync.status-paused
+        io.github.gnacho.nextsync.status-syncing
+        io.github.gnacho.nextsync.tab-conflicts
+        io.github.gnacho.nextsync.tab-deletions
+        io.github.gnacho.nextsync.tab-recent
+        io.github.gnacho.nextsync.tray-cloud
+        io.github.gnacho.nextsync.tray-cloud-alert
+        io.github.gnacho.nextsync.tray-cloud-check
+        io.github.gnacho.nextsync.tray-cloud-off
+        io.github.gnacho.nextsync.tray-cloud-sync
+        io.github.gnacho.nextsync.tray-settings
     )
     for icon in "${colored[@]}"; do
         install -Dm644 "data/icons/$icon.svg" \
@@ -104,13 +104,13 @@ package() {
     done
 
     # Symbolic (currentColor) SVGs: hicolor only indexes symbolic/apps, never
-    # symbolic/status — installing under status makes the icons unresolvable.
+    # symbolic/status - installing under status makes the icons unresolvable.
     local symbolic=(
         io.github.gnacho.nextsync-symbolic
-        nextsync-info-symbolic
-        nextsync-list-checks-symbolic
-        nextsync-settings-2-symbolic
-        nextsync-theme-auto-symbolic
+        io.github.gnacho.nextsync.info-symbolic
+        io.github.gnacho.nextsync.list-checks-symbolic
+        io.github.gnacho.nextsync.settings-2-symbolic
+        io.github.gnacho.nextsync.theme-auto-symbolic
     )
     for icon in "${symbolic[@]}"; do
         install -Dm644 "data/icons/$icon.svg" \
