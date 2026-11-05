@@ -7,7 +7,7 @@ use crate::reconcile::{reconcile, Action};
 use crate::{
     CancelToken, EngineConfig, Error, ExitState, Progress, ProgressSink, Provider, Result,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -127,6 +127,8 @@ impl Engine {
         let rem: BTreeMap<&str, &RemoteEntry> =
             remote.iter().map(|e| (e.path.as_str(), e)).collect();
         let mut processed = 0u32;
+        let mut refresh: BTreeSet<String> = BTreeSet::new();
+        let mut download_jobs: Vec<&Action> = Vec::new();
 
         for action in &plan {
             if cancel.is_cancelled() {
@@ -136,9 +138,25 @@ impl Engine {
                 self.record(&db, action, &loc, &rem)?;
                 continue;
             }
+            if matches!(action, Action::Download { .. }) {
+                // Downloads are independent of each other and dominate the
+                // runtime of a cold pass, so they run later in a pool (issue
+                // #268).
+                download_jobs.push(action);
+                continue;
+            }
             processed += 1;
             match self.apply(
-                &http, &endpoints, action, &loc, &rem, &db, sink, processed, cancel,
+                &http,
+                &endpoints,
+                action,
+                &loc,
+                &rem,
+                &db,
+                sink,
+                processed,
+                cancel,
+                &mut refresh,
             ) {
                 Ok(()) => match action {
                     Action::Download { .. } => summary.downloaded += 1,
@@ -155,6 +173,74 @@ impl Engine {
                     summary.errors += 1;
                     continue;
                 }
+            }
+        }
+
+        if !download_jobs.is_empty() {
+            let workers = std::env::var("NATIVE_DOWNLOAD_WORKERS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(4usize)
+                .clamp(1, 16)
+                .min(download_jobs.len());
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let done = std::sync::atomic::AtomicU32::new(0);
+            let failures = std::sync::Mutex::new(Vec::<String>::new());
+            let dirs = std::sync::Mutex::new(BTreeSet::<String>::new());
+            std::thread::scope(|scope| {
+                for _ in 0..workers {
+                    scope.spawn(|| loop {
+                        if cancel.is_cancelled() {
+                            break;
+                        }
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some(action) = download_jobs.get(index) else {
+                            break;
+                        };
+                        match self.run_download(&http, &endpoints, action, &rem, sink, cancel) {
+                            Ok(dir) => {
+                                done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                if let Ok(mut dirs) = dirs.lock() {
+                                    dirs.insert(dir);
+                                }
+                            }
+                            Err(Error::Auth(m)) => {
+                                if let Ok(mut failures) = failures.lock() {
+                                    failures.push(format!("auth:{m}"));
+                                }
+                                break;
+                            }
+                            Err(Error::Cancelled) => break,
+                            Err(e) => {
+                                eprintln!("{} failed: {e}", action.rel());
+                                if let Ok(mut failures) = failures.lock() {
+                                    failures.push(e.to_string());
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            summary.downloaded += done.load(std::sync::atomic::Ordering::SeqCst);
+            if let Ok(dirs) = dirs.into_inner() {
+                refresh.extend(dirs);
+            }
+            if let Ok(failures) = failures.into_inner() {
+                summary.errors += failures.len() as u32;
+                if let Some(message) = failures
+                    .iter()
+                    .find_map(|f| f.strip_prefix("auth:").map(str::to_string))
+                {
+                    return Err(Error::Auth(message));
+                }
+            }
+        }
+
+        // One Depth:1 listing per touched directory instead of one Depth:0
+        // PROPFIND per transferred file (issue #268).
+        for dir in &refresh {
+            if let Err(e) = self.refresh_dir(&http, &endpoints, &db, dir) {
+                log::warn!("refresh {dir}: {e}");
             }
         }
 
@@ -201,6 +287,51 @@ impl Engine {
         Ok(())
     }
 
+    fn run_download(
+        &self,
+        http: &HttpClient,
+        ep: &Endpoints,
+        action: &Action,
+        rem: &BTreeMap<&str, &RemoteEntry>,
+        sink: &dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<String> {
+        let Action::Download {
+            rel,
+            etag,
+            mtime,
+            checksum,
+            ..
+        } = action
+        else {
+            return Err(Error::Config("not a download action".into()));
+        };
+        sink.event(Progress {
+            action: "download".to_string(),
+            path: rel.clone(),
+            processed: 0,
+            bytes_done: 0,
+            bytes_total: 0,
+        });
+        let url = self.url(ep, rel);
+        let dest = self.local_path(rel);
+        let total = rem.get(rel.as_str()).map(|r| r.size).unwrap_or(0);
+        crate::transfer::download(
+            http,
+            &url,
+            &dest,
+            Some(etag),
+            checksum.as_deref(),
+            *mtime,
+            total,
+            self.cfg.max_retries,
+            cancel,
+            sink,
+            rel,
+        )?;
+        Ok(parent_dir(rel))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn apply(
         &self,
@@ -213,6 +344,7 @@ impl Engine {
         sink: &dyn ProgressSink,
         processed: u32,
         cancel: &CancelToken,
+        refresh: &mut BTreeSet<String>,
     ) -> Result<()> {
         let progress = |action: &str, path: &str| {
             sink.event(Progress {
@@ -259,7 +391,10 @@ impl Engine {
                     sink,
                     rel,
                 )?;
-                self.refresh_from_remote(http, ep, db, rel)
+                {
+                    refresh.insert(parent_dir(rel));
+                    Ok(())
+                }
             }
             Action::Upload { rel } => {
                 progress("upload", rel);
@@ -282,7 +417,10 @@ impl Engine {
                     sink,
                     rel,
                 )?;
-                self.refresh_from_remote(http, ep, db, rel)
+                {
+                    refresh.insert(parent_dir(rel));
+                    Ok(())
+                }
             }
             Action::DeleteRemote { rel } => {
                 progress("delete", rel);
@@ -351,7 +489,10 @@ impl Engine {
                     sink,
                     rel,
                 )?;
-                self.refresh_from_remote(http, ep, db, rel)
+                {
+                    refresh.insert(parent_dir(rel));
+                    Ok(())
+                }
             }
         }
     }
@@ -379,38 +520,47 @@ impl Engine {
     }
 
     /// Read back the authoritative remote state after a transfer.
-    fn refresh_from_remote(
-        &self,
-        http: &HttpClient,
-        ep: &Endpoints,
-        db: &StateDb,
-        rel: &str,
-    ) -> Result<()> {
-        let url = self.url(ep, rel);
-        let entries = http.propfind(&url, "0")?;
-        let remote = entries.first();
-        let path = self.local_path(rel);
-        let meta = std::fs::symlink_metadata(&path).ok();
-        let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-        let size = meta
-            .as_ref()
-            .map(|m| if is_dir { 0 } else { m.len() })
-            .unwrap_or(0);
-        let mtime = meta
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        db.upsert(&DbEntry {
-            path: rel.to_string(),
-            is_dir,
-            size,
-            mtime,
-            etag: remote.map(|r| r.etag.clone()).unwrap_or_default(),
-            fileid: remote.and_then(|r| r.fileid.clone()),
-            inode: inode_of_meta(meta.as_ref()),
-        })
+    /// Refresh every entry of one directory with a single Depth:1 listing.
+    fn refresh_dir(&self, http: &HttpClient, ep: &Endpoints, db: &StateDb, dir: &str) -> Result<()> {
+        let url = if dir.is_empty() {
+            ep.remote_root.clone()
+        } else {
+            format!("{}/", self.url(ep, dir))
+        };
+        let entries = http.propfind(&url, "1")?;
+        for entry in entries {
+            let rel = if dir.is_empty() {
+                entry.path.clone()
+            } else {
+                format!("{dir}/{}", entry.path)
+            };
+            if rel.is_empty() {
+                continue;
+            }
+            let path = self.local_path(&rel);
+            let meta = std::fs::symlink_metadata(&path).ok();
+            let is_dir = entry.is_dir;
+            let size = meta
+                .as_ref()
+                .map(|m| if is_dir { 0 } else { m.len() })
+                .unwrap_or(entry.size);
+            let mtime = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(entry.mtime.unwrap_or(0));
+            db.upsert(&DbEntry {
+                path: rel,
+                is_dir,
+                size,
+                mtime,
+                etag: entry.etag.clone(),
+                fileid: entry.fileid.clone(),
+                inode: inode_of_meta(meta.as_ref()),
+            })?;
+        }
+        Ok(())
     }
 
     fn ensure_remote_root(&self, http: &HttpClient) -> Result<()> {
@@ -574,6 +724,13 @@ impl SyncSummary {
             _ => {}
         }
     }
+}
+
+/// Parent directory of a relative path, `""` for top-level entries.
+fn parent_dir(rel: &str) -> String {
+    rel.rsplit_once('/')
+        .map(|(dir, _)| dir.to_string())
+        .unwrap_or_default()
 }
 
 fn inode_of_meta(meta: Option<&std::fs::Metadata>) -> u64 {
