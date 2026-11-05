@@ -10,6 +10,11 @@ Todas las versiones notables de NextSync se documentan aquí. El formato sigue [
 - The setup wizard no longer blocks finishing when the external client is missing, and the folder menu only offers to install it for accounts that opted out of the native engine (#262).
 - The README and the landing describe the engine the app actually runs, including what the first run does on an account that the external client synchronized before (#262).
 
+### Fixed
+
+- The native engine builds its HTTP client with the system root certificates. Without them every run panicked before the first request and every folder reported a sync error (0.41 shipped it broken behind the opt-in switch) (#262).
+- The sync exclusions apply to the remote listing and the journal, not only to the local scan. An excluded file that exists on the server was downloaded and, because the local scan never reports it, proposed as a remote deletion on the next run (#262).
+
 ## [0.41.0] - 2026-11-05
 
 ### Added

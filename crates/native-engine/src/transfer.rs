@@ -403,14 +403,19 @@ fn tus(
         .unwrap_or(dest_url)
         .trim_start_matches('/');
     let size = std::fs::metadata(local)?.len();
-    let filename = crate::http::base64_encode(rel.as_bytes());
+    // OpenCloud creates the upload on the target collection and names it from
+    // the `filename` metadata: a metadata value containing a slash is
+    // rejected with 412, and the upload has to be issued on the destination
+    // directory, not on the space root.
+    let (parent, name) = tus_target(space_root, rel);
+    let filename = crate::http::base64_encode(name.as_bytes());
     let meta = format!("filename {filename}, mtime {mtime}");
     let len = size.to_string();
     let mut last = None;
     for attempt in 0..=max_retries {
         let resp = client.request_raw(
             "POST",
-            space_root,
+            &parent,
             &[
                 ("Tus-Resumable", "1.0.0"),
                 ("Upload-Length", &len),
@@ -438,7 +443,7 @@ fn tus(
         if !(200..=299).contains(&status) {
             let e = Error::Http {
                 status,
-                url: space_root.to_string(),
+                url: parent.clone(),
                 body: "tus create".into(),
             };
             let retry = retryable(&e);
@@ -535,6 +540,24 @@ fn head_offset(client: &HttpClient, url: &str) -> Result<u64> {
         .unwrap_or(0))
 }
 
+/// Collection and bare name for a TUS creation.
+///
+/// OpenCloud creates the upload on the target collection: posting to the
+/// space root with a relative path in `filename` is rejected with 412, so the
+/// parent collection is derived from the destination and the path is decoded
+/// back to a plain file name.
+fn tus_target(space_root: &str, rel: &str) -> (String, String) {
+    let root = space_root.trim_end_matches('/');
+    let decoded = crate::http::percent_decode(rel);
+    match decoded.rsplit_once('/') {
+        Some((dir, name)) => (
+            format!("{root}/{}", crate::http::percent_encode_path(dir)),
+            name.to_string(),
+        ),
+        None => (root.to_string(), decoded),
+    }
+}
+
 fn absolute(base: &str, location: &str) -> String {
     if location.starts_with("http://") || location.starts_with("https://") {
         return location.to_string();
@@ -590,6 +613,24 @@ mod tests {
         assert_eq!(
             absolute("https://h:9200/dav/spaces/x", "https://o/p"),
             "https://o/p"
+        );
+    }
+
+    /// OpenCloud rejects a TUS creation whose `filename` carries a path (412),
+    /// so the upload goes to the destination collection with a bare name.
+    #[test]
+    fn tus_targets_the_destination_collection() {
+        let root = "https://h/dav/spaces/S";
+        assert_eq!(
+            tus_target(root, "gestion/a%20b/c%20d.jpg"),
+            (
+                "https://h/dav/spaces/S/gestion/a%20b".to_string(),
+                "c d.jpg".to_string()
+            )
+        );
+        assert_eq!(
+            tus_target(root, "root.jpg"),
+            ("https://h/dav/spaces/S".to_string(), "root.jpg".to_string())
         );
     }
 }
