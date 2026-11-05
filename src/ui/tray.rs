@@ -290,8 +290,23 @@ impl Tray {
     pub fn new(initial: AppState, callbacks: TrayCallbacks) -> Result<Self, ksni::Error> {
         let show_conflicts = callbacks.open_conflicts.is_some();
         let (sender, receiver) = async_channel::unbounded();
-        let item = TrayItem::new(initial, sender, show_conflicts);
-        let handle = item.spawn()?;
+        // The StatusNotifierWatcher (provided by the GNOME appindicator
+        // extension) can be missing for a moment while the shell reloads it,
+        // so a single failed attempt at startup used to drop the tray for the
+        // whole session. Retry briefly before giving up.
+        let mut attempt = 1;
+        let handle = loop {
+            let item = TrayItem::new(initial, sender.clone(), show_conflicts);
+            match item.spawn() {
+                Ok(handle) => break handle,
+                Err(error) if attempt < 5 => {
+                    eprintln!("nextsync: tray registration failed ({error:?}), retrying");
+                    std::thread::sleep(std::time::Duration::from_millis(250 * attempt));
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         let dispatcher = MainContext::default().spawn_local(dispatch(receiver, callbacks));
         Ok(Self {
             handle,
