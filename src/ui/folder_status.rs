@@ -25,19 +25,19 @@ use crate::util::i18n::{plural, t};
 /// `'static` lifetimes.
 pub fn folder_status_presentation(state: AppState) -> (&'static str, &'static str) {
     match state {
-        AppState::Unconfigured => ("nextsync-row-not-configured", t("Not Configured")),
-        AppState::IdleOk => ("nextsync-row-ok", t("Synchronized")),
-        AppState::IdleManualOnly => ("nextsync-row-paused", t("Automatic Sync Is Off")),
-        AppState::IdleNotSynced => ("nextsync-row-paused", t("Not Synchronized Yet")),
-        AppState::SyncQueued => ("nextsync-row-paused", t("Waiting to synchronize")),
-        AppState::Syncing => ("nextsync-row-syncing", t("Synchronizing…")),
-        AppState::PausedUser => ("nextsync-row-paused", t("Paused")),
-        AppState::PausedBattery => ("nextsync-row-battery", t("Paused on Battery")),
-        AppState::Offline => ("nextsync-row-offline", t("Offline")),
-        AppState::Error => ("nextsync-row-error", t("Synchronization Error")),
-        AppState::AuthRequired => ("nextsync-row-error", t("Credentials rejected")),
-        AppState::KeyringLocked => ("nextsync-row-error", t("Password Keyring Locked")),
-        AppState::DeleteReview => ("nextsync-row-error", t("Review Deletions")),
+        AppState::Unconfigured => ("io.github.gnacho.nextsync.row-not-configured", t("Not Configured")),
+        AppState::IdleOk => ("io.github.gnacho.nextsync.row-ok", t("Synchronized")),
+        AppState::IdleManualOnly => ("io.github.gnacho.nextsync.row-paused", t("Automatic Sync Is Off")),
+        AppState::IdleNotSynced => ("io.github.gnacho.nextsync.row-paused", t("Not Synchronized Yet")),
+        AppState::SyncQueued => ("io.github.gnacho.nextsync.row-paused", t("Waiting to synchronize")),
+        AppState::Syncing => ("io.github.gnacho.nextsync.row-syncing", t("Synchronizing…")),
+        AppState::PausedUser => ("io.github.gnacho.nextsync.row-paused", t("Paused")),
+        AppState::PausedBattery => ("io.github.gnacho.nextsync.row-battery", t("Paused on Battery")),
+        AppState::Offline => ("io.github.gnacho.nextsync.row-offline", t("Offline")),
+        AppState::Error => ("io.github.gnacho.nextsync.row-error", t("Synchronization Error")),
+        AppState::AuthRequired => ("io.github.gnacho.nextsync.row-error", t("Credentials rejected")),
+        AppState::KeyringLocked => ("io.github.gnacho.nextsync.row-error", t("Password Keyring Locked")),
+        AppState::DeleteReview => ("io.github.gnacho.nextsync.row-error", t("Review Deletions")),
     }
 }
 
@@ -84,6 +84,16 @@ pub fn progress_line_text(
         _ => t("processing {file}"),
     }
     .replace("{file}", file);
+    let action = if progress.bytes_total > 0 {
+        use crate::nextcloud::nextcloudcmd_progress::human_bytes;
+        format!(
+            "{action} · {} / {}",
+            human_bytes(progress.bytes_done, 1),
+            human_bytes(progress.bytes_total, 1)
+        )
+    } else {
+        action
+    };
     if progress.processed > 0 {
         plural(
             u64::from(progress.processed),
@@ -367,13 +377,13 @@ impl FolderStatusRow {
                 Some(t("Resolve conflicts")),
                 Some("folder.resolve-conflicts"),
             );
-            item.set_icon(&gio::ThemedIcon::new("nextsync-list-checks-symbolic"));
+            item.set_icon(&gio::ThemedIcon::new("io.github.gnacho.nextsync.list-checks-symbolic"));
             menu.append_item(&item);
         }
         if actions.contains_key("review-deletions") {
             let item =
                 gio::MenuItem::new(Some(t("Review deletions")), Some("folder.review-deletions"));
-            item.set_icon(&gio::ThemedIcon::new("nextsync-row-error"));
+            item.set_icon(&gio::ThemedIcon::new("io.github.gnacho.nextsync.row-error"));
             menu.append_item(&item);
         }
         if actions.contains_key("toggle-pause") {
@@ -404,7 +414,7 @@ impl FolderStatusRow {
         let pending_item = actions.contains_key("pending-changes").then(|| {
             let item =
                 gio::MenuItem::new(Some(t("Pending changes…")), Some("folder.pending-changes"));
-            item.set_icon(&gio::ThemedIcon::new("nextsync-list-checks-symbolic"));
+            item.set_icon(&gio::ThemedIcon::new("io.github.gnacho.nextsync.list-checks-symbolic"));
             item
         });
         let popover = gtk4::PopoverMenu::from_model(Some(&menu));
@@ -647,7 +657,7 @@ mod tests {
     fn idle_ok_presents_as_synchronized() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::IdleOk);
-        assert_eq!(icon, "nextsync-row-ok");
+        assert_eq!(icon, "io.github.gnacho.nextsync.row-ok");
         assert_eq!(label, "Synchronized");
         assert_eq!(folder_status_color(AppState::IdleOk), Some("success"));
         reset_locale();
@@ -657,7 +667,7 @@ mod tests {
     fn syncing_presents_with_spinner_icon() {
         set_locale(Locale::English);
         let (icon, label) = folder_status_presentation(AppState::Syncing);
-        assert_eq!(icon, "nextsync-row-syncing");
+        assert_eq!(icon, "io.github.gnacho.nextsync.row-syncing");
         assert_eq!(label, "Synchronizing…");
         assert_eq!(folder_status_color(AppState::Syncing), None);
         reset_locale();
@@ -668,7 +678,7 @@ mod tests {
         // Native theme icons; attention states turn red.
         assert_eq!(
             folder_status_presentation(AppState::SyncQueued).0,
-            "nextsync-row-paused"
+            "io.github.gnacho.nextsync.row-paused"
         );
         assert_eq!(folder_status_color(AppState::SyncQueued), None);
         for state in [
@@ -679,14 +689,14 @@ mod tests {
         ] {
             assert_eq!(
                 folder_status_presentation(state).0,
-                "nextsync-row-error",
+                "io.github.gnacho.nextsync.row-error",
                 "state {state:?}"
             );
             assert_eq!(folder_status_color(state), Some("error"));
         }
         assert_eq!(
             folder_status_presentation(AppState::Offline).0,
-            "nextsync-row-offline"
+            "io.github.gnacho.nextsync.row-offline"
         );
     }
 
@@ -895,9 +905,14 @@ mod tests {
                 action: "download".to_string(),
                 path: "/tmp/a/song.mp3".to_string(),
                 processed: 3,
+                bytes_done: 1_500_000_000,
+                bytes_total: 3_000_000_000,
             }));
             assert!(row.progress_label.is_visible());
-            assert_eq!(row.progress_label.label(), "downloading song.mp3 · 3 files");
+            assert_eq!(
+                row.progress_label.label(),
+                "downloading song.mp3 · 1,4 GB / 2,8 GB · 3 files"
+            );
             state.set_progress(None);
             assert!(!row.progress_label.is_visible());
             reset_locale();

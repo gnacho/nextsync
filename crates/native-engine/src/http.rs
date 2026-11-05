@@ -14,6 +14,7 @@ pub struct RemoteEntry {
     pub etag: String,
     pub fileid: Option<String>,
     pub mtime: Option<i64>,
+    pub checksum: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +38,17 @@ impl HttpClient {
         INIT.call_once(|| {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         });
-        let mut tls = ureq::tls::TlsConfig::builder();
+        // ureq is built with `rustls-no-provider`, so WebPki lookup is disabled
+        // and the root certificates must be supplied explicitly. Without this
+        // every HTTPS request to a normal CA-signed server panics.
+        let native = rustls_native_certs::load_native_certs();
+        let certs: Vec<ureq::tls::Certificate<'static>> = native
+            .certs
+            .iter()
+            .map(|cert| ureq::tls::Certificate::from_der(cert.as_ref()).to_owned())
+            .collect();
+        let mut tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::new_with_certs(&certs));
         if opts.trust_invalid_certificates {
             tls = tls.disable_verification(true);
         }
@@ -87,16 +98,30 @@ impl HttpClient {
             200..=299 => Ok(status),
             401 | 403 => Err(Error::Auth(format!("{status} {url}"))),
             404 => Err(Error::NotFound(url.to_string())),
-            _ => Err(Error::Http {
-                status,
-                url: url.to_string(),
-                body: String::new(),
-            }),
+            _ => {
+                // Honour the server's pacing hint before the caller applies
+                // its own exponential backoff (429 rate limit, 503 overload).
+                if status == 429 || status == 503 {
+                    if let Some(secs) = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(parse_retry_after)
+                    {
+                        std::thread::sleep(std::time::Duration::from_secs(secs.min(30)));
+                    }
+                }
+                Err(Error::Http {
+                    status,
+                    url: url.to_string(),
+                    body: String::new(),
+                })
+            }
         }
     }
 
     pub fn propfind(&self, url: &str, depth: &str) -> Result<Vec<RemoteEntry>> {
-        const BODY: &str = r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><d:getetag/><d:getcontentlength/><d:getlastmodified/><d:resourcetype/><oc:fileid/></d:prop></d:propfind>"#;
+        const BODY: &str = r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><d:getetag/><d:getcontentlength/><d:getlastmodified/><d:resourcetype/><oc:fileid/><oc:checksums/></d:prop></d:propfind>"#;
         let mut resp = self.request(
             "PROPFIND",
             url,
@@ -119,6 +144,27 @@ impl HttpClient {
         let resp = self.request("GET", url, &[], None)?;
         self.check(&resp, url)?;
         Ok(Box::new(resp.into_body().into_reader()))
+    }
+
+    /// GET that may resume: sends `Range: bytes=<offset>-` when `offset > 0`.
+    /// Returns the reader plus the status so the caller can tell 206 (resumed)
+    /// from 200 (server ignored the range and restarted).
+    pub fn get_reader_from(
+        &self,
+        url: &str,
+        offset: u64,
+    ) -> Result<(Box<dyn Read + Send>, u16)> {
+        let range;
+        let headers: &[(&str, &str)] = if offset > 0 {
+            range = format!("bytes={offset}-");
+            &[("Range", range.as_str())]
+        } else {
+            &[]
+        };
+        let resp = self.request("GET", url, headers, None)?;
+        let status = resp.status().as_u16();
+        self.check(&resp, url)?;
+        Ok((Box::new(resp.into_body().into_reader()), status))
     }
 
     pub fn put_file(
@@ -226,6 +272,7 @@ pub fn parse_multistatus(xml: &str, request_url: &str) -> Result<Vec<RemoteEntry
         let mut etag = String::new();
         let mut fileid = None;
         let mut mtime = None;
+        let mut checksum: Option<String> = None;
         for propstat in resp
             .descendants()
             .filter(|n| n.has_tag_name(("DAV:", "propstat")))
@@ -264,6 +311,15 @@ pub fn parse_multistatus(xml: &str, request_url: &str) -> Result<Vec<RemoteEntry
                             .any(|c| c.has_tag_name(("DAV:", "collection")))
                     }
                     "fileid" => fileid = prop.text().map(|t| t.trim().to_string()),
+                    "checksums" => {
+                        checksum = prop.text().and_then(|t| {
+                            t.split_whitespace().find_map(|c| {
+                                c.strip_prefix("SHA1:")
+                                    .or_else(|| c.strip_prefix("sha1:"))
+                                    .map(|h| h.to_ascii_lowercase())
+                            })
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -273,6 +329,7 @@ pub fn parse_multistatus(xml: &str, request_url: &str) -> Result<Vec<RemoteEntry
             is_dir,
             size,
             etag,
+            checksum,
             fileid,
             mtime,
         });
@@ -389,6 +446,27 @@ pub fn now_epoch() -> i64 {
 }
 
 #[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    /// Regression: ureq is built with `rustls-no-provider`, so building an
+    /// agent without explicit root certs panics with "WebPki is disabled".
+    /// HTTPS with a real CA must work without the insecure flag.
+    #[test]
+    fn default_tls_configuration_builds_an_agent() {
+        let opts = HttpOptions {
+            base_url: "https://hub.example.com".to_string(),
+            username: "user".to_string(),
+            password: "secret".to_string(),
+            trust_invalid_certificates: false,
+            proxy: None,
+            timeout: Duration::from_secs(5),
+        };
+        HttpClient::new(&opts).expect("agent with native root certs");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -432,5 +510,29 @@ mod tests {
         assert_eq!(base64_encode(b"admin:pass"), "YWRtaW46cGFzcw==");
         assert_eq!(base64_encode(b"a"), "YQ==");
         assert_eq!(base64_encode(b"ab"), "YWI=");
+    }
+}
+
+/// Parse a `Retry-After` header in its delay-seconds form. HTTP-date form is
+/// ignored on purpose: servers that send it are rare and the caller's backoff
+/// already covers that case.
+pub fn parse_retry_after(value: &str) -> Option<u64> {
+    value.trim().parse::<u64>().ok()
+}
+
+#[cfg(test)]
+mod retry_after_tests {
+    use super::parse_retry_after;
+
+    #[test]
+    fn parses_delay_seconds() {
+        assert_eq!(parse_retry_after("5"), Some(5));
+        assert_eq!(parse_retry_after(" 12 "), Some(12));
+    }
+
+    #[test]
+    fn ignores_http_dates_and_garbage() {
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after(""), None);
     }
 }

@@ -129,6 +129,10 @@ pub struct Progress {
     pub action: String,
     pub path: String,
     pub processed: u32,
+    /// Bytes already transferred for this file.
+    pub bytes_done: u64,
+    /// Total bytes of the file being transferred, 0 when unknown.
+    pub bytes_total: u64,
 }
 
 impl Progress {
@@ -137,7 +141,16 @@ impl Progress {
             action: action.into(),
             path: path.into(),
             processed: 0,
+            bytes_done: 0,
+            bytes_total: 0,
         }
+    }
+
+    /// Attach byte counters so the UI can show copied and remaining size.
+    pub fn with_bytes(mut self, done: u64, total: u64) -> Self {
+        self.bytes_done = done;
+        self.bytes_total = total;
+        self
     }
 }
 

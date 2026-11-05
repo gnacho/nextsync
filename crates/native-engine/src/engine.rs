@@ -191,6 +191,8 @@ impl Engine {
                 action: action.to_string(),
                 path: path.to_string(),
                 processed,
+                bytes_done: 0,
+                bytes_total: 0,
             });
         };
         match action {
@@ -206,19 +208,24 @@ impl Engine {
                 self.record(db, action, loc, rem)
             }
             Action::Download {
-                rel, etag, mtime, ..
+                rel, etag, mtime, checksum, ..
             } => {
                 progress("download", rel);
                 let url = self.url(ep, rel);
                 let dest = self.local_path(rel);
+                let total = rem.get(rel.as_str()).map(|r| r.size).unwrap_or(0);
                 crate::transfer::download(
                     http,
                     &url,
                     &dest,
                     Some(etag),
+                    checksum.as_deref(),
                     *mtime,
+                    total,
                     self.cfg.max_retries,
                     cancel,
+                    sink,
+                    rel,
                 )?;
                 self.refresh_from_remote(http, ep, db, rel)
             }
@@ -240,6 +247,8 @@ impl Engine {
                     self.cfg.chunk_threshold,
                     self.cfg.max_retries,
                     cancel,
+                    sink,
+                    rel,
                 )?;
                 self.refresh_from_remote(http, ep, db, rel)
             }
@@ -291,9 +300,9 @@ impl Engine {
                     }
                     std::fs::rename(&path, &target)?;
                 }
-                let (etag, mtime) = rem
+                let (etag, mtime, checksum, total) = rem
                     .get(rel.as_str())
-                    .map(|r| (r.etag.clone(), r.mtime))
+                    .map(|r| (r.etag.clone(), r.mtime, r.checksum.clone(), r.size))
                     .unwrap_or_default();
                 let url = self.url(ep, rel);
                 let dest = self.local_path(rel);
@@ -302,9 +311,13 @@ impl Engine {
                     &url,
                     &dest,
                     Some(&etag),
+                    checksum.as_deref(),
                     mtime,
+                    total,
                     self.cfg.max_retries,
                     cancel,
+                    sink,
+                    rel,
                 )?;
                 self.refresh_from_remote(http, ep, db, rel)
             }

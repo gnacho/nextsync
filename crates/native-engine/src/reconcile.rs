@@ -10,6 +10,7 @@ pub enum Action {
     Download {
         rel: String,
         etag: String,
+        checksum: Option<String>,
         size: u64,
         mtime: Option<i64>,
     },
@@ -161,6 +162,7 @@ pub fn reconcile(
                         etag: r.etag.clone(),
                         size: r.size,
                         mtime: r.mtime,
+                        checksum: r.checksum.clone(),
                     });
                 } else if local_changed && !l.is_dir {
                     actions.push(Action::Upload {
@@ -217,6 +219,7 @@ pub fn reconcile(
                         etag: r.etag.clone(),
                         size: r.size,
                         mtime: r.mtime,
+                        checksum: r.checksum.clone(),
                     });
                 }
             }
@@ -290,6 +293,7 @@ mod tests {
             is_dir: false,
             size: 10,
             etag: etag.into(),
+            checksum: None,
             fileid: fileid.map(str::to_string),
             mtime: Some(100),
         }
@@ -300,6 +304,7 @@ mod tests {
             is_dir: true,
             size: 0,
             etag: String::new(),
+            checksum: None,
             fileid: None,
             mtime: None,
         }

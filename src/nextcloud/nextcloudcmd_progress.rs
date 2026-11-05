@@ -19,6 +19,10 @@ pub struct SyncProgress {
     pub path: String,
     /// Number of operations reported so far in the current sync.
     pub processed: u32,
+    /// Bytes already transferred for this file.
+    pub bytes_done: u64,
+    /// Total bytes of the file, 0 when unknown.
+    pub bytes_total: u64,
 }
 
 impl SyncProgress {
@@ -28,6 +32,8 @@ impl SyncProgress {
             action: action.into(),
             path: path.into(),
             processed: 0,
+            bytes_done: 0,
+            bytes_total: 0,
         }
     }
 
@@ -41,12 +47,33 @@ impl SyncProgress {
 
     /// Short human label, mirroring `nextcloudcmd_progress.describe_progress`.
     pub fn describe(&self) -> String {
-        if self.is_operation() && self.processed > 0 {
+        let mut text = if self.is_operation() && self.processed > 0 {
             format!("{}: {} ({})", self.action, self.path, self.processed)
         } else {
             format!("{}: {}", self.action, self.path)
+        };
+        if self.bytes_total > 0 {
+            text.push_str(&format!(
+                " - {} / {}",
+                human_bytes(self.bytes_done, 1),
+                human_bytes(self.bytes_total, 1)
+            ));
         }
+        text
     }
+}
+
+/// Human size with a decimal comma, e.g. `1,2 GB`.
+pub fn human_bytes(bytes: u64, decimals: usize) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    let text = format!("{value:.decimals$}");
+    format!("{} {}", text.replace('.', ","), UNITS[unit])
 }
 
 /// Normalized action for the raw action words printed by `nextcloudcmd`.

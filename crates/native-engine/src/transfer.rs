@@ -1,7 +1,7 @@
 //! Streaming downloads and uploads, with retries and chunking.
 
 use crate::http::HttpClient;
-use crate::{CancelToken, Error, Result};
+use crate::{CancelToken, Error, Progress, ProgressSink, Result};
 use sha1::{Digest, Sha1};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -10,27 +10,96 @@ use std::time::Duration;
 const CHUNK: u64 = 10 * 1024 * 1024;
 const CHECKSUM_LIMIT: u64 = 100 * 1024 * 1024;
 
+/// Emits byte-level progress at most every 250 ms so the UI can show how much
+/// is copied and how much is left without flooding the channel.
+pub struct ProgressReporter<'a> {
+    sink: &'a dyn ProgressSink,
+    action: &'static str,
+    path: String,
+    total: u64,
+    done: u64,
+    last: std::time::Instant,
+}
+
+impl<'a> ProgressReporter<'a> {
+    pub fn new(sink: &'a dyn ProgressSink, action: &'static str, path: &str, total: u64) -> Self {
+        let mut reporter = Self {
+            sink,
+            action,
+            path: path.to_string(),
+            total,
+            done: 0,
+            last: std::time::Instant::now(),
+        };
+        reporter.emit();
+        reporter
+    }
+
+    /// Continue from bytes already on disk (resumed downloads).
+    pub fn resume_from(&mut self, done: u64) {
+        self.done = done;
+        self.emit();
+    }
+
+    pub fn add(&mut self, bytes: u64) {
+        self.done += bytes;
+        if self.last.elapsed() >= Duration::from_millis(250) {
+            self.emit();
+        }
+    }
+
+    pub fn finish(&mut self) {
+        self.done = self.done.max(self.total);
+        self.emit();
+    }
+
+    fn emit(&mut self) {
+        self.sink.event(
+            Progress::new(self.action, self.path.clone()).with_bytes(self.done, self.total),
+        );
+        self.last = std::time::Instant::now();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn download(
     client: &HttpClient,
     url: &str,
     dest: &Path,
     expected_etag: Option<&str>,
+    expected_checksum: Option<&str>,
     mtime: Option<i64>,
+    total: u64,
     max_retries: u32,
     cancel: &CancelToken,
+    sink: &dyn ProgressSink,
+    path: &str,
 ) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = temp_path(dest);
+    let mut reporter = ProgressReporter::new(sink, "download", path, total);
     let mut last_err = None;
     for attempt in 0..=max_retries {
         if cancel.is_cancelled() {
             let _ = std::fs::remove_file(&tmp);
             return Err(Error::Cancelled);
         }
-        match try_download(client, url, &tmp, expected_etag) {
+        match try_download(client, url, &tmp, expected_etag, &mut reporter) {
             Ok(()) => {
+                if let Some(expected) = expected_checksum {
+                    let actual = sha1_hex(&tmp)?;
+                    if !actual.eq_ignore_ascii_case(expected) {
+                        let _ = std::fs::remove_file(&tmp);
+                        last_err = Some(Error::Transport("checksum mismatch".into()));
+                        if attempt == max_retries {
+                            break;
+                        }
+                        backoff(attempt);
+                        continue;
+                    }
+                }
                 set_mtime(&tmp, mtime)?;
                 if std::fs::rename(&tmp, dest).is_err() {
                     let _ = std::fs::remove_file(dest);
@@ -52,10 +121,34 @@ pub fn download(
     Err(last_err.unwrap_or_else(|| Error::Transport("download failed".into())))
 }
 
-fn try_download(client: &HttpClient, url: &str, tmp: &Path, expected: Option<&str>) -> Result<()> {
-    let mut reader = client.get_reader(url)?;
-    let mut out = std::fs::File::create(tmp)?;
-    std::io::copy(&mut reader, &mut out)?;
+fn try_download(
+    client: &HttpClient,
+    url: &str,
+    tmp: &Path,
+    expected: Option<&str>,
+    reporter: &mut ProgressReporter,
+) -> Result<()> {
+    // Resume a partial download when a previous attempt left bytes behind.
+    let offset = std::fs::metadata(tmp).map(|m| m.len()).unwrap_or(0);
+    let (mut reader, status) = client.get_reader_from(url, offset)?;
+    let mut out = if offset > 0 && status == 206 {
+        reporter.resume_from(offset);
+        std::fs::OpenOptions::new().append(true).open(tmp)?
+    } else {
+        if offset > 0 {
+            reporter.resume_from(0);
+        }
+        std::fs::File::create(tmp)?
+    };
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buf[..n])?;
+        reporter.add(n as u64);
+    }
     out.sync_all()?;
     let _ = expected;
     Ok(())
@@ -73,8 +166,11 @@ pub fn upload(
     threshold: u64,
     max_retries: u32,
     cancel: &CancelToken,
+    sink: &dyn ProgressSink,
+    path: &str,
 ) -> Result<()> {
     let size = std::fs::metadata(local)?.len();
+    let mut reporter = ProgressReporter::new(sink, "upload", path, size);
     if size >= threshold {
         match provider {
             crate::Provider::Nextcloud => chunked_v2(
@@ -85,6 +181,7 @@ pub fn upload(
                 mtime,
                 max_retries,
                 cancel,
+                &mut reporter,
             ),
             crate::Provider::OpenCloud => tus(
                 client,
@@ -94,6 +191,7 @@ pub fn upload(
                 mtime,
                 max_retries,
                 cancel,
+                &mut reporter,
             ),
         }
     } else {
@@ -108,7 +206,10 @@ pub fn upload(
                 None
             };
             match client.put_file(dest_url, local, Some(mtime), cs.as_deref()) {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    reporter.finish();
+                    return Ok(());
+                }
                 Err(e) => {
                     let retry = retryable(&e);
                     last = Some(e);
@@ -125,7 +226,10 @@ pub fn upload(
 
 fn retryable(e: &Error) -> bool {
     match e {
-        Error::Http { status, .. } => *status >= 500 || *status == 429 || *status == 408,
+        Error::Http { status, .. } => {
+            // 423 is a temporary lock, 507 a transient quota/quota-refresh signal.
+            *status >= 500 || matches!(*status, 408 | 423 | 429 | 507)
+        }
         Error::Transport(_) => true,
         _ => false,
     }
@@ -160,7 +264,14 @@ fn set_mtime(_path: &Path, _mtime: Option<i64>) -> Result<()> {
     Ok(())
 }
 
-pub fn sha1_hex(path: &Path) -> Result<String> {
+pub fn sha1_hex_bytes(data: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+fn sha1_hex(path: &Path) -> Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut hasher = Sha1::new();
     let mut buf = vec![0u8; 64 * 1024];
@@ -178,6 +289,7 @@ pub fn sha1_hex(path: &Path) -> Result<String> {
         .collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn chunked_v2(
     client: &HttpClient,
     local: &Path,
@@ -186,10 +298,23 @@ fn chunked_v2(
     mtime: i64,
     max_retries: u32,
     cancel: &CancelToken,
+    reporter: &mut ProgressReporter,
 ) -> Result<()> {
-    let transfer = format!("{}-{}", crate::http::now_epoch(), std::process::id());
+    // A deterministic id keeps the same server-side upload folder across
+    // attempts, so a retry can skip the chunks that already landed instead of
+    // starting over.
+    let size = std::fs::metadata(local)?.len();
+    let seed = format!("{dest_url}|{size}|{mtime}");
+    let transfer = sha1_hex_bytes(seed.as_bytes())[..16].to_string();
     let base = format!("{}/{}/", upload_root.trim_end_matches('/'), transfer);
     client.mkcol(&base)?;
+    // Chunks already present on the server from a previous attempt.
+    let mut present: Vec<String> = client
+        .propfind(&base, "1")
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|e| e.path.rsplit('/').next().map(str::to_string))
+        .collect();
     let mut f = std::fs::File::open(local)?;
     let mut idx = 1u32;
     let mut buf = vec![0u8; CHUNK as usize];
@@ -202,7 +327,14 @@ fn chunked_v2(
         if n == 0 {
             break;
         }
-        let url = format!("{base}{:05}", idx);
+        let name = format!("{:05}", idx);
+        let url = format!("{base}{name}");
+        if present.contains(&name) {
+            present.retain(|p| *p != name);
+            reporter.add(n as u64);
+            idx += 1;
+            continue;
+        }
         let mut last = None;
         let mut ok = false;
         for attempt in 0..=max_retries {
@@ -222,29 +354,41 @@ fn chunked_v2(
             }
         }
         if !ok {
-            let _ = client.delete(&base);
+            // Keep the upload folder: the next attempt resumes from here.
             return Err(last.unwrap_or_else(|| Error::Transport("chunk failed".into())));
         }
+        reporter.add(n as u64);
         idx += 1;
     }
     let src = format!("{base}.file");
     let total = std::fs::metadata(local)?.len().to_string();
     let mt = mtime.to_string();
-    client
-        .request_raw(
-            "MOVE",
-            &src,
-            &[
-                ("Destination", dest_url),
-                ("Overwrite", "T"),
-                ("OC-Total-Length", &total),
-                ("X-OC-Mtime", &mt),
-            ],
-            None,
-        )
-        .map(drop)
+    let moved = client.request_raw(
+        "MOVE",
+        &src,
+        &[
+            ("Destination", dest_url),
+            ("Overwrite", "T"),
+            ("OC-Total-Length", &total),
+            ("X-OC-Mtime", &mt),
+        ],
+        None,
+    )?;
+    let status = moved.status().as_u16();
+    if !(200..=299).contains(&status) {
+        // Without this check a failed MOVE reported a successful upload and
+        // left the file only as loose chunks on the server.
+        return Err(Error::Http {
+            status,
+            url: dest_url.to_string(),
+            body: "chunked move".into(),
+        });
+    }
+    reporter.finish();
+    Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tus(
     client: &HttpClient,
     local: &Path,
@@ -253,6 +397,7 @@ fn tus(
     mtime: i64,
     max_retries: u32,
     cancel: &CancelToken,
+    reporter: &mut ProgressReporter,
 ) -> Result<()> {
     let rel = dest_url
         .strip_prefix(space_root.trim_end_matches('/'))
@@ -350,6 +495,7 @@ fn tus(
             match res {
                 Ok(r) if (200..=299).contains(&r.status().as_u16()) => {
                     offset += read as u64;
+                    reporter.add(read as u64);
                 }
                 Ok(r) => {
                     failed = Some(Error::Http {
@@ -446,5 +592,112 @@ mod tests {
             absolute("https://h:9200/dav/spaces/x", "https://o/p"),
             "https://o/p"
         );
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct Recorder(Mutex<Vec<(u64, u64)>>);
+
+    impl ProgressSink for Recorder {
+        fn event(&self, p: Progress) {
+            self.0.lock().unwrap().push((p.bytes_done, p.bytes_total));
+        }
+    }
+
+    #[test]
+    fn reporter_emits_start_add_and_finish() {
+        let sink = Recorder(Mutex::new(Vec::new()));
+        let mut reporter = ProgressReporter::new(&sink, "download", "Docs/big.bin", 1000);
+        reporter.add(400);
+        reporter.finish();
+        let seen = sink.0.lock().unwrap().clone();
+        assert_eq!(seen.first(), Some(&(0, 1000)));
+        assert_eq!(seen.last(), Some(&(1000, 1000)));
+    }
+
+    #[test]
+    fn reporter_resumes_from_bytes_already_on_disk() {
+        let sink = Recorder(Mutex::new(Vec::new()));
+        let mut reporter = ProgressReporter::new(&sink, "download", "Docs/big.bin", 1000);
+        reporter.resume_from(600);
+        reporter.add(400);
+        reporter.finish();
+        let seen = sink.0.lock().unwrap().clone();
+        assert!(seen.contains(&(600, 1000)));
+        assert_eq!(seen.last(), Some(&(1000, 1000)));
+    }
+}
+
+#[cfg(test)]
+mod chunk_resume_tests {
+    use super::*;
+
+    /// Resumes a chunked v2 upload that already has its first chunk on the
+    /// server. Needs a live Nextcloud:
+    /// `NXS_E2E_NC_URL=http://127.0.0.1:8081 cargo test -- --ignored chunked_resume`
+    #[test]
+    #[ignore]
+    fn chunked_resume_reuses_chunks_already_uploaded() {
+        let base = std::env::var("NXS_E2E_NC_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".into());
+        let user = "admin";
+        let pass = "admin1234";
+        let opts = crate::http::HttpOptions {
+            base_url: base.clone(),
+            username: user.into(),
+            password: pass.into(),
+            trust_invalid_certificates: false,
+            proxy: None,
+            timeout: std::time::Duration::from_secs(60),
+        };
+        let client = crate::http::HttpClient::new(&opts).expect("client");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = format!("resume-{}.bin", std::process::id());
+        let local = dir.path().join(&name);
+        let mut data = vec![0u8; CHUNK as usize + 4096];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        std::fs::write(&local, &data).expect("write");
+
+        let mtime = 1_700_000_000i64;
+        let dest = format!("{base}/remote.php/dav/files/{user}/nxs-resume/{name}");
+        let upload_root = format!("{base}/remote.php/dav/uploads/{user}");
+        let seed = format!("{dest}|{}|{mtime}", data.len());
+        let id = sha1_hex_bytes(seed.as_bytes())[..16].to_string();
+        let folder = format!("{upload_root}/{id}/");
+        client.mkcol(&folder).expect("mkcol");
+        let _ = client.mkcol(&format!("{base}/remote.php/dav/files/{user}/nxs-resume/"));
+        client
+            .put_bytes(&format!("{folder}00001"), &data[..CHUNK as usize], &[])
+            .expect("seed first chunk");
+
+        let sink = crate::NullSink;
+        let cancel = crate::CancelToken::new();
+        upload(
+            &client,
+            &local,
+            &dest,
+            crate::Provider::Nextcloud,
+            &upload_root,
+            &base,
+            mtime,
+            CHUNK,
+            0,
+            &cancel,
+            &sink,
+            &name,
+        )
+        .expect("upload resumes");
+
+        let mut reader = client.get_reader(&dest).expect("download");
+        let mut out = Vec::new();
+        std::io::copy(&mut reader, &mut out).expect("read");
+        assert_eq!(out.len(), data.len(), "remote size matches");
+        assert_eq!(out, data, "resumed upload is byte identical");
+        let _ = client.delete(&dest);
     }
 }
