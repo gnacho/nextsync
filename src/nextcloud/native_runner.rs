@@ -21,6 +21,17 @@ impl ProgressSink for ChannelSink {
         progress.processed = p.processed;
         progress.bytes_done = p.bytes_done;
         progress.bytes_total = p.bytes_total;
+        if progress.bytes_total > 0 {
+            eprintln!(
+                "sync: {} {} ({}/{})",
+                progress.action,
+                progress.path,
+                progress.bytes_done,
+                progress.bytes_total
+            );
+        } else {
+            eprintln!("sync: {} {}", progress.action, progress.path);
+        }
         let _ = self.0.send_blocking(progress);
     }
 }
@@ -118,6 +129,18 @@ impl SyncRunner for NativeEngineRunner {
         let cancel = self.cancel.clone();
         glib::spawn_future_local(async move {
             let result = gio::spawn_blocking(move || engine.run(&sink, &cancel)).await;
+            if let Ok(Ok(summary)) = &result {
+                eprintln!(
+                    "sync: done actions={} downloaded={} uploaded={} deleted_local={} deleted_remote={} conflicts={} errors={}",
+                    summary.actions,
+                    summary.downloaded,
+                    summary.uploaded,
+                    summary.deleted_local,
+                    summary.deleted_remote,
+                    summary.conflicts,
+                    summary.errors
+                );
+            }
             let outcome = match result {
                 Ok(Ok(summary)) => match summary.exit {
                     ExitState::Success => SyncOutcome::Success,
