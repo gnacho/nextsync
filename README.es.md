@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="Estado de CI"></a>
-    <img src="https://img.shields.io/badge/version-0.41.0-blue?style=flat-square" alt="Versión 0.2.32">
+    <img src="https://img.shields.io/badge/version-0.42.0-blue?style=flat-square" alt="Versión 0.2.32">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 o posterior">
   </p>
 </div>
@@ -92,7 +92,7 @@ NextSync mantiene espejos locales completos. No hace todo lo que hacen los clien
 Descarga el `.pkg.tar.zst` de la [última release](https://github.com/gnacho/nextsync/releases/latest) e instálalo:
 
 ```bash
-sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
 ```
 
 El paquete depende de `gtk4` y `libadwaita`. Trae su propio motor de sincronización, así que no hace falta ningún cliente externo. Los paquetes opcionales `nextcloud-client` y `opencloud-desktop` solo sirven si quieres pasar una carpeta a modo heredado.

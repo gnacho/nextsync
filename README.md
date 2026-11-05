@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/version-0.41.0-blue?style=flat-square" alt="Version 0.2.32">
+    <img src="https://img.shields.io/badge/version-0.42.0-blue?style=flat-square" alt="Version 0.2.32">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 or later">
   </p>
 </div>
@@ -92,7 +92,7 @@ NextSync keeps full local mirrors. It does not do everything the official client
 Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/nextsync/releases/latest) and install it:
 
 ```bash
-sudo pacman -U nextsync-0.41.0-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
 ```
 
 The package depends on `gtk4` and `libadwaita`. It brings its own sync engine, so no external client is required. The optional `nextcloud-client` and `opencloud-desktop` packages are only useful if you want to switch a folder to legacy mode.

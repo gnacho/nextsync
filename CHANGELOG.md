@@ -2,6 +2,18 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.42.0] - 2026-11-05
+
+### Fixed
+
+- The native engine loaded no TLS root certificates, so every HTTPS request
+  to a CA-signed server panicked (#265). It now builds its client from the
+  system certificate store.
+
+### Added
+
+- Byte-level progress and resumable transfers in the native engine (#265).
+
 ## [0.41.0] - 2026-11-05
 
 ### Added
