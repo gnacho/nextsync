@@ -1,3 +1,8 @@
+[workspace]
+members = ["crates/native-engine"]
+default-members = [".", "crates/native-engine"]
+resolver = "2"
+
 [package]
 name = "nextsync"
 version = "0.2.32"
@@ -7,6 +12,7 @@ license = "GPL-3.0-or-later"
 description = "NextSync - Nextcloud desktop client for GNOME (Rust rewrite)"
 
 [dependencies]
+native-engine = { path = "crates/native-engine" }
 async-channel = "2"
 data-encoding = "2"
 gio = "0.22"
