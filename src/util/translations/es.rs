@@ -40,6 +40,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Advanced", "Avanzado"),
     ("Advanced synchronization", "Sincronización avanzada"),
     ("Allow invalid or self-signed certificates", "Permitir certificados no válidos o autofirmados"),
+    ("An account with the same server and username already exists.", "Ya existe una cuenta con el mismo servidor y usuario."),
     ("Another synchronization engine ({name}) is already running on this folder. Close it and try again.", "Otro motor de sincronización ({name}) ya está funcionando en esta carpeta. Ciérralo e inténtalo de nuevo."),
     ("App Token", "Token de aplicación"),
     ("Approve These Deletions Once", "Aprobar estos borrados masivos una vez"),

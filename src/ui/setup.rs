@@ -757,6 +757,21 @@ fn manual_login(ctx: &SetupContext) {
                 ctx.state.borrow_mut().username = username.clone();
                 ctx.state.borrow_mut().authentication_type = "manual".to_string();
                 let account_id = account_id(&server, &username);
+                // Issue #267: reject a duplicate (server, username) before
+                // touching the keyring, so a rejected add cannot overwrite
+                // the password of the account that already exists.
+                let duplicate = ctx
+                    .config_store
+                    .load()
+                    .map(|config| config.accounts.iter().any(|item| item.id == account_id))
+                    .unwrap_or(false);
+                if duplicate {
+                    ctx.widgets.manual_button.set_sensitive(true);
+                    ctx.widgets.auth_error.set_text(t(
+                        "An account with the same server and username already exists.",
+                    ));
+                    return;
+                }
                 let password_for_store = password.clone();
                 let store = gio::spawn_blocking(move || {
                     CredentialsStore::set(&account_id, &password_for_store)
