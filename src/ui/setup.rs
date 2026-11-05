@@ -180,7 +180,6 @@ impl BrowserFlowState {
 #[derive(Clone)]
 struct SetupWidgets {
     provider_row: libadwaita::ComboRow,
-    provider_warning: libadwaita::Banner,
     server_title: gtk4::Label,
     server_entry: libadwaita::EntryRow,
     trust_invalid: gtk4::CheckButton,
@@ -208,8 +207,6 @@ impl SetupWidgets {
             .build();
         let model = gtk4::StringList::new(&["Nextcloud", "OpenCloud"]);
         provider_row.set_model(Some(&model));
-
-        let provider_warning = libadwaita::Banner::new("");
 
         let server_title = title_label(t("Connect to Nextcloud"));
         let server_entry = libadwaita::EntryRow::new();
@@ -286,7 +283,6 @@ impl SetupWidgets {
 
         Self {
             provider_row,
-            provider_warning,
             server_title,
             server_entry,
             trust_invalid,
@@ -459,15 +455,6 @@ fn build_welcome_page(ctx: &SetupContext) {
     provider_group.add(&ctx.widgets.provider_row);
     content.append(&provider_group);
 
-    update_provider_warning(&ctx.widgets.provider_warning, Provider::default());
-    content.append(&ctx.widgets.provider_warning);
-
-    let warning = ctx.widgets.provider_warning.clone();
-    let provider_row = ctx.widgets.provider_row.clone();
-    provider_row.connect_selected_notify(move |row| {
-        update_provider_warning(&warning, provider_from_combo(row));
-    });
-
     let continue_button = gtk4::Button::with_label(t("Continue"));
     continue_button.set_tooltip_text(Some(t("Continue to the next step")));
     continue_button.add_css_class("suggested-action");
@@ -476,10 +463,6 @@ fn build_welcome_page(ctx: &SetupContext) {
     {
         let ctx = ctx.clone();
         continue_button.connect_clicked(move |_| {
-            update_provider_warning(
-                &ctx.widgets.provider_warning,
-                provider_from_combo(&ctx.widgets.provider_row),
-            );
             ctx.stack.set_visible_child_name("server");
         });
     }
@@ -1408,26 +1391,11 @@ fn size_threshold_bytes(store: &ConfigStore) -> Option<u64> {
 /// Create the local roots, persist the account and the TLS trust choice, then
 /// invoke `on_complete` with the validated account and close the wizard.
 fn finish_setup(ctx: &SetupContext) {
-    // Issue #210: block the finish when the selected provider's sync engine
-    // is not installed. This is the single choke point every finish path
-    // (first-sync confirmation, resume, decision) goes through, and the
-    // provider in the state is the freshly selected one, so switching
-    // providers re-evaluates the check for the new engine.
-    let provider = ctx.state.borrow().provider;
-    if engine_install_hint(provider, engine_present_for(provider)).is_some() {
-        // Issue #218: the blocking dialog offers one-click installation of
-        // the provider's engine package; once installed, the finish gate
-        // passes on the next attempt.
-        let window = ctx.window.clone();
-        crate::ui::engine_install::present_engine_install_dialog(
-            &ctx.window,
-            provider,
-            Rc::new(move || {
-                crate::ui::engine_install::present_engine_installed_dialog(&window);
-            }),
-        );
-        return;
-    }
+    // Issue #262: the native engine is the default, so finishing the wizard
+    // no longer depends on an external `nextcloudcmd` / `opencloudcmd` being
+    // installed. An account that later opts out of the native engine surfaces
+    // the missing engine as `EngineMissing` and the folder menu offers the
+    // one-click install (issue #218).
     let (provider, server, username, authentication_type, folders, trust_invalid, size_confirmed) = {
         let state = ctx.state.borrow();
         (
@@ -1645,25 +1613,6 @@ fn fill_first_sync_template(template: &str, account: &str, count: usize, folders
         .replacen("{account}", account, 1)
         .replacen("{count}", &count.to_string(), 1)
         .replacen("{folders}", folders, 1)
-}
-
-/// Whether the given provider's sync binary is missing, for the welcome banner.
-fn update_provider_warning(banner: &libadwaita::Banner, provider: Provider) {
-    match provider {
-        Provider::Nextcloud if find_binary("nextcloudcmd").is_none() => {
-            banner.set_title(
-                t("nextcloudcmd is missing. Install the nextcloud-desktop-cmd package before the first synchronization."),
-            );
-            banner.set_revealed(true);
-        }
-        Provider::OpenCloud if find_binary("opencloudcmd").is_none() => {
-            banner.set_title(
-                t("opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization."),
-            );
-            banner.set_revealed(true);
-        }
-        _ => banner.set_revealed(false),
-    }
 }
 
 /// Whether the selected provider's sync binary is available on `$PATH`

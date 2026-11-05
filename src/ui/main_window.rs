@@ -361,7 +361,10 @@ impl AccountView {
                 on_install_engine: {
                     let provider = account.provider;
                     let folder_runtime = folder_runtime.clone();
-                    if crate::ui::setup::engine_present_for(provider) {
+                    // Issue #262: the external client is only needed by
+                    // accounts that opted out of the native engine.
+                    if account.sync.native_engine || crate::ui::setup::engine_present_for(provider)
+                    {
                         None
                     } else {
                         Some(Rc::new(move |parent: &gtk4::Widget| {

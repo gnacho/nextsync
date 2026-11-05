@@ -432,6 +432,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("The address of your Nextcloud or OpenCloud server", "La dirección de tu servidor Nextcloud u OpenCloud"),
     ("The chosen folders will be mirrored in both directions using the Nextcloud synchronization engine.", "Las carpetas elegidas se sincronizarán en ambos sentidos con el motor de sincronización de Nextcloud."),
     ("The default GNOME password collection is now unlocked before searching for the Nextcloud credential after biometric login.", "La colección de contraseñas predeterminada de GNOME ahora se desbloquea antes de buscar la credencial de Nextcloud después del inicio de sesión biométrico."),
+    ("The default engine. Turn it off to synchronize with nextcloudcmd or opencloudcmd instead.", "El motor por defecto. Desactívalo para sincronizar con nextcloudcmd u opencloudcmd."),
     ("The deletion guard has not flagged any files in this folder.", "El guard de borrado no ha marcado ningún archivo en esta carpeta."),
     ("The folder could not be moved to the trash.", "No se pudo mover la carpeta a la papelera."),
     ("The independent Settings window is released after closing to preserve the low-memory interface lifecycle.", "La ventana independiente de Configuración se libera al cerrarla para conservar el ciclo de vida de la interfaz con bajo consumo de memoria."),

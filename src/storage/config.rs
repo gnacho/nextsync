@@ -1,10 +1,11 @@
-//! Configuration storage: schema v7 model, validation and atomic file IO.
+//! Configuration storage: schema v8 model, validation and atomic file IO.
 //!
 //! The on-disk format is byte-compatible with the Python `nextsync` v0.2.x
 //! (`~/.config/nextsync/settings.json`, `schema_version: 6`), plus the v7
-//! additions (account `provider`, folder `space_id`). Reading tolerates legacy
-//! v1-v6 files (migrating them in order) and missing keys (merging with
-//! defaults); writing always emits a clean v7 payload.
+//! additions (account `provider`, folder `space_id`) and the v8 default
+//! (native sync engine). Reading tolerates legacy v1-v7 files (migrating them
+//! in order) and missing keys (merging with defaults); writing always emits a
+//! clean v8 payload.
 //!
 //! Reference implementation: `src/nextsync/storage/config.py` (v0.2.5).
 
@@ -25,7 +26,7 @@ use sha2::{Digest, Sha256};
 use crate::nextcloud::driver::Provider;
 
 /// Current configuration schema version.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Default exclusion patterns, mirroring `nextsync.core.exclusions`.
 pub const DEFAULT_PATTERNS: [&str; 10] = [
@@ -169,7 +170,9 @@ pub struct SyncConfig {
     pub exclude_patterns_enabled: bool,
     pub exclude_patterns: Vec<String>,
     /// Use the in-process native engine instead of the external command.
-    /// Enabled by default: the external CLI is a documented escape hatch.
+    ///
+    /// On by default since schema v8: the external command line clients are
+    /// the fallback for accounts that opt out.
     pub native_engine: bool,
     /// Sync dotfiles. The command line tools need an explicit flag for this.
     pub sync_hidden_files: bool,
@@ -540,6 +543,9 @@ pub fn validate_config(value: Value) -> Result<Config, ConfigError> {
     migrate_to_v5(&mut data);
     migrate_to_v6(&mut data);
     migrate_to_v7(&mut data);
+    if version < 8 {
+        migrate_to_v8(&mut data);
+    }
     data.insert("schema_version".to_string(), Value::from(SCHEMA_VERSION));
 
     let mut accounts = Vec::new();
@@ -937,6 +943,32 @@ fn migrate_to_v6(raw: &mut Map<String, Value>) {
 /// the other migrations.
 fn migrate_to_v7(raw: &mut Map<String, Value>) {
     let _ = raw;
+}
+
+/// Turn the native sync engine on for every existing account (schema v8).
+///
+/// 0.41 introduced the engine as an opt-in switch that defaulted to off, so
+/// every configuration written up to v7 either lacks the key or carries
+/// `false`. From 0.42 the native engine is the default and the external
+/// command line clients are the fallback: accounts that never made a choice
+/// move over once, with their journal seeded by the first run. The migration
+/// only runs while reading a v7-or-older file, so an explicit opt-out written
+/// afterwards (`native_engine: false` in a v8 file) is respected.
+fn migrate_to_v8(raw: &mut Map<String, Value>) {
+    let Some(Value::Array(accounts)) = raw.get_mut("accounts") else {
+        return;
+    };
+    for account in accounts {
+        let Value::Object(map) = account else {
+            continue;
+        };
+        let sync = map
+            .entry("sync".to_string())
+            .or_insert_with(default_sync_value);
+        if let Value::Object(sync) = sync {
+            sync.insert("native_engine".to_string(), Value::Bool(true));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1621,11 +1653,11 @@ mod tests {
 
     #[test]
     fn future_schema_rejected() {
-        let cfg = json!({ "schema_version": 8 });
+        let cfg = json!({ "schema_version": 9 });
         let err = validate_config(cfg).unwrap_err();
         assert!(err
             .message
-            .contains("Configuration schema 8 is newer than this application supports"));
+            .contains("Configuration schema 9 is newer than this application supports"));
     }
 
     #[test]
@@ -1692,7 +1724,7 @@ mod tests {
             }]
         });
         let config = validate_config(cfg).unwrap();
-        assert_eq!(config.schema_version, 7);
+        assert_eq!(config.schema_version, 8);
         assert_eq!(config.accounts.len(), 1);
         let account = &config.accounts[0];
         assert_eq!(account.folders.len(), 1);
@@ -1771,8 +1803,64 @@ mod tests {
             }]
         });
         let config = validate_config(cfg).unwrap();
-        assert_eq!(config.schema_version, 7);
+        assert_eq!(config.schema_version, 8);
         assert_eq!(config.accounts[0].provider, Provider::Nextcloud);
+    }
+
+    /// Issue #262: the native engine is the engine unless the user opts out.
+    #[test]
+    fn native_engine_is_the_default_for_new_configurations() {
+        assert!(SyncConfig::default().native_engine);
+        let cfg = validate_config(json!({})).unwrap();
+        assert_eq!(cfg.schema_version, 8);
+        let cfg = validate_config(json!({
+            "schema_version": 8,
+            "accounts": [{
+                "server_url": "https://cloud.example.com",
+                "login_name": "alice"
+            }]
+        }))
+        .unwrap();
+        assert!(cfg.accounts[0].sync.native_engine);
+    }
+
+    /// Issue #262: a v7 file carries either no key or the opt-in `false` the
+    /// switch wrote, so both move to the native engine exactly once.
+    #[test]
+    fn migrating_to_v8_turns_the_native_engine_on() {
+        for (sync, detailed) in [
+            (json!({ "native_engine": false }), true),
+            (json!({ "detailed_output": false }), false),
+        ] {
+            let cfg = json!({
+                "schema_version": 7,
+                "accounts": [{
+                    "server_url": "https://cloud.example.com",
+                    "login_name": "alice",
+                    "sync": sync
+                }]
+            });
+            let config = validate_config(cfg).unwrap();
+            assert_eq!(config.schema_version, 8);
+            assert!(config.accounts[0].sync.native_engine);
+            assert_eq!(config.accounts[0].sync.detailed_output, detailed);
+        }
+    }
+
+    /// Issue #262: once the file is v8, turning the switch off is a real
+    /// choice and every later load keeps it.
+    #[test]
+    fn opt_out_written_on_v8_is_respected() {
+        let cfg = json!({
+            "schema_version": 8,
+            "accounts": [{
+                "server_url": "https://cloud.example.com",
+                "login_name": "alice",
+                "sync": { "native_engine": false }
+            }]
+        });
+        let config = validate_config(cfg).unwrap();
+        assert!(!config.accounts[0].sync.native_engine);
     }
 
     #[test]
@@ -1925,7 +2013,7 @@ mod tests {
 
         let raw: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let obj = raw.as_object().unwrap();
-        assert_eq!(obj.get("schema_version"), Some(&json!(7)));
+        assert_eq!(obj.get("schema_version"), Some(&json!(8)));
         assert!(!obj.contains_key("account"));
         assert!(!obj.contains_key("sync"));
         assert!(!obj.contains_key("runtime"));
@@ -1966,7 +2054,7 @@ mod tests {
         let store = ConfigStore::with_path(dir.path().join("settings.json"));
         let config = store.load().unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(config.schema_version, 7);
+        assert_eq!(config.schema_version, 8);
         assert!(config.accounts.is_empty());
     }
 
@@ -2078,7 +2166,7 @@ mod tests {
     fn empty_document_validates_to_defaults() {
         let config = validate_config(json!({})).unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(config.schema_version, 7);
+        assert_eq!(config.schema_version, 8);
         assert!(config.accounts.is_empty());
     }
 
