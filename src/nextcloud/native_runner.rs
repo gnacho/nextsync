@@ -12,6 +12,24 @@ use native_engine::{
 };
 use std::sync::Arc;
 
+/// Counts the deletions the run applied locally. A failed run returns no
+/// summary, so this is the only signal the deletion guard can use to tell a
+/// local deletion caused by the server from a truncated local scan (#276).
+struct CountingSink {
+    inner: ChannelSink,
+    deleted_local: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl ProgressSink for CountingSink {
+    fn event(&self, p: Progress) {
+        if p.action == "delete" {
+            self.deleted_local
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.inner.event(p);
+    }
+}
+
 struct ChannelSink(async_channel::Sender<SyncProgress>);
 
 impl ProgressSink for ChannelSink {
@@ -99,29 +117,33 @@ impl SyncRunner for NativeEngineRunner {
     fn start(
         &mut self,
         _reasons: &[crate::core::triggers::Trigger],
-        on_finished: Box<dyn FnOnce(SyncOutcome) + 'static>,
+        on_finished: Box<dyn FnOnce(SyncOutcome, u64) + 'static>,
     ) {
         let Some(source) = self.credentials.clone() else {
-            glib::spawn_future_local(async move { on_finished(SyncOutcome::Failed) });
+            glib::spawn_future_local(async move { on_finished(SyncOutcome::Failed, 0) });
             return;
         };
         let password = match source.lookup(&self.account) {
             CredentialLookup::Found(p) => p,
             CredentialLookup::Missing => {
-                glib::spawn_future_local(async move { on_finished(SyncOutcome::NoCredentials) });
+                glib::spawn_future_local(async move { on_finished(SyncOutcome::NoCredentials, 0) });
                 return;
             }
             CredentialLookup::Locked => {
-                glib::spawn_future_local(async move { on_finished(SyncOutcome::KeyringLocked) });
+                glib::spawn_future_local(async move { on_finished(SyncOutcome::KeyringLocked, 0) });
                 return;
             }
             CredentialLookup::Unavailable => {
-                glib::spawn_future_local(async move { on_finished(SyncOutcome::Failed) });
+                glib::spawn_future_local(async move { on_finished(SyncOutcome::Failed, 0) });
                 return;
             }
         };
         let engine = Engine::new(self.config(&password));
-        let sink = ChannelSink(self.progress.clone());
+        let deleted_local = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let sink = CountingSink {
+            inner: ChannelSink(self.progress.clone()),
+            deleted_local: std::sync::Arc::clone(&deleted_local),
+        };
         let cancel = self.cancel.clone();
         glib::spawn_future_local(async move {
             let result = gio::spawn_blocking(move || engine.run(&sink, &cancel)).await;
@@ -155,7 +177,10 @@ impl SyncRunner for NativeEngineRunner {
                     SyncOutcome::Failed
                 }
             };
-            on_finished(outcome);
+            on_finished(
+                outcome,
+                deleted_local.load(std::sync::atomic::Ordering::Relaxed),
+            );
         });
     }
 
