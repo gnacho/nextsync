@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.18] - 2026-11-06
+
+### Fixed
+
+- A remote entry the local scan hides or excludes is no longer planned as a deletion. With hidden files disabled, every hidden entry on the server used to look locally deleted and had its removal propagated (#271).
+
 ## [0.43.16] - 2026-11-06
 
 ### Fixed
