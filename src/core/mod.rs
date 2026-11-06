@@ -16,6 +16,7 @@ pub mod pending_changes;
 pub mod power;
 pub mod scheduler;
 pub mod server_notifications;
+pub mod server_state;
 pub mod suspend;
 pub mod sync_permit;
 pub mod sync_safety;

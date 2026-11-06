@@ -2723,3 +2723,38 @@ msgstr "{used} usados"
 #: src/ui/setup.rs
 msgid "An account with the same server and username already exists."
 msgstr "Ya existe una cuenta con el mismo servidor y usuario."
+
+#: src/ui/deletion_presence.rs
+msgid "checking the server…"
+msgstr "comprobando el servidor…"
+
+#: src/core/server_state.rs
+msgid "still on the server"
+msgstr "sigue en el servidor"
+
+msgid "already gone from the server"
+msgstr "ya no está en el servidor"
+
+msgid "server state not checked"
+msgstr "estado en el servidor sin comprobar"
+
+msgid "all still on the server"
+msgstr "todos siguen en el servidor"
+
+msgid "all already gone from the server"
+msgstr "ninguno sigue en el servidor"
+
+msgid "checked {checked} of {count}"
+msgstr "comprobados {checked} de {count}"
+
+msgid "1 already gone from the server"
+msgstr "1 ya no está en el servidor"
+
+msgid "{count} already gone from the server"
+msgstr "{count} ya no están en el servidor"
+
+msgid "1 still there"
+msgstr "1 sigue ahí"
+
+msgid "{count} still there"
+msgstr "{count} siguen ahí"
