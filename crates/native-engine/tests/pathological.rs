@@ -548,3 +548,21 @@ fn tus_metadata_survives_awkward_names() {
     assert_eq!(meta.matches(", ").count(), 1);
     assert!(meta.ends_with("mtime 42"));
 }
+
+/// A conflict must never move a directory tree aside (Fotos, 6-Nov-2026).
+#[test]
+fn conflicts_never_rename_a_directory_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("Colegas");
+    std::fs::create_dir_all(dir.join("2007 03 Windows Vista")).unwrap();
+    let file = dir.join("foto.jpg");
+    std::fs::write(&file, b"123").unwrap();
+    assert!(!native_engine::engine::conflict_may_rename(
+        &dir.join("2007 03 Windows Vista")
+    ));
+    assert!(native_engine::engine::conflict_may_rename(&file));
+    // A path that does not exist is treated as a file: nothing to move.
+    assert!(native_engine::engine::conflict_may_rename(
+        &tmp.path().join("ausente.txt")
+    ));
+}
