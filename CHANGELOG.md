@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.6] - 2026-11-06
+
+### Fixed
+
+- `native-engine-cli` accepts `--db-path` again. Without it, diagnostic dry runs wrote into the live app journal and the delete guard aborted real syncs (#279).
+- The two Secret Service tests no longer share a keyring item, which made the suite fail intermittently under parallel threads (#280).
+
 ## [0.43.4] - 2026-11-06
 
 ### Fixed

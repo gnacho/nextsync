@@ -536,9 +536,12 @@ mod tests {
             .expect("legacy item stored");
 
         // No Rust-key item yet: the fallback must find the legacy secret.
-        let resolved =
-            CredentialsStore::get_for_account(TEST_LEGACY_ACCOUNT, TEST_LEGACY_SERVER, TEST_LEGACY_LOGIN)
-                .expect("get_for_account should succeed");
+        let resolved = CredentialsStore::get_for_account(
+            TEST_LEGACY_ACCOUNT,
+            TEST_LEGACY_SERVER,
+            TEST_LEGACY_LOGIN,
+        )
+        .expect("get_for_account should succeed");
         assert_eq!(resolved.as_deref(), Some(TEST_PASSWORD));
 
         // The legacy hit must have been adopted under `account_id`.
