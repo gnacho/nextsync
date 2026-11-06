@@ -2,6 +2,22 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.0] - 2026-11-06
+
+### Removed
+- The external sync engine backend. nextsync no longer runs nextcloudcmd or opencloudcmd, and the setup wizard no longer requires them.
+
+### Added
+- Retry blacklist for transfers that keep failing, ported from the official clients.
+- Twenty two regression tests derived from the Nextcloud and OpenCloud desktop sources.
+
+### Fixed
+- Mass deletion guard no longer aborts small legitimate deletions.
+- Remote paths are validated before touching the local filesystem.
+- The account password is redacted from debug output.
+- Chunked uploads send their SHA1 checksum on the final MOVE.
+- Uploads of a resumed file can no longer publish mixed chunks.
+
 ## [0.42.2] - 2026-11-05
 
 ### Changed
