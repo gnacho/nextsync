@@ -980,6 +980,12 @@ impl Engine {
                     complete = false;
                     continue;
                 }
+                if !accept_remote_entry(&rel, entry.is_dir, &self.cfg) {
+                    // Issue #271: the local scan never yields hidden or
+                    // excluded paths, so a remote entry the local side would
+                    // not produce must not look like a local deletion.
+                    continue;
+                }
                 if entry.is_dir {
                     queue.push((
                         rel.clone(),
@@ -991,6 +997,14 @@ impl Engine {
         }
         Ok((out, complete))
     }
+}
+
+/// Whether a remote entry may enter reconciliation. The local scan never
+/// yields hidden or excluded paths, so letting them in would make every such
+/// remote entry look like a local deletion and propagate it to the server
+/// (issue #271).
+pub fn accept_remote_entry(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
+    crate::is_safe_rel(rel) && !crate::local::ignored(rel, is_dir, cfg)
 }
 
 impl SyncSummary {
