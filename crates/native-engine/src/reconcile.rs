@@ -207,6 +207,15 @@ pub fn reconcile(
                     });
                     continue;
                 }
+                if l.is_dir != r.is_dir {
+                    // Issue #274: say why the path is left alone instead of letting
+                    // the run report a bare conflict.
+                    log::warn!(
+                        "type collision at {key}: local {} and remote {}; neither side is touched",
+                        if l.is_dir { "directory" } else { "file" },
+                        if r.is_dir { "directory" } else { "file" },
+                    );
+                }
                 if l.is_dir != r.is_dir || (remote_changed && local_changed) {
                     actions.push(Action::Conflict {
                         rel: key.to_string(),
