@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.22] - 2026-11-06
+
+### Added
+
+- Every row of the deletion review says whether the file still exists on the server, and group rows count how many are already gone, so the answers are chosen knowing which ones can still be recovered (#294).
+
 ## [0.43.20] - 2026-11-06
 
 ### Added
