@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.4] - 2026-11-06
+
+### Fixed
+
+- Never rename a directory when resolving a conflict: a directory conflict moved the whole local tree to `(Nextcloud conflicted copy ...)`, which then cascaded into remote deletions and a full re-download (#278).
+
 ## [0.43.2] - 2026-11-06
 
 ### Fixed
