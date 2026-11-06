@@ -371,11 +371,11 @@ fn wire_deletion_actions(
     scheduler: crate::core::scheduler::Scheduler,
 ) -> DeletionTarget {
     let approve = gtk4::Button::builder()
-        .label(t("Approve These Deletions Once"))
+        .label(t("Delete these files on the server too"))
         .css_classes(["suggested-action"])
         .build();
     let restore = gtk4::Button::builder()
-        .label(t("Restore from Nextcloud"))
+        .label(t("Rescan the folder from the server"))
         .build();
     actions.append(&restore);
     actions.append(&approve);

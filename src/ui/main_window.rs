@@ -1531,18 +1531,21 @@ impl MainWindow {
             dialog.set_extra_child(Some(&content));
         }
 
-        dialog.add_response("keep", t("Keep Paused"));
+        dialog.add_response("keep", t("Keep my local files and stay paused"));
         if account.provider == Provider::Nextcloud {
-            dialog.add_response("restore", t("Restore from Nextcloud"));
+            dialog.add_response("restore", t("Rescan the folder from the server"));
         }
         if alert.can_approve_once {
-            dialog.add_response("approve", t("Approve These Deletions Once"));
-            dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Suggested);
+            dialog.add_response("approve", t("Delete these files on the server too"));
+            // The destructive answer must not be the highlighted one: the
+            // safe way out is keeping the local files (#277).
+            dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Destructive);
         }
         if account.provider == Provider::Nextcloud {
             dialog.add_response("trash", t("Restore from server trash…"));
         }
         dialog.set_default_response(Some("keep"));
+        dialog.set_response_appearance("keep", libadwaita::ResponseAppearance::Suggested);
 
         let approve = scheduler.clone();
         let restore = scheduler;
@@ -1900,6 +1903,8 @@ impl MainWindow {
                         libadwaita::ResponseAppearance::Destructive,
                     );
                     dialog.set_default_response(Some("keep"));
+                    dialog
+                        .set_response_appearance("keep", libadwaita::ResponseAppearance::Suggested);
                     let store = store.clone();
                     let weak = weak.clone();
                     let overlay = overlay.clone();
