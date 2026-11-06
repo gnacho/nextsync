@@ -91,14 +91,6 @@ msgstr "Sincronización bloqueada"
 msgid "Keep Paused"
 msgstr "Mantener en pausa"
 
-#: src/nextsync/application.py:632
-msgid "Restore from Nextcloud"
-msgstr "Restaurar desde Nextcloud"
-
-#: src/nextsync/application.py:634
-msgid "Approve These Deletions Once"
-msgstr "Aprobar estos borrados masivos una vez"
-
 #: src/nextsync/application.py:656
 msgid "Finishing synchronization"
 msgstr "Terminando la sincronización"
@@ -107,53 +99,22 @@ msgstr "Terminando la sincronización"
 msgid "NextSync will quit when the current synchronization finishes."
 msgstr "NextSync se cerrará cuando termine la sincronización actual."
 
-#: src/nextsync/ui/about_content.py:10
 msgid ""
-"NextSync is an independent, unofficial third-party project. It is not "
-"affiliated with, sponsored by, endorsed by, maintained by, or otherwise "
-"connected to Nextcloud GmbH. Nextcloud is a registered trademark of "
-"Nextcloud GmbH.\n"
+"NextSync is an independent, unofficial third-party project. It is not affiliated with, sponsored by, endorsed by, maintained by, or otherwise connected to Nextcloud GmbH. Nextcloud is a registered trademark of Nextcloud GmbH.\n"
 "\n"
-"Bidirectional synchronization can upload, download, replace, conflict, or "
-"delete files on both the computer and the configured server. Use this "
-"software entirely at your own risk, test it with non-critical data, and "
-"maintain independent, restorable backups. The authors and contributors are "
-"not responsible for lost, corrupted, deleted, or otherwise damaged data.\n"
+"Bidirectional synchronization can upload, download, replace, conflict, or delete files on both the computer and the configured server. Use this software entirely at your own risk, test it with non-critical data, and maintain independent, restorable backups. The authors and contributors are not responsible for lost, corrupted, deleted, or otherwise damaged data.\n"
 "\n"
-"The application delegates file reconciliation and conflict handling to "
-"nextcloudcmd. Availability of notify_push and other server features depends "
-"on the Nextcloud installation. This release was tested with Nextcloud Hub 26 "
-"Spring (34.0.1) on Nextcloud AIO. Compatibility with other or future "
-"Nextcloud versions is not guaranteed.\n"
+"The application reconciles files and resolves conflicts with its own synchronization engine. Availability of notify_push and other server features depends on the Nextcloud installation. This release was tested against Nextcloud 33 and OpenCloud on self-hosted installations. Compatibility with other or future Nextcloud versions is not guaranteed.\n"
 "\n"
-"No telemetry, advertising, or usage tracking is included. Credentials are "
-"stored through the desktop Secret Service. Use of this software is also "
-"subject to the GNU General Public License version 3 or later and its "
-"warranty disclaimer."
+"No telemetry, advertising, or usage tracking is included. Credentials are stored through the desktop Secret Service. Use of this software is also subject to the GNU General Public License version 3 or later and its warranty disclaimer."
 msgstr ""
-"NextSync es un proyecto independiente, no oficial y desarrollado por "
-"terceros. No está afiliado, patrocinado, respaldado, mantenido ni vinculado "
-"de ninguna otra forma con Nextcloud GmbH. Nextcloud es una marca registrada "
-"de Nextcloud GmbH.\n"
+"NextSync es un proyecto independiente, no oficial y desarrollado por terceros. No está afiliado, patrocinado, respaldado, mantenido ni vinculado de ninguna otra forma con Nextcloud GmbH. Nextcloud es una marca registrada de Nextcloud GmbH.\n"
 "\n"
-"La sincronización bidireccional puede subir, descargar, reemplazar, crear "
-"conflictos o eliminar archivos tanto en el equipo como en el servidor "
-"configurado. Use este software bajo su propia responsabilidad, pruébelo con "
-"datos no críticos y mantenga copias de seguridad independientes y "
-"restaurables. Los autores y colaboradores no se responsabilizan de datos "
-"perdidos, dañados, eliminados o corrompidos.\n"
+"La sincronización bidireccional puede subir, descargar, reemplazar, crear conflictos o eliminar archivos tanto en el equipo como en el servidor configurado. Use este software bajo su propia responsabilidad, pruébelo con datos no críticos y mantenga copias de seguridad independientes y restaurables. Los autores y colaboradores no se responsabilizan de datos perdidos, dañados, eliminados o corrompidos.\n"
 "\n"
-"La aplicación delega la reconciliación de archivos y el tratamiento de "
-"conflictos a nextcloudcmd. La disponibilidad de notify_push y de otras "
-"funciones del servidor depende de la instalación de Nextcloud. Esta versión "
-"se probó con Nextcloud Hub 26 Spring (34.0.1) en Nextcloud AIO. No se "
-"garantiza la compatibilidad con otras versiones ni con versiones futuras de "
-"Nextcloud.\n"
+"La aplicación reconcilia los archivos y resuelve los conflictos con su propio motor de sincronización. La disponibilidad de notify_push y de otras funciones del servidor depende de la instalación de Nextcloud. Esta versión se ha probado contra Nextcloud 33 y OpenCloud en instalaciones propias. No se garantiza la compatibilidad con otras versiones ni con versiones futuras de Nextcloud.\n"
 "\n"
-"No se incluye telemetría, publicidad ni seguimiento de uso. Las credenciales "
-"se almacenan mediante el Secret Service del escritorio. El uso de este "
-"software también está sujeto a la Licencia Pública General de GNU versión 3 "
-"o posterior y a su exención de garantías."
+"No se incluye telemetría, publicidad ni seguimiento de uso. Las credenciales se almacenan mediante el Secret Service del escritorio. El uso de este software también está sujeto a la Licencia Pública General de GNU versión 3 o posterior y a su exención de garantías."
 
 #: src/nextsync/ui/about_content.py:34
 msgid "Version 0.2.0"
@@ -2758,3 +2719,63 @@ msgstr "1 sigue ahí"
 
 msgid "{count} still there"
 msgstr "{count} siguen ahí"
+
+msgid "1 local conflicted copy"
+msgstr "1 copia local en conflicto"
+
+msgid "{count} local conflicted copies"
+msgstr "{count} copias locales en conflicto"
+
+msgid "Restore 1 file from its local conflicted copy"
+msgstr "Restaurar 1 archivo desde su copia local en conflicto"
+
+msgid "Restore {count} files from local conflicted copies"
+msgstr "Restaurar {count} archivos desde copias locales en conflicto"
+
+msgid "Restored local copies"
+msgstr "Copias locales restauradas"
+
+msgid "No file could be restored from its local conflicted copy."
+msgstr "No se pudo restaurar ningún archivo desde su copia local en conflicto."
+
+msgid "1 file was restored from a local conflicted copy and will be uploaded on the next sync."
+msgstr "Se restauró 1 archivo desde su copia local en conflicto y se subirá en la próxima sincronización."
+
+msgid "{count} files were restored from local conflicted copies and will be uploaded on the next sync."
+msgstr "Se restauraron {count} archivos desde copias locales en conflicto y se subirán en la próxima sincronización."
+
+msgid "1 copy could not be restored."
+msgstr "1 copia no se pudo restaurar."
+
+msgid "{count} copies could not be restored."
+msgstr "{count} copias no se pudieron restaurar."
+
+msgid "Delete these files on the server too"
+msgstr "Borrar tambien estos ficheros en el servidor"
+
+msgid "Disconnected"
+msgstr "Desconectado"
+
+msgid "Discovering server push support…"
+msgstr "Descubriendo si el servidor admite push…"
+
+msgid "Keep my local files and stay paused"
+msgstr "Conservar mis ficheros y seguir en pausa"
+
+msgid "Push authentication failed after several attempts."
+msgstr "La autenticación del push ha fallado tras varios intentos."
+
+msgid "Push authentication failed."
+msgstr "La autenticación del push ha fallado."
+
+msgid "Push notifications are disabled."
+msgstr "Las notificaciones push están desactivadas."
+
+msgid "Push status"
+msgstr "Estado del push"
+
+msgid "Rescan the folder from the server"
+msgstr "Volver a leer la carpeta desde el servidor"
+
+msgid "This server does not offer notify_push."
+msgstr "Este servidor no ofrece notify_push."

@@ -25,6 +25,9 @@
 //!   instead of Python's `datetime.strftime("%x %H:%M")`; both render a
 //!   locale-dependent short date + time.
 
+use std::cell::RefCell;
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -176,47 +179,118 @@ pub fn find_conflicts(root: &Path, matcher: &ExclusionMatcher) -> Vec<ConflictFi
 
     let mut stack: Vec<PathBuf> = vec![root];
     while let Some(directory) = stack.pop() {
-        let entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let kind = match entry.file_type() {
-                Ok(kind) => kind,
-                Err(_) => continue,
-            };
-            if kind.is_dir() {
-                stack.push(entry.path());
-                continue;
-            }
-            if !kind.is_file() {
-                continue;
-            }
-            let file_name = entry.file_name();
-            let name = file_name.to_string_lossy();
-            if matcher.matches_name(&name) {
-                continue;
-            }
-            let Some(parts) = parse_conflict_name(&name) else {
-                continue;
-            };
-            let path = entry.path();
-            let metadata = match fs::metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(_) => continue,
-            };
-            matches.push(ConflictFile {
-                path,
-                original_name: original_name(&parts),
-                original_path: derive_original_path(&entry.path(), &parts),
-                conflict_date: parts.date,
-                size: metadata.len(),
-                modified: modified_seconds(&metadata),
-            });
-        }
+        stack.extend(scan_dir(&directory, Some(matcher), &mut matches));
     }
     matches.sort_by(|a, b| a.path.file_name().cmp(&b.path.file_name()));
     matches
+}
+
+/// Collect the conflicted copies found directly inside `directory` and return
+/// its subdirectories for the caller to walk.
+fn scan_dir(
+    directory: &Path,
+    matcher: Option<&ExclusionMatcher>,
+    out: &mut Vec<ConflictFile>,
+) -> Vec<PathBuf> {
+    let mut subdirectories: Vec<PathBuf> = Vec::new();
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(_) => return subdirectories,
+    };
+    for entry in entries.flatten() {
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(_) => continue,
+        };
+        if kind.is_dir() {
+            subdirectories.push(entry.path());
+            continue;
+        }
+        if !kind.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if matcher.is_some_and(|matcher| matcher.matches_name(&name)) {
+            continue;
+        }
+        let Some(parts) = parse_conflict_name(&name) else {
+            continue;
+        };
+        let path = entry.path();
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        out.push(ConflictFile {
+            original_path: derive_original_path(&path, &parts),
+            path,
+            original_name: original_name(&parts),
+            conflict_date: parts.date,
+            size: metadata.len(),
+            modified: modified_seconds(&metadata),
+        });
+    }
+    subdirectories
+}
+
+/// Conflicted copies that shadow the paths of one deletion review (issue
+/// #302).
+///
+/// A review names hundreds of files that are usually spread over a handful of
+/// folders, so each lookup lists only the folder holding the path and the
+/// answer is cached per folder: one `read_dir` per directory, never a walk of
+/// the whole tree from the UI thread.
+pub struct ConflictIndex {
+    root: PathBuf,
+    folders: RefCell<HashMap<PathBuf, Vec<ConflictFile>>>,
+}
+
+impl ConflictIndex {
+    /// Build an index rooted at the folder being reviewed.
+    pub fn new(root: &Path) -> Self {
+        Self {
+            root: absolute_root(root),
+            folders: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Every conflicted copy that would restore `relative_path`, newest
+    /// first (a path can accumulate several copies over time and the newest
+    /// one is the best guess at the lost content).
+    pub fn copies(&self, relative_path: &str) -> Vec<ConflictFile> {
+        let path = Path::new(relative_path);
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return Vec::new();
+        };
+        let folder = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => self.root.join(parent),
+            _ => self.root.clone(),
+        };
+        let mut folders = self.folders.borrow_mut();
+        if let std::collections::hash_map::Entry::Vacant(entry) = folders.entry(folder.clone()) {
+            let mut found = Vec::new();
+            scan_dir(&folder, None, &mut found);
+            entry.insert(found);
+        }
+        let mut copies: Vec<ConflictFile> = folders
+            .get(&folder)
+            .map(|found| {
+                found
+                    .iter()
+                    .filter(|conflict| conflict.original_name == name)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        copies.sort_by(|a, b| {
+            b.modified
+                .partial_cmp(&a.modified)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.name().cmp(b.name()))
+        });
+        copies
+    }
 }
 
 /// Derive the original (conflict-free) file name from the parsed parts.
@@ -577,6 +651,67 @@ mod tests {
         // cannot represent (the Python raises OverflowError for the same
         // input).
         assert!(describe_modified(f64::INFINITY).is_empty());
+    }
+
+    // ---- ConflictIndex (issue #302) ----------------------------------------
+
+    #[test]
+    fn index_lists_the_copies_of_one_path() {
+        let dir = root();
+        write(
+            dir.path(),
+            "report.pdf (Nextcloud conflicted copy 2026-08-11 09-30-00).pdf",
+        );
+        write(
+            dir.path(),
+            "other (Nextcloud conflicted copy 2026-08-11).txt",
+        );
+        write(dir.path(), "report.pdf.txt");
+        let index = ConflictIndex::new(dir.path());
+        let copies = index.copies("report.pdf");
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].original_name, "report.pdf");
+        assert_eq!(copies[0].original_path, dir.path().join("report.pdf"));
+    }
+
+    #[test]
+    fn index_returns_the_newest_copy_first() {
+        let dir = root();
+        write(
+            dir.path(),
+            "notes (Nextcloud conflicted copy 2026-08-11).txt",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        write(
+            dir.path(),
+            "notes (Nextcloud conflicted copy 2026-08-12).txt",
+        );
+        let index = ConflictIndex::new(dir.path());
+        let copies = index.copies("notes.txt");
+        assert_eq!(copies.len(), 2);
+        assert_eq!(copies[0].conflict_date, "2026-08-12");
+        assert_eq!(copies[1].conflict_date, "2026-08-11");
+    }
+
+    #[test]
+    fn index_follows_nested_paths() {
+        let dir = root();
+        write(
+            dir.path(),
+            "docs/deep/report.pdf (Nextcloud conflicted copy 2026-08-11).pdf",
+        );
+        let index = ConflictIndex::new(dir.path());
+        assert_eq!(index.copies("docs/deep/report.pdf").len(), 1);
+        assert!(index.copies("report.pdf").is_empty());
+    }
+
+    #[test]
+    fn index_is_empty_for_unknown_paths_and_missing_folders() {
+        let dir = root();
+        let index = ConflictIndex::new(dir.path());
+        assert!(index.copies("nothing.txt").is_empty());
+        assert!(index.copies("gone/away.txt").is_empty());
+        assert!(index.copies("").is_empty());
     }
 
     #[test]

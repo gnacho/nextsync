@@ -11,6 +11,8 @@
 //! (issue #21).
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 
 use libadwaita::prelude::*;
@@ -1303,7 +1305,7 @@ impl MainWindow {
     /// window is hidden (not mapped), and a dialog with `set_transient_for` a
     /// non-mapped parent is not shown by GTK; deferring the dialog by one idle
     /// lets the window map first (issue #203, upstream release 0.1.32).
-    fn present_modal_dialog(
+    pub(crate) fn present_modal_dialog(
         dialog: &libadwaita::AlertDialog,
         window: &libadwaita::ApplicationWindow,
     ) {
@@ -1372,7 +1374,27 @@ impl MainWindow {
             .find(|candidate| candidate.id == folder_id)
             .cloned();
         let mut presence = crate::ui::deletion_presence::PresenceJob::new();
+        // Issue #302: a path the server already dropped often survives on disk
+        // as a conflicted copy, so every row counts its copies and the dialog
+        // offers to promote them back to the original name.
+        let conflict_index = folder_config.as_ref().map(|config| {
+            crate::core::conflict_files::ConflictIndex::new(Path::new(&config.local_root))
+        });
+        let mut restorable: Vec<crate::core::conflict_files::ConflictFile> = Vec::new();
         if !missing.is_empty() {
+            let mut restored_paths: HashSet<PathBuf> = HashSet::new();
+            let mut copies_of = |path: &str| -> usize {
+                let Some(index) = conflict_index.as_ref() else {
+                    return 0;
+                };
+                let found = index.copies(path);
+                if let Some(newest) = found.first() {
+                    if restored_paths.insert(newest.original_path.clone()) {
+                        restorable.push(newest.clone());
+                    }
+                }
+                found.len()
+            };
             const DELETION_LIST_MAX: usize = 50;
             let list = gtk4::ListBox::builder()
                 .css_classes(["boxed-list"])
@@ -1405,7 +1427,9 @@ impl MainWindow {
                             group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
                             group_row.set_enable_expansion(false);
                             list.append(&group_row);
-                            presence.add_group(paths.clone(), &group_row);
+                            let group_copies: usize =
+                                paths.iter().map(|path| copies_of(path)).sum();
+                            presence.add_group(paths.clone(), &group_row, group_copies);
                         }
                         crate::core::delete_guard::DeletionReviewRow::File(path) => {
                             if loose_preview.len() < LOOSE_PREVIEW_CAP {
@@ -1431,9 +1455,10 @@ impl MainWindow {
                             .selectable(false)
                             .build();
                         loose_row.add_row(&child);
-                        presence.add_row(path, &child);
+                        presence.add_row(path, &child, copies_of(path));
                     }
-                    presence.add_group(loose_all, &loose_row);
+                    let loose_copies: usize = loose_all.iter().map(|path| copies_of(path)).sum();
+                    presence.add_group(loose_all, &loose_row, loose_copies);
                     if loose_count > LOOSE_PREVIEW_CAP {
                         let more =
                             libadwaita::ActionRow::builder()
@@ -1484,7 +1509,7 @@ impl MainWindow {
                                     .selectable(false)
                                     .build();
                                 group_row.add_row(&child);
-                                presence.add_row(path, &child);
+                                presence.add_row(path, &child, copies_of(path));
                                 shown_children += 1;
                             }
                             if paths.len() > GROUP_CHILD_CAP {
@@ -1499,7 +1524,9 @@ impl MainWindow {
                                 group_row.add_row(&more);
                             }
                             list.append(&group_row);
-                            presence.add_group(paths.clone(), &group_row);
+                            let group_copies: usize =
+                                paths.iter().map(|path| copies_of(path)).sum();
+                            presence.add_group(paths.clone(), &group_row, group_copies);
                             shown_rows += 1;
                         }
                         crate::core::delete_guard::DeletionReviewRow::File(path) => {
@@ -1509,7 +1536,7 @@ impl MainWindow {
                                 .selectable(false)
                                 .build();
                             list.append(&row);
-                            presence.add_row(path, &row);
+                            presence.add_row(path, &row, copies_of(path));
                             shown_rows += 1;
                         }
                     }
@@ -1555,6 +1582,12 @@ impl MainWindow {
             // safe way out is keeping the local files (#277).
             dialog.set_response_appearance("approve", libadwaita::ResponseAppearance::Destructive);
         }
+        if !restorable.is_empty() {
+            dialog.add_response(
+                "copies",
+                &crate::ui::deletion_restore::restore_response_label(restorable.len()),
+            );
+        }
         if account.provider == Provider::Nextcloud {
             dialog.add_response("trash", t("Restore from server trash…"));
         }
@@ -1562,12 +1595,18 @@ impl MainWindow {
         dialog.set_response_appearance("keep", libadwaita::ResponseAppearance::Suggested);
 
         let approve = scheduler.clone();
-        let restore = scheduler;
+        let restore = scheduler.clone();
+        let restore_copies = scheduler;
         let account_for_trash = account.clone();
         let window = self.window.clone();
         dialog.connect_response(None, move |_dialog, response| match response {
             "approve" => approve.approve_delete_once(),
             "restore" => restore.restore_from_server(),
+            "copies" => crate::ui::deletion_restore::present_restore_copies(
+                restorable.clone(),
+                restore_copies.clone(),
+                &window,
+            ),
             "trash" => crate::ui::server_trash::present_server_trash(
                 &account_for_trash,
                 window.upcast_ref::<gtk4::Widget>(),
