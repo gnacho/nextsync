@@ -230,10 +230,32 @@ impl NotifyPushClient {
             self.disconnect(false);
         }
         if !effective_enabled {
-            self.on_state(PushState::Disabled, "Push notifications are disabled.");
+            self.on_state(PushState::Disabled, t("Push notifications are disabled."));
         } else if self.inner.borrow().online {
             self.connect();
         }
+    }
+
+    /// Turn the channel on or off without touching the stored credentials
+    /// (issue #287): the Settings switch flips it while the app runs, and the
+    /// password is only available from the keyring at startup.
+    pub fn set_enabled(&self, enabled: bool) {
+        let effective = enabled && remote_push_supported(self.inner.borrow().provider);
+        if self.inner.borrow().enabled == effective {
+            return;
+        }
+        self.inner.borrow_mut().enabled = effective;
+        if effective {
+            self.connect();
+        } else {
+            self.disconnect(false);
+            self.on_state(PushState::Disabled, t("Push notifications are disabled."));
+        }
+    }
+
+    /// Whether the channel is currently allowed to run.
+    pub fn is_enabled(&self) -> bool {
+        self.inner.borrow().enabled
     }
 
     /// Reflect the network status; disconnects (keeping the config) when
@@ -261,7 +283,13 @@ impl NotifyPushClient {
     pub fn connect(&self) {
         let (generation, server, username, password, force_password_auth, tls) = {
             let mut inner = self.inner.borrow_mut();
-            if !inner.enabled || !inner.online || inner.connection.is_some() {
+            if !inner.enabled
+                || !inner.online
+                || inner.connection.is_some()
+                || inner.server.is_empty()
+            {
+                // No configured server yet (the credentials arrive later, from
+                // the keyring): there is nothing to connect to.
                 return;
             }
             inner.generation += 1;
@@ -279,7 +307,7 @@ impl NotifyPushClient {
                 inner.tls.clone().expect("tls built above"),
             )
         };
-        self.on_state(PushState::Connecting, "Discovering server push support…");
+        self.on_state(PushState::Connecting, t("Discovering server push support…"));
         self.spawn_worker(
             generation,
             server,
@@ -303,7 +331,7 @@ impl NotifyPushClient {
             inner.force_password_auth = false;
         }
         if !keep_enabled {
-            self.on_state(PushState::Disabled, "Disconnected");
+            self.on_state(PushState::Disabled, t("Disconnected"));
         }
     }
 
@@ -1241,6 +1269,13 @@ mod tests {
     // ---- facade state transitions (no network) --------------------------------
 
     #[test]
+    fn enabling_push_is_a_no_op_for_providers_without_a_channel() {
+        let client = NotifyPushClient::new(Provider::OpenCloud, |_| {}, || {}, |_, _| {});
+        client.set_enabled(true);
+        assert!(!client.is_enabled());
+    }
+
+    #[test]
     fn configure_disabled_reports_disabled_state() {
         let (client, states, _notifications) = test_client(Provider::Nextcloud);
         client.configure("https://cloud.example.com", "alice", "secret", false);
@@ -1248,7 +1283,10 @@ mod tests {
         assert!(states
             .iter()
             .all(|(state, _)| *state == PushState::Disabled));
-        assert_eq!(states.last().unwrap().1, "Push notifications are disabled.");
+        assert_eq!(
+            states.last().unwrap().1,
+            t("Push notifications are disabled.")
+        );
     }
 
     #[test]
