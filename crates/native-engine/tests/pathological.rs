@@ -634,3 +634,30 @@ fn a_journaled_hidden_entry_is_never_deleted_from_the_server() {
     let plan = reconcile(&local_entries, &filtered, &journal_entries, true);
     assert_eq!(deletes(&plan), 0);
 }
+
+/// Issue #274: a path that is a file locally and a collection on the server
+/// used to cascade into thousands of server deletions. Neither side may be
+/// touched, and the collision has to reach the run report.
+#[test]
+fn a_file_local_against_a_collection_remote_touches_neither_side() {
+    let plan = reconcile(
+        &[local("Media", false, 114, 100)],
+        &[
+            remote("Media", true, 0, "\"d1\""),
+            remote("Media/foto.jpg", false, 10, "\"e1\""),
+        ],
+        &[],
+        true,
+    );
+
+    let rendered = format!("{plan:?}");
+    assert_eq!(deletes(&plan), 0, "the server keeps its tree: {rendered}");
+    assert!(
+        !rendered.contains("Upload"),
+        "nothing is uploaded through a colliding path: {rendered}"
+    );
+    assert!(
+        rendered.contains("Conflict"),
+        "the collision is reported: {rendered}"
+    );
+}
