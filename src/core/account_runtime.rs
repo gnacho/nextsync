@@ -888,7 +888,10 @@ impl AccountRuntime {
     /// Build the notify_push client for this account, or `None` when the
     /// provider has no push channel or the account disabled it.
     fn default_push(&self) -> Option<NotifyPushClient> {
-        if !remote_push_supported(self.account.provider) || !self.account.sync.remote_push_enabled {
+        // Built whenever the provider has a channel, even if the account keeps
+        // it disabled: the Settings switch must be able to turn it on without
+        // a restart (issue #287). `configure` decides whether it runs.
+        if !remote_push_supported(self.account.provider) {
             return None;
         }
         let file_targets = Rc::clone(&self.targets);
@@ -915,6 +918,19 @@ impl AccountRuntime {
             .map(|folder| folder.scheduler())
             .collect();
         self.targets.borrow_mut().schedulers = schedulers;
+    }
+
+    /// Take a fresh account configuration: reconcile the folders and start or
+    /// stop the push channel when its preference changed (issue #287).
+    fn apply_account(&mut self, account: &AccountConfig) {
+        let push_was_enabled = self.account.sync.remote_push_enabled;
+        self.account = account.clone();
+        self.sync_folders();
+        if push_was_enabled != account.sync.remote_push_enabled {
+            if let Some(client) = &self.push {
+                client.set_enabled(account.sync.remote_push_enabled);
+            }
+        }
     }
 
     /// Reconcile the folder runtimes with the account's current folders.
@@ -1127,8 +1143,7 @@ impl AccountManager {
         let Some(runtime) = self.runtimes.get_mut(&account.id) else {
             return false;
         };
-        runtime.account = account.clone();
-        runtime.sync_folders();
+        runtime.apply_account(account);
         true
     }
 
@@ -1925,7 +1940,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_push_yields_no_client() {
+    fn disabled_push_still_gets_a_client_that_can_be_turned_on_later() {
         let source = fake_source();
         let mut account = sample_account(true);
         account.sync.remote_push_enabled = false;
@@ -1938,7 +1953,45 @@ mod tests {
             SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
             runtime.default_push_for_test(),
         );
-        assert!(runtime.push_client().is_none());
+        let client = runtime
+            .push_client()
+            .expect("a client is built even when disabled");
+        assert!(!client.is_enabled());
+    }
+
+    #[test]
+    fn changing_the_push_preference_applies_without_a_restart() {
+        let source = fake_source();
+        let mut account = sample_account(true);
+        account.sync.remote_push_enabled = false;
+        // No server: the client must record the switch without opening a
+        // socket, so the test stays offline.
+        account.server_url = String::new();
+        let mut runtime = AccountRuntime::new(
+            account.clone(),
+            NetworkConfig::default(),
+            source,
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        runtime.mount_test(
+            online_network_watcher(),
+            PowerWatcher::new(Box::new(FakePowerProbe::default())),
+            SuspendWatcher::new(Box::new(FakeSuspendProbe::default())),
+            runtime.default_push_for_test(),
+        );
+        assert!(!runtime.push_client().expect("client").is_enabled());
+
+        let mut enabling = account;
+        enabling.sync.remote_push_enabled = true;
+        runtime.apply_account(&enabling);
+        assert!(runtime.push_client().expect("client").is_enabled());
+
+        let mut disabling = enabling;
+        disabling.sync.remote_push_enabled = false;
+        runtime.apply_account(&disabling);
+        assert!(!runtime.push_client().expect("client").is_enabled());
     }
 
     #[test]
