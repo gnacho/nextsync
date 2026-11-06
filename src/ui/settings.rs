@@ -59,9 +59,9 @@ use crate::util::paths::state_dir;
 /// A simple no-argument callback.
 pub type SettingsCallback = Rc<dyn Fn()>;
 
-/// Reads the live state of the remote push channel, `None` when the account
-/// has no runtime yet.
-pub type PushStateReader = Rc<dyn Fn() -> Option<(PushState, String)>>;
+/// Attaches a live listener for the remote push channel to its status row:
+/// renders the current state and then every later change (issue #283).
+pub type PushStateSubscription = Rc<dyn Fn(&libadwaita::ActionRow)>;
 
 /// Callbacks the Settings window invokes after mutating the configuration.
 #[derive(Clone, Default)]
@@ -76,9 +76,10 @@ pub struct SettingsCallbacks {
     /// Invoked after the user re-enters credentials ("Sign in again",
     /// issue #72): lifts the credential-rejection gate and reconciles.
     pub on_credentials_renewed: Option<SettingsCallback>,
-    /// Reads the push channel state so the Remote Changes group can explain
-    /// an unavailable or failing channel (issue #283).
-    pub push_state: Option<PushStateReader>,
+    /// Attaches the push channel state to its status row so the Remote
+    /// Changes group can explain an unavailable or failing channel
+    /// (issue #283).
+    pub push_state: Option<PushStateSubscription>,
 }
 
 /// Where an in-app settings view anchors its dialogs and toasts.
@@ -434,8 +435,8 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
 /// Render the push channel message into its status row. A channel without a
 /// message (connected, or no runtime yet) hides the row instead of showing it
 /// empty.
-fn refresh_push_status(row: &libadwaita::ActionRow, reader: &PushStateReader) {
-    match reader() {
+pub(crate) fn refresh_push_status(row: &libadwaita::ActionRow, state: Option<(PushState, String)>) {
+    match state {
         Some((_, message)) if !message.is_empty() => {
             row.set_subtitle(&message);
             row.set_visible(true);
@@ -502,20 +503,8 @@ pub(crate) fn sync_option_groups(
         .title(t("Push status"))
         .build();
     push_status.set_visible(false);
-    if let Some(reader) = callbacks.push_state.clone() {
-        refresh_push_status(&push_status, &reader);
-        {
-            let reader = reader.clone();
-            push_status.connect_map(move |row| refresh_push_status(row, &reader));
-        }
-        // The channel finishes its handshake a moment after the page opens;
-        // one delayed read catches that without keeping a timer running.
-        let row = push_status.downgrade();
-        libadwaita::glib::timeout_add_seconds_local_once(3, move || {
-            if let Some(row) = row.upgrade() {
-                refresh_push_status(&row, &reader);
-            }
-        });
+    if let Some(subscribe) = callbacks.push_state.clone() {
+        subscribe(&push_status);
     }
     let remote_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a remote interval"))
@@ -2595,12 +2584,11 @@ mod tests {
 
 #[cfg(test)]
 mod push_status_tests {
-    use super::{refresh_push_status, PushStateReader};
+    use super::refresh_push_status;
     use crate::state::PushState;
     use crate::ui::test_helpers::gtk_smoke;
     use crate::util::i18n::t;
     use libadwaita::prelude::*;
-    use std::rc::Rc;
 
     #[test]
     fn the_status_row_hides_when_the_channel_has_no_message() {
@@ -2608,12 +2596,10 @@ mod push_status_tests {
             let row = libadwaita::ActionRow::builder()
                 .title("Push status")
                 .build();
-            let reader: PushStateReader = Rc::new(|| None);
-            refresh_push_status(&row, &reader);
+            refresh_push_status(&row, None);
             assert!(!row.is_visible());
 
-            let reader: PushStateReader = Rc::new(|| Some((PushState::Connected, String::new())));
-            refresh_push_status(&row, &reader);
+            refresh_push_status(&row, Some((PushState::Connected, String::new())));
             assert!(!row.is_visible());
         });
     }
@@ -2625,10 +2611,8 @@ mod push_status_tests {
                 .title("Push status")
                 .build();
             let message = t("This server does not offer notify_push.");
-            let reader: PushStateReader =
-                Rc::new(move || Some((PushState::Unsupported, message.to_string())));
 
-            refresh_push_status(&row, &reader);
+            refresh_push_status(&row, Some((PushState::Unsupported, message.to_string())));
 
             assert!(row.is_visible());
             assert_eq!(row.subtitle().as_deref(), Some(message));

@@ -77,6 +77,9 @@ struct WatcherTargets {
     on_battery: bool,
     /// Last notify_push state/message reported by the push client.
     push_state: Option<(PushState, String)>,
+    /// Live listeners for `push_state` changes (issue #283). A dropped
+    /// receiver closes its channel and is pruned on the next change.
+    push_watchers: Vec<async_channel::Sender<(PushState, String)>>,
     /// App-layer hook for the push `notify_notification` hint (issue #31): set
     /// by the launcher to poke the server-notifications poller.
     on_server_notification: Option<Rc<dyn Fn()>>,
@@ -181,7 +184,8 @@ impl WatcherTargets {
     /// Record the latest push state reported by the client (used for the UI).
     fn store_push_state(targets: &Rc<RefCell<WatcherTargets>>, state: PushState, message: String) {
         if let Ok(mut current) = targets.try_borrow_mut() {
-            current.push_state = Some((state, message));
+            let payload = (state, message);
+            current.push_state = Some(payload.clone());
             // Issue #185: while push is connected it is the real-time source of
             // truth, so the periodic remote-interval poll can be skipped. Tell
             // every folder scheduler whether to drop `RemoteInterval`.
@@ -189,6 +193,11 @@ impl WatcherTargets {
             for scheduler in &current.schedulers {
                 scheduler.set_remote_push_ready(ready);
             }
+            // Issue #283: the views that show the channel listen here instead
+            // of polling. A closed receiver is dropped for good.
+            current
+                .push_watchers
+                .retain(|watcher| watcher.try_send(payload.clone()).is_ok());
         }
     }
 
@@ -718,6 +727,14 @@ impl AccountRuntime {
     /// The latest notify_push state and message reported by the client.
     pub fn push_state(&self) -> Option<(PushState, String)> {
         self.targets.borrow().push_state.clone()
+    }
+
+    /// Listen for later push state changes (issue #283). Read `push_state`
+    /// first for the current value: the receiver only yields what happens next.
+    pub fn subscribe_push_state(&self) -> async_channel::Receiver<(PushState, String)> {
+        let (sender, receiver) = async_channel::unbounded();
+        self.targets.borrow_mut().push_watchers.push(sender);
+        receiver
     }
 
     /// Apply a change of the global `pause_on_battery` preference at runtime,
@@ -1992,5 +2009,53 @@ mod tests {
             "single spaces only, no double separator"
         );
         crate::util::i18n::reset_locale();
+    }
+}
+
+#[cfg(test)]
+mod push_watcher_tests {
+    use super::WatcherTargets;
+    use crate::state::PushState;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[test]
+    fn a_push_state_change_reaches_every_subscriber() {
+        let targets = Rc::new(RefCell::new(WatcherTargets::default()));
+        let (sender_a, receiver_a) = async_channel::unbounded();
+        let (sender_b, receiver_b) = async_channel::unbounded();
+        {
+            let mut current = targets.borrow_mut();
+            current.push_watchers.push(sender_a);
+            current.push_watchers.push(sender_b);
+        }
+
+        WatcherTargets::store_push_state(
+            &targets,
+            PushState::Unsupported,
+            "no notify_push".to_string(),
+        );
+
+        for receiver in [&receiver_a, &receiver_b] {
+            let (state, message) = receiver.try_recv().expect("subscriber was not told");
+            assert_eq!(state, PushState::Unsupported);
+            assert_eq!(message, "no notify_push");
+        }
+        assert_eq!(
+            targets.borrow().push_state,
+            Some((PushState::Unsupported, "no notify_push".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_closed_subscriber_is_dropped_and_stops_receiving() {
+        let targets = Rc::new(RefCell::new(WatcherTargets::default()));
+        let (sender, receiver) = async_channel::unbounded();
+        targets.borrow_mut().push_watchers.push(sender);
+        drop(receiver);
+
+        WatcherTargets::store_push_state(&targets, PushState::Connected, "connected".to_string());
+
+        assert!(targets.borrow().push_watchers.is_empty());
     }
 }

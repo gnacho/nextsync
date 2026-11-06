@@ -22,8 +22,8 @@ use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{
-    page as settings_page, present_add_folder_dialog, ExclusionsDialog, SettingsCallbacks,
-    SettingsHost, SettingsView,
+    page as settings_page, present_add_folder_dialog, refresh_push_status, ExclusionsDialog,
+    SettingsCallbacks, SettingsHost, SettingsView,
 };
 use crate::util::i18n::{plural, t};
 
@@ -1598,14 +1598,32 @@ impl MainWindow {
             },
             push_state: {
                 let weak = weak.clone();
-                Some(Rc::new(move || {
-                    let main = weak.upgrade()?;
-                    let main = main.borrow();
-                    let account_id = main.active_account_id.clone()?;
-                    main.account_manager
-                        .runtimes()
-                        .get(&account_id)
-                        .and_then(|runtime| runtime.push_state())
+                Some(Rc::new(move |row: &libadwaita::ActionRow| {
+                    let Some(main) = weak.upgrade() else {
+                        return;
+                    };
+                    let (current, receiver) = {
+                        let main = main.borrow();
+                        let Some(account_id) = main.active_account_id.clone() else {
+                            return;
+                        };
+                        let Some(runtime) = main.account_manager.runtimes().get(&account_id) else {
+                            return;
+                        };
+                        (runtime.push_state(), runtime.subscribe_push_state())
+                    };
+                    refresh_push_status(row, current);
+                    // The receiver lives in the main context and dies with the
+                    // row, which closes the channel on the runtime side.
+                    let row = row.downgrade();
+                    glib::spawn_future_local(async move {
+                        while let Ok(state) = receiver.recv().await {
+                            let Some(row) = row.upgrade() else {
+                                break;
+                            };
+                            refresh_push_status(&row, Some(state));
+                        }
+                    });
                 }))
             },
         }
