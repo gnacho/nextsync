@@ -12,9 +12,11 @@
 //!   msgids missing from the Spanish catalog fall back to the English source.
 //! - No `runtime` parameter. The window only receives a [`ConfigStore`], the
 //!   [`AccountConfig`] snapshot, the account id and the [`SettingsCallbacks`]
-//!   closures. The live Diagnostics rows (inotify watches, push state) are
-//!   dropped because the window has no handle to the runtimes;
-//!   `runtime.last_exit_code` is shown instead.
+//!   closures. The inotify watch diagnostics row is dropped because the window
+//!   has no handle to the runtimes; `runtime.last_exit_code` is shown instead.
+//!   The push channel is the exception: the window gets its state through a
+//!   closure that reads the runtime, so the Remote Changes group can explain
+//!   why push is not working on a given server (issue #283).
 //! - Desktop integrations (`_build_desktop_integrations`): the three switches
 //!   target the account's FIRST folder instead of the Python's "active"
 //!   folder (the rewrite has no active-account concept); with no folders the
@@ -38,6 +40,8 @@ use std::rc::Rc;
 
 use libadwaita::prelude::*;
 
+use crate::state::PushState;
+
 use crate::core::sync_safety::{
     local_folder_is_empty, review_required, stale_artifact_names, FirstSyncFacts,
 };
@@ -55,6 +59,10 @@ use crate::util::paths::state_dir;
 /// A simple no-argument callback.
 pub type SettingsCallback = Rc<dyn Fn()>;
 
+/// Reads the live state of the remote push channel, `None` when the account
+/// has no runtime yet.
+pub type PushStateReader = Rc<dyn Fn() -> Option<(PushState, String)>>;
+
 /// Callbacks the Settings window invokes after mutating the configuration.
 #[derive(Clone, Default)]
 pub struct SettingsCallbacks {
@@ -68,6 +76,9 @@ pub struct SettingsCallbacks {
     /// Invoked after the user re-enters credentials ("Sign in again",
     /// issue #72): lifts the credential-rejection gate and reconciles.
     pub on_credentials_renewed: Option<SettingsCallback>,
+    /// Reads the push channel state so the Remote Changes group can explain
+    /// an unavailable or failing channel (issue #283).
+    pub push_state: Option<PushStateReader>,
 }
 
 /// Where an in-app settings view anchors its dialogs and toasts.
@@ -420,6 +431,19 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
 /// and the advanced ones (exclusions and reliability). Issue #249 splits them
 /// across two pages because the whole block did not fit in a 960 px tall
 /// window.
+/// Render the push channel message into its status row. A channel without a
+/// message (connected, or no runtime yet) hides the row instead of showing it
+/// empty.
+fn refresh_push_status(row: &libadwaita::ActionRow, reader: &PushStateReader) {
+    match reader() {
+        Some((_, message)) if !message.is_empty() => {
+            row.set_subtitle(&message);
+            row.set_visible(true);
+        }
+        _ => row.set_visible(false),
+    }
+}
+
 pub(crate) fn sync_option_groups(
     store: &ConfigStore,
     account_id: &str,
@@ -474,6 +498,22 @@ pub(crate) fn sync_option_groups(
         .title(t("Use server push notifications"))
         .active(sync.remote_push_enabled)
         .build();
+    let push_status = libadwaita::ActionRow::builder()
+        .title(t("Push status"))
+        .build();
+    push_status.set_visible(false);
+    if let Some(reader) = callbacks.push_state.clone() {
+        let row = push_status.downgrade();
+        let refresh = move || {
+            let Some(row) = row.upgrade() else {
+                return libadwaita::glib::ControlFlow::Break;
+            };
+            refresh_push_status(&row, &reader);
+            libadwaita::glib::ControlFlow::Continue
+        };
+        refresh();
+        libadwaita::glib::timeout_add_seconds_local(2, refresh);
+    }
     let remote_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a remote interval"))
         .active(sync.remote_interval_enabled)
@@ -486,6 +526,7 @@ pub(crate) fn sync_option_groups(
     );
     remote_minutes.set_visible(sync.remote_interval_enabled);
     remote.add(&push);
+    remote.add(&push_status);
     remote.add(&remote_timer);
     remote.add(&remote_minutes);
     groups.push(remote);
@@ -2545,6 +2586,49 @@ mod tests {
                 Some(page::NETWORK)
             );
             reset_locale();
+        });
+    }
+}
+
+#[cfg(test)]
+mod push_status_tests {
+    use super::{refresh_push_status, PushStateReader};
+    use crate::state::PushState;
+    use crate::ui::test_helpers::gtk_smoke;
+    use crate::util::i18n::t;
+    use libadwaita::prelude::*;
+    use std::rc::Rc;
+
+    #[test]
+    fn the_status_row_hides_when_the_channel_has_no_message() {
+        gtk_smoke(|| {
+            let row = libadwaita::ActionRow::builder()
+                .title("Push status")
+                .build();
+            let reader: PushStateReader = Rc::new(|| None);
+            refresh_push_status(&row, &reader);
+            assert!(!row.is_visible());
+
+            let reader: PushStateReader = Rc::new(|| Some((PushState::Connected, String::new())));
+            refresh_push_status(&row, &reader);
+            assert!(!row.is_visible());
+        });
+    }
+
+    #[test]
+    fn the_status_row_explains_a_server_without_notify_push() {
+        gtk_smoke(|| {
+            let row = libadwaita::ActionRow::builder()
+                .title("Push status")
+                .build();
+            let message = t("This server does not offer notify_push.");
+            let reader: PushStateReader =
+                Rc::new(move || Some((PushState::Unsupported, message.to_string())));
+
+            refresh_push_status(&row, &reader);
+
+            assert!(row.is_visible());
+            assert_eq!(row.subtitle().as_deref(), Some(message));
         });
     }
 }

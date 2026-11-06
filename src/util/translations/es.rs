@@ -286,6 +286,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Push authentication failed after several attempts.", "La autenticación del push ha fallado tras varios intentos."),
     ("Push authentication failed.", "La autenticación del push ha fallado."),
     ("Push connection", "Conexión push"),
+    ("Push status", "Estado del push"),
     ("Quiet Hours", "Horario de silencio"),
     ("Quiet hours", "Horario de silencio"),
     ("Quiet hours: synchronization is suspended", "Horario de silencio: la sincronización está suspendida"),

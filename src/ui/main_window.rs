@@ -1596,6 +1596,18 @@ impl MainWindow {
                     }
                 }))
             },
+            push_state: {
+                let weak = weak.clone();
+                Some(Rc::new(move || {
+                    let main = weak.upgrade()?;
+                    let main = main.borrow();
+                    let account_id = main.active_account_id.clone()?;
+                    main.account_manager
+                        .runtimes()
+                        .get(&account_id)
+                        .and_then(|runtime| runtime.push_state())
+                }))
+            },
         }
     }
 
