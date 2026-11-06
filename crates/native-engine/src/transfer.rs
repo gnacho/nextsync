@@ -73,6 +73,8 @@ pub fn download(
     cancel: &CancelToken,
     sink: &dyn ProgressSink,
     path: &str,
+    multipart_threshold: u64,
+    multipart_streams: u32,
 ) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -82,15 +84,23 @@ pub fn download(
     let mut last_err = None;
     for attempt in 0..=max_retries {
         if cancel.is_cancelled() {
-            let _ = std::fs::remove_file(&tmp);
+            discard_part(&tmp);
             return Err(Error::Cancelled);
         }
-        match try_download(client, url, &tmp, expected_etag, &mut reporter) {
+        let outcome = if multipart_streams > 1
+            && total >= multipart_threshold
+            && ranges_supported(client, url)
+        {
+            try_download_ranges(client, url, &tmp, total, multipart_streams, &mut reporter)
+        } else {
+            try_download(client, url, &tmp, expected_etag, &mut reporter)
+        };
+        match outcome {
             Ok(()) => {
                 if let Some(expected) = expected_checksum {
                     let actual = sha1_hex(&tmp)?;
                     if !actual.eq_ignore_ascii_case(expected) {
-                        let _ = std::fs::remove_file(&tmp);
+                        discard_part(&tmp);
                         last_err = Some(Error::Transport("checksum mismatch".into()));
                         if attempt == max_retries {
                             break;
@@ -104,10 +114,13 @@ pub fn download(
                     let _ = std::fs::remove_file(dest);
                     std::fs::rename(&tmp, dest)?;
                 }
+                // The download is finished: the range bookkeeping is stale
+                // and, left behind, it would upload as a stray file (#272).
+                let _ = std::fs::remove_file(ranges_sidecar(&tmp));
                 return Ok(());
             }
             Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
+                discard_part(&tmp);
                 let retry = retryable(&e);
                 last_err = Some(e);
                 if !retry || attempt == max_retries {
@@ -118,6 +131,105 @@ pub fn download(
         }
     }
     Err(last_err.unwrap_or_else(|| Error::Transport("download failed".into())))
+}
+
+/// Whether the server honours byte ranges (issue #272).
+fn ranges_supported(client: &HttpClient, url: &str) -> bool {
+    matches!(client.get_range(url, 0, 0), Ok((_, 206)))
+}
+
+/// Download `url` as parallel byte ranges into `tmp`, skipping the ranges a
+/// previous attempt already finished (issue #272).
+fn try_download_ranges(
+    client: &HttpClient,
+    url: &str,
+    tmp: &Path,
+    total: u64,
+    streams: u32,
+    reporter: &mut ProgressReporter,
+) -> Result<()> {
+    let plan = split_ranges(total, streams);
+    let done = completed_ranges(tmp);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(tmp)?;
+    file.set_len(total)?;
+
+    let mut already = 0u64;
+    for range in &plan {
+        if done.contains(range) {
+            already += range.1 - range.0 + 1;
+        }
+    }
+    if already > 0 {
+        reporter.resume_from(already);
+    }
+
+    let pending: Vec<(u64, u64)> = plan.iter().copied().filter(|r| !done.contains(r)).collect();
+    let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+    std::thread::scope(|scope| {
+        for (start, end) in pending {
+            let file = &file;
+            let failure = &failure;
+            scope.spawn(move || {
+                if failure.lock().map(|slot| slot.is_some()).unwrap_or(true) {
+                    return;
+                }
+                if let Err(error) = fetch_range(client, url, tmp, file, start, end) {
+                    if let Ok(mut slot) = failure.lock() {
+                        if slot.is_none() {
+                            *slot = Some(error);
+                        }
+                    }
+                }
+            });
+        }
+    });
+    if let Some(error) = failure.into_inner().unwrap_or(None) {
+        return Err(error);
+    }
+    file.sync_all()?;
+    reporter.add(total.saturating_sub(already));
+    Ok(())
+}
+
+/// Fetch one byte range straight into its offset inside the part file.
+fn fetch_range(
+    client: &HttpClient,
+    url: &str,
+    tmp: &Path,
+    file: &std::fs::File,
+    start: u64,
+    end: u64,
+) -> Result<()> {
+    use std::os::unix::fs::FileExt;
+
+    let (mut reader, status) = client.get_range(url, start, end)?;
+    if status != 206 {
+        return Err(Error::Transport(format!(
+            "server ignored the byte range {start}-{end}"
+        )));
+    }
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut offset = start;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        file.write_all_at(&buffer[..read], offset)?;
+        offset += read as u64;
+    }
+    if offset != end + 1 {
+        return Err(Error::Transport(format!(
+            "range {start}-{end} came back short"
+        )));
+    }
+    mark_range_complete(tmp, (start, end))?;
+    Ok(())
 }
 
 fn try_download(
@@ -156,7 +268,7 @@ fn try_download(
     if len < 512 {
         if let Ok(bytes) = std::fs::read(tmp) {
             if is_webdav_banner(&bytes) {
-                let _ = std::fs::remove_file(tmp);
+                discard_part(tmp);
                 return Err(Error::Transport(
                     "the server returned its WebDAV page instead of file content (collection?)"
                         .to_string(),
@@ -261,13 +373,19 @@ fn backoff(attempt: u32) {
     std::thread::sleep(Duration::from_secs(secs));
 }
 
+/// Remove a partial file together with its range bookkeeping (issue #272).
+fn discard_part(part: &Path) {
+    let _ = std::fs::remove_file(part);
+    let _ = std::fs::remove_file(ranges_sidecar(part));
+}
+
 fn temp_path(dest: &Path) -> PathBuf {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
     let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{}.{}.part", std::process::id(), n));
+    name.push(format!(".{n}.part"));
     dest.with_file_name(name)
 }
 

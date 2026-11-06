@@ -544,6 +544,8 @@ impl Engine {
             cancel,
             sink,
             rel,
+            self.cfg.multipart_threshold,
+            self.cfg.multipart_streams,
         )?;
         Ok(parent_dir(rel))
     }
@@ -648,6 +650,8 @@ impl Engine {
                     cancel,
                     sink,
                     rel,
+                    self.cfg.multipart_threshold,
+                    self.cfg.multipart_streams,
                 )?;
                 {
                     refresh.insert(parent_dir(rel));
@@ -761,6 +765,8 @@ impl Engine {
                     cancel,
                     sink,
                     rel,
+                    self.cfg.multipart_threshold,
+                    self.cfg.multipart_streams,
                 )?;
                 {
                     refresh.insert(parent_dir(rel));
