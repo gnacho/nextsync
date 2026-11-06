@@ -52,7 +52,21 @@ impl Default for DeleteGuardConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Paths coming from the server must stay inside the synced folder. A href
+/// carrying `..` (or an absolute path) would otherwise let a malicious or
+/// broken server write outside `local_root`.
+pub fn is_safe_rel(rel: &str) -> bool {
+    if rel.is_empty() {
+        return true;
+    }
+    if rel.starts_with('/') || rel.contains('\\') || rel.contains('\0') {
+        return false;
+    }
+    rel.split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+#[derive(Clone)]
 pub struct EngineConfig {
     pub provider: Provider,
     /// Scheme, host and port, no trailing slash, e.g. `https://cloud.example.com`.
@@ -77,6 +91,35 @@ pub struct EngineConfig {
     pub chunk_threshold: u64,
     /// Journal location. Defaults to `<local_root>/.nextsync/state.db`.
     pub db_path: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for EngineConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The password must never reach a log line, a panic message or a
+        // crash report. Same rule as the app (issue #140).
+        f.debug_struct("EngineConfig")
+            .field("provider", &self.provider)
+            .field("base_url", &self.base_url)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .field("local_root", &self.local_root)
+            .field("remote_path", &self.remote_path)
+            .field("space_id", &self.space_id)
+            .field(
+                "trust_invalid_certificates",
+                &self.trust_invalid_certificates,
+            )
+            .field("proxy", &self.proxy)
+            .field("max_retries", &self.max_retries)
+            .field("sync_hidden_files", &self.sync_hidden_files)
+            .field("exclude_patterns", &self.exclude_patterns)
+            .field("delete_guard", &self.delete_guard)
+            .field("dry_run", &self.dry_run)
+            .field("timeout", &self.timeout)
+            .field("chunk_threshold", &self.chunk_threshold)
+            .field("db_path", &self.db_path)
+            .finish()
+    }
 }
 
 impl EngineConfig {

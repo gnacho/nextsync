@@ -7,9 +7,8 @@
 //! erased verbatim, longest first.
 //!
 //! [`Redact::redact_line`] is the stateless entry point wired into the log
-//! buffer ([`crate::core::log`]) and the sync-engine output capture
-//! ([`crate::nextcloud::sync_engine`]); it runs only the three structural
-//! passes. [`Redactor`] adds the known-secret scrub and mirrors the Python
+//! buffer ([`crate::core::log`]); it runs only the three structural passes.
+//! [`Redactor`] adds the known-secret scrub and mirrors the Python
 //! `Redactor` API (`new`/`add_secret`/`redact`) so the app can register the
 //! credentials it just looked up before emitting diagnostics.
 

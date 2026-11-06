@@ -16,7 +16,7 @@ use std::rc::{Rc, Weak};
 use libadwaita::prelude::*;
 
 use crate::core::account_runtime::{AccountManager, AccountRuntime};
-use crate::nextcloud::driver::Provider;
+use crate::nextcloud::provider::Provider;
 use crate::state::{AppState, StateSnapshot};
 use crate::storage::config::{Config, ConfigStore};
 use crate::ui::about;
@@ -353,30 +353,6 @@ impl AccountView {
                             cb(&account_id, &folder_id);
                         }
                     }))
-                },
-                // Issue #218: while the provider's engine is missing, the row
-                // menu offers one-click installation; a successful install
-                // retries the folder right away (the engine-missing state
-                // recovers on the next manual run).
-                on_install_engine: {
-                    let provider = account.provider;
-                    let folder_runtime = folder_runtime.clone();
-                    if crate::ui::setup::engine_present_for(provider, account.sync.native_engine) {
-                        None
-                    } else {
-                        Some(Rc::new(move |parent: &gtk4::Widget| {
-                            let folder_runtime = folder_runtime.clone();
-                            crate::ui::engine_install::present_engine_install_dialog(
-                                parent,
-                                provider,
-                                Rc::new(move || {
-                                    if let Some(fr) = &folder_runtime {
-                                        fr.sync_now();
-                                    }
-                                }),
-                            );
-                        }))
-                    }
                 },
             };
             // No last-sync caption is rendered (the v0.4.0 folder-focused
@@ -2904,7 +2880,10 @@ mod tests {
             state.set(crate::state::AppState::Syncing, "");
             assert_eq!(action_row.subtitle().as_deref(), Some("Synchronizing…"));
             state.set(crate::state::AppState::IdleOk, "");
-            assert_eq!(action_row.subtitle().as_deref(), Some("Local copy of docs"));
+            assert_eq!(
+                action_row.subtitle().as_deref(),
+                Some("Remote folder: docs")
+            );
             reset_locale();
         });
     }

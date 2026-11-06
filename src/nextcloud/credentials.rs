@@ -186,6 +186,77 @@ pub(crate) fn reset_service_for_tests() {
     *service_lock() = None;
 }
 
+/// Result of looking up the account password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CredentialLookup {
+    /// A usable password was retrieved.
+    Found(String),
+    /// The keyring has no item for the account.
+    Missing,
+    /// The keyring is locked and could not answer.
+    Locked,
+    /// The lookup failed for any other reason.
+    Unavailable,
+}
+
+impl CredentialLookup {
+    /// Whether the failure is transient infrastructure trouble (issue #85):
+    /// the session bus or the secret service is not ready yet, the
+    /// collection is locked, or the agent answered something unexpected.
+    /// Retrying later is meaningful; nothing here says the password is bad.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            CredentialLookup::Locked | CredentialLookup::Unavailable
+        )
+    }
+}
+
+/// Supplies the account password to a sync runner.
+///
+/// Kept behind a trait so tests can inject deterministic lookups instead of
+/// talking to the Secret Service.
+pub trait CredentialSource: Send + Sync + 'static {
+    /// Resolve the password for the given account.
+    fn lookup(&self, account: &crate::storage::config::AccountConfig) -> CredentialLookup;
+
+    /// Issue #214: best-effort unlock of the keyring collections. Returns
+    /// `true` when at least one locked collection was unlocked, so the
+    /// caller re-runs [`CredentialSource::lookup`] once. GNOME collections
+    /// created by the desktop session usually share the login password: the
+    /// Secret Service then completes the unlock prompt on its own as long as
+    /// the client connection stays alive through it, so the common case
+    /// needs no user interaction. Sources without an unlock facility keep
+    /// the default: no unlock, no retry.
+    fn unlock_keyring(&self) -> bool {
+        false
+    }
+}
+
+/// [`CredentialSource`] backed by the desktop Secret Service.
+pub struct KeyringCredentialSource;
+
+impl CredentialSource for KeyringCredentialSource {
+    fn lookup(&self, account: &crate::storage::config::AccountConfig) -> CredentialLookup {
+        match CredentialsStore::get_for_account(
+            &account.id,
+            &account.server_url,
+            &account.login_name,
+        ) {
+            Ok(Some(password)) => CredentialLookup::Found(password),
+            Ok(None) => CredentialLookup::Missing,
+            Err(CredentialError::Service(secret_service::Error::Locked)) => {
+                CredentialLookup::Locked
+            }
+            Err(_) => CredentialLookup::Unavailable,
+        }
+    }
+
+    fn unlock_keyring(&self) -> bool {
+        CredentialsStore::unlock_locked_collections().unwrap_or(false)
+    }
+}
+
 /// Prefer the `login` collection (unlocked automatically by the desktop
 /// session) and fall back to the default collection (issue #58).
 ///
@@ -385,7 +456,16 @@ mod tests {
         let _ = CredentialsStore::delete(TEST_ACCOUNT);
 
         CredentialsStore::set(TEST_ACCOUNT, TEST_PASSWORD).expect("set should succeed");
-        let stored = CredentialsStore::get(TEST_ACCOUNT).expect("get should succeed");
+        // The session collection is shared with the desktop keyring daemon and
+        // does not always answer the first read right after a write.
+        let mut stored = None;
+        for _ in 0..5 {
+            stored = CredentialsStore::get(TEST_ACCOUNT).expect("get should succeed");
+            if stored.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         assert_eq!(stored.as_deref(), Some(TEST_PASSWORD));
 
         // Replacing an existing item must not create a duplicate.

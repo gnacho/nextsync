@@ -1494,7 +1494,6 @@ dependencies = [
  "notify-rust",
  "rand",
  "roxmltree",
- "rusqlite",
  "rustls",
  "rustls-native-certs",
  "secret-service",

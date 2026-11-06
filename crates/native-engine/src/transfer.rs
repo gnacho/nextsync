@@ -149,8 +149,30 @@ fn try_download(
         reporter.add(n as u64);
     }
     out.sync_all()?;
+    // A WebDAV server answers `GET` on a collection with an HTML page rather
+    // than an error. Writing that page as the file content replaces a folder
+    // with a 114-byte file, and every child of it then fails with ENOTDIR.
+    let len = std::fs::metadata(tmp).map(|m| m.len()).unwrap_or(0);
+    if len < 512 {
+        if let Ok(bytes) = std::fs::read(tmp) {
+            if is_webdav_banner(&bytes) {
+                let _ = std::fs::remove_file(tmp);
+                return Err(Error::Transport(
+                    "the server returned its WebDAV page instead of file content (collection?)"
+                        .to_string(),
+                ));
+            }
+        }
+    }
     let _ = expected;
     Ok(())
+}
+
+/// True for the HTML page WebDAV servers return when a collection is fetched
+/// as if it were a file.
+pub fn is_webdav_banner(bytes: &[u8]) -> bool {
+    const MARKER: &[u8] = b"This is the WebDAV interfac";
+    bytes.len() < 512 && bytes.windows(MARKER.len()).any(|window| window == MARKER)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -263,6 +285,16 @@ fn set_mtime(_path: &Path, _mtime: Option<i64>) -> Result<()> {
     Ok(())
 }
 
+/// The `Upload-Metadata` header OpenCloud expects: comma-separated
+/// `key base64value` pairs, as built by the official client
+/// (`oc-desktop src/libsync/propagateuploadtus.cpp:88`).
+pub fn tus_metadata(rel: &str, mtime: i64) -> String {
+    format!(
+        "filename {}, mtime {mtime}",
+        crate::http::base64_encode(rel.as_bytes())
+    )
+}
+
 pub fn sha1_hex_bytes(data: &[u8]) -> String {
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
@@ -362,6 +394,11 @@ fn chunked_v2(
     let src = format!("{base}.file");
     let total = std::fs::metadata(local)?.len().to_string();
     let mt = mtime.to_string();
+    // A resumed upload can mix chunks from an earlier run whose content has
+    // since changed (same size and mtime, different bytes). The server
+    // validates this checksum on MOVE and rejects the file instead of
+    // publishing corrupt content.
+    let checksum = format!("SHA1:{}", sha1_hex(local)?);
     let moved = client.request_raw(
         "MOVE",
         &src,
@@ -370,6 +407,7 @@ fn chunked_v2(
             ("Overwrite", "T"),
             ("OC-Total-Length", &total),
             ("X-OC-Mtime", &mt),
+            ("OC-Checksum", &checksum),
         ],
         None,
     )?;
@@ -403,8 +441,7 @@ fn tus(
         .unwrap_or(dest_url)
         .trim_start_matches('/');
     let size = std::fs::metadata(local)?.len();
-    let filename = crate::http::base64_encode(rel.as_bytes());
-    let meta = format!("filename {filename}, mtime {mtime}");
+    let meta = tus_metadata(rel, mtime);
     let len = size.to_string();
     let mut last = None;
     for attempt in 0..=max_retries {

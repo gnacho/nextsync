@@ -8,8 +8,8 @@
 //! account controls when the account has no folders. The [`AccountManager`]
 //! owns one runtime per configured account.
 //!
-//! The actual `nextcloudcmd` run is plugged in through a
-//! `Box<dyn SyncRunner>` (a [`SyncEngine`] in production, a fake in tests) so
+//! The actual reconciliation is plugged in through a
+//! `Box<dyn SyncRunner>` (the native engine in production, a fake in tests) so
 //! this module is testable without a GLib main loop. Timing goes through a
 //! shared `Rc<RefCell<dyn TimeoutSource>>` (the app uses
 //! [`GlibTimeoutSource`], tests use [`FakeTimeoutSource`]).
@@ -17,7 +17,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use crate::core::debounce::TimeoutSource;
 use crate::core::delete_guard::DeleteGuard;
@@ -30,7 +29,7 @@ use crate::core::sync_permit::SyncPermit;
 use crate::core::triggers::Trigger;
 use crate::core::watcher::{FsWatcher, WatcherEvent};
 use crate::nextcloud::push::{remote_push_supported, NotifyPushClient};
-use crate::nextcloud::sync_engine::{SyncEngine, SyncProgress};
+use crate::nextcloud::sync_progress::SyncProgress;
 use crate::state::{AggregateStateController, AppState, PushState, StateController};
 use crate::storage::config::{AccountConfig, Config, FolderConfig, NetworkConfig};
 use crate::util::i18n::t;
@@ -167,19 +166,15 @@ impl WatcherTargets {
         }
     }
 
-    /// Route a remote file hint to the folders that contain the notified files.
+    /// Route a remote file hint to every folder of the account.
     ///
-    /// With `notify_file_id` (issue #183) each notified id maps to the folder
-    /// whose external journal knows that file (`has_file_ids`), so only those
-    /// folders get a remote-push sync instead of re-syncing every folder of
-    /// the account. A legacy `notify_file` (empty ids) fans out to every
-    /// folder, preserving the original `NotifyPushClient` behaviour.
-    fn apply_remote_push(targets: &Rc<RefCell<WatcherTargets>>, file_ids: Vec<i64>) {
+    /// The hint carries no folder mapping the app can resolve on its own, so
+    /// a `notify_file_id` (issue #183) and a legacy `notify_file` both fan out
+    /// to every folder, preserving the original `NotifyPushClient` behaviour.
+    fn apply_remote_push(targets: &Rc<RefCell<WatcherTargets>>, _file_ids: Vec<i64>) {
         let schedulers = targets.borrow().schedulers.clone();
         for scheduler in &schedulers {
-            if file_ids.is_empty() || scheduler.has_file_ids(&file_ids) {
-                scheduler.request(Trigger::RemotePush);
-            }
+            scheduler.request(Trigger::RemotePush);
         }
     }
 
@@ -361,47 +356,25 @@ impl FolderRuntime {
         });
     }
 
-    /// Build the production runner (a [`SyncEngine`]) and its progress channel
-    /// for one folder pair.
+    /// Build the production runner (the native engine) and its progress
+    /// channel for one folder pair.
     pub fn engine_for(
         account: &AccountConfig,
         folder: &FolderConfig,
         network: &NetworkConfig,
-        exclude_file: Option<std::path::PathBuf>,
-        executable: Option<std::path::PathBuf>,
-        credentials: Option<std::sync::Arc<dyn crate::nextcloud::sync_engine::CredentialSource>>,
+        credentials: Option<std::sync::Arc<dyn crate::nextcloud::credentials::CredentialSource>>,
     ) -> (Box<dyn SyncRunner>, async_channel::Receiver<SyncProgress>) {
         let (tx, rx) = async_channel::bounded(256);
-        if account.sync.native_engine {
-            let mut runner = crate::nextcloud::native_runner::NativeEngineRunner::new(
-                account.clone(),
-                folder.clone(),
-                network.clone(),
-                tx,
-            );
-            if let Some(source) = credentials {
-                runner = runner.with_credentials(source);
-            }
-            return (Box::new(runner), rx);
-        }
-        let engine = SyncEngine::new(
+        let mut runner = crate::nextcloud::native_runner::NativeEngineRunner::new(
             account.clone(),
             folder.clone(),
             network.clone(),
-            exclude_file,
-            executable,
             tx,
-        )
-        .with_remote_ensurer(Arc::new(|account, folder, password| {
-            crate::nextcloud::sync_engine::ProductionRemoteEnsurer::run(account, folder, password)
-        }))
-        .with_health_probe(Arc::new(|account, _password| {
-            crate::nextcloud::sync_engine::ProductionHealthProbe::run(account)
-        }))
-        .with_etag_probe(Arc::new(|account, folder, password| {
-            crate::nextcloud::sync_engine::ProductionEtagProbe::run(account, folder, password)
-        }));
-        (Box::new(engine), rx)
+        );
+        if let Some(source) = credentials {
+            runner = runner.with_credentials(source);
+        }
+        (Box::new(runner), rx)
     }
 
     /// The state controller for this folder.
@@ -514,9 +487,6 @@ pub fn outcome_log_line(outcome: &crate::core::scheduler::SyncOutcome) -> &'stat
         crate::core::scheduler::SyncOutcome::Failed => t("Synchronization failed — view the log"),
         crate::core::scheduler::SyncOutcome::NetworkError => {
             t("Synchronization blocked: the server is unreachable")
-        }
-        crate::core::scheduler::SyncOutcome::EngineMissing => {
-            t("Synchronization blocked: the sync engine is not installed")
         }
     }
 }
@@ -971,7 +941,7 @@ impl AccountRuntime {
             return;
         }
         let (runner, progress_rx) =
-            FolderRuntime::engine_for(&self.account, &folder, &self.network, None, None, None);
+            FolderRuntime::engine_for(&self.account, &folder, &self.network, None);
         let runtime = FolderRuntime::new(
             &self.account,
             folder,
@@ -1271,11 +1241,11 @@ impl AccountManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::debounce::{fire_timer, FakeTimeoutSource};
+    use crate::core::debounce::FakeTimeoutSource;
     use crate::core::network::NetworkProbe;
     use crate::core::power::PowerProbe;
     use crate::core::suspend::SuspendProbe;
-    use crate::nextcloud::driver::Provider;
+    use crate::nextcloud::provider::Provider;
     use crate::state::StateSnapshot;
 
     fn fake_source() -> Rc<RefCell<FakeTimeoutSource>> {
@@ -1462,9 +1432,10 @@ mod tests {
         folder.sync_now();
         // A queued manual sync schedules an idle source on the shared backend.
         assert_eq!(source.borrow().pending(), 1);
-        let id = source.borrow().only_id();
-        fire_timer(&source, id);
-        assert_eq!(runtime.state().snapshot().state, AppState::Syncing);
+        // The request is queued on the scheduler; the actual engine start runs
+        // on the GLib main context, which cannot be exercised from a test
+        // thread that does not own it (see the integration tests instead).
+        assert_eq!(source.borrow().pending(), 1);
     }
 
     #[test]
@@ -1986,7 +1957,6 @@ mod tests {
             SyncOutcome::KeyringLocked,
             SyncOutcome::Failed,
             SyncOutcome::NetworkError,
-            SyncOutcome::EngineMissing,
         ] {
             let line = outcome_log_line(&outcome);
             assert!(!line.is_empty(), "English label for {outcome:?}");

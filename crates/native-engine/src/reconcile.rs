@@ -74,6 +74,33 @@ impl Action {
 
 const MTIME_TOLERANCE: i64 = 2;
 
+/// True when some ancestor of `key` exists locally as a file. The remote side
+/// then describes a subtree that the local side holds as one file, which is a
+/// type mismatch, never a deletion (#271).
+/// True when the local side holds exactly that path as a file.
+fn local_file_at(key: &str, local: &BTreeMap<&str, &LocalEntry>) -> bool {
+    local.get(key).is_some_and(|entry| !entry.is_dir)
+}
+
+fn shadowed_by_local_file(key: &str, local: &BTreeMap<&str, &LocalEntry>) -> bool {
+    let mut prefix = String::new();
+    for segment in key.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        if prefix == key {
+            break;
+        }
+        if let Some(entry) = local.get(prefix.as_str()) {
+            if !entry.is_dir {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn reconcile(
     local: &[LocalEntry],
     remote: &[RemoteEntry],
@@ -135,6 +162,21 @@ pub fn reconcile(
     };
 
     for key in keys {
+        // The journal lives inside the synced folder. It must never take part
+        // in reconciliation: an earlier run could have uploaded it, and with a
+        // complete remote listing the engine would then delete the local copy.
+        if key == ".nextsync" || key.starts_with(".nextsync/") {
+            continue;
+        }
+        // A local file where the server has a collection shadows every child:
+        // downloading them would fail with ENOTDIR and re-download the WebDAV
+        // banner page (#271). The parent is reported as a conflict instead.
+        if let Some((dir, _)) = key.rsplit_once('/') {
+            let shadowed = local_file_at(dir, &loc) || shadowed_by_local_file(dir, &loc);
+            if shadowed {
+                continue;
+            }
+        }
         let l = loc.get(key);
         let r = rem.get(key);
         let j = jr.get(key);
@@ -150,8 +192,21 @@ pub fn reconcile(
         match (l, r, j) {
             (Some(l), Some(r), Some(j)) => {
                 let remote_changed = r.etag != j.etag;
-                let local_changed =
-                    l.size != j.size || l.mtime != j.mtime || (j.inode != 0 && l.inode != j.inode);
+                // A different inode does not mean different content: restoring
+                // a backup, copying with `cp -a` or moving a tree across
+                // filesystems changes every inode while leaving bytes and
+                // mtimes untouched. Treating that as a local edit queued the
+                // whole tree for upload, so only size and mtime decide here.
+                let local_changed = l.size != j.size || l.mtime != j.mtime;
+                // Directories carry no content: a changed mtime only means a
+                // child appeared or vanished. Conflicting one renamed a whole
+                // tree on disk, so they are always recorded, never resolved.
+                if l.is_dir && r.is_dir {
+                    actions.push(Action::RecordOnly {
+                        rel: key.to_string(),
+                    });
+                    continue;
+                }
                 if l.is_dir != r.is_dir || (remote_changed && local_changed) {
                     actions.push(Action::Conflict {
                         rel: key.to_string(),
@@ -184,18 +239,20 @@ pub fn reconcile(
                 });
             }
             (None, Some(_r), Some(_)) => {
-                if remote_scan_complete {
+                // Never delete a remote entry whose path is shadowed locally by
+                // a file: a type mismatch (file here, directory there) says the
+                // two sides disagree, not that the user deleted anything (#271).
+                if remote_scan_complete && !shadowed_by_local_file(key, &loc) {
                     actions.push(Action::DeleteRemote {
                         rel: key.to_string(),
                     });
                 }
             }
             (None, None, Some(_)) => {
-                if remote_scan_complete {
-                    actions.push(Action::DeleteRemote {
-                        rel: key.to_string(),
-                    });
-                }
+                // Gone on both sides: the journal entry is stale, there is
+                // nothing to delete anywhere. Deleting here used to fire a
+                // no-op DELETE per pruned entry (#271).
+                continue;
             }
             (Some(l), None, None) => {
                 if l.is_dir {
@@ -393,8 +450,19 @@ mod tests {
 
     #[test]
     fn missing_local_deletes_remote() {
-        let acts = reconcile(&[], &[], &[db("a", 1, 1, "e", None)], true);
+        let acts = reconcile(
+            &[],
+            &[rem("a", "e9", None)],
+            &[db("a", 1, 1, "e", None)],
+            true,
+        );
         assert_eq!(acts, vec![Action::DeleteRemote { rel: "a".into() }]);
+    }
+
+    #[test]
+    fn entry_gone_on_both_sides_produces_no_action() {
+        let acts = reconcile(&[], &[], &[db("a", 1, 1, "e", None)], true);
+        assert!(acts.is_empty(), "expected no actions, got {acts:?}");
     }
 
     #[test]

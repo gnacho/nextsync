@@ -1,12 +1,11 @@
 //! [`SyncRunner`] backed by the native engine crate.
 //!
-//! Replaces the `nextcloudcmd` / `opencloudcmd` child process with an
-//! in-process WebDAV client. Enabled per account through
-//! `SyncConfig::native_engine`.
+//! Runs the reconciliation in-process against the provider's WebDAV API; the
+//! app no longer shells out to an external sync binary.
 
 use crate::core::scheduler::{SyncOutcome, SyncRunner};
-use crate::nextcloud::nextcloudcmd_progress::SyncProgress;
-use crate::nextcloud::sync_engine::{CredentialLookup, CredentialSource, KeyringCredentialSource};
+use crate::nextcloud::credentials::{CredentialLookup, CredentialSource, KeyringCredentialSource};
+use crate::nextcloud::sync_progress::SyncProgress;
 use crate::storage::config::{AccountConfig, FolderConfig, NetworkConfig};
 use native_engine::{
     CancelToken, Engine, EngineConfig, ExitState, Progress, ProgressSink, Provider,
@@ -24,10 +23,7 @@ impl ProgressSink for ChannelSink {
         if progress.bytes_total > 0 {
             eprintln!(
                 "sync: {} {} ({}/{})",
-                progress.action,
-                progress.path,
-                progress.bytes_done,
-                progress.bytes_total
+                progress.action, progress.path, progress.bytes_done, progress.bytes_total
             );
         } else {
             eprintln!("sync: {} {}", progress.action, progress.path);
@@ -70,8 +66,8 @@ impl NativeEngineRunner {
     fn config(&self, password: &str) -> EngineConfig {
         let mut cfg = EngineConfig::new(
             match self.account.provider {
-                crate::nextcloud::driver::Provider::OpenCloud => Provider::OpenCloud,
-                crate::nextcloud::driver::Provider::Nextcloud => Provider::Nextcloud,
+                crate::nextcloud::provider::Provider::OpenCloud => Provider::OpenCloud,
+                crate::nextcloud::provider::Provider::Nextcloud => Provider::Nextcloud,
             },
             self.account.server_url.clone(),
             self.account.login_name.clone(),
@@ -174,7 +170,7 @@ mod tests {
     use crate::storage::config::{AccountConfig, FolderConfig, NetworkConfig};
     use native_engine::Engine;
 
-    fn account(provider: crate::nextcloud::driver::Provider, url: &str) -> AccountConfig {
+    fn account(provider: crate::nextcloud::provider::Provider, url: &str) -> AccountConfig {
         let sync = crate::storage::config::SyncConfig {
             max_sync_retries: 7,
             exclude_patterns_enabled: true,
@@ -209,7 +205,7 @@ mod tests {
         let (tx, _rx) = async_channel::bounded(4);
         let runner = NativeEngineRunner::new(
             account(
-                crate::nextcloud::driver::Provider::OpenCloud,
+                crate::nextcloud::provider::Provider::OpenCloud,
                 "https://cloud.example.com/",
             ),
             folder("/tmp/ignored"),
@@ -258,7 +254,7 @@ mod tests {
         let acc = AccountConfig {
             custom_proxy: None, // the config test uses a dead proxy on purpose
             trust_invalid_certificates: false,
-            ..account(crate::nextcloud::driver::Provider::Nextcloud, &url)
+            ..account(crate::nextcloud::provider::Provider::Nextcloud, &url)
         };
         let runner = NativeEngineRunner::new(
             acc,

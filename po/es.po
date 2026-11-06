@@ -1521,14 +1521,6 @@ msgstr ""
 "Tu árbol de archivos completo de Nextcloud se almacenará en este equipo y se "
 "sincronizará en ambos sentidos."
 
-#: src/nextsync/ui/setup.py:97
-msgid ""
-"nextcloudcmd is missing. Install the nextcloud-desktop-cmd package before "
-"the first synchronization."
-msgstr ""
-"Falta nextcloudcmd. Instala el paquete nextcloud-desktop-cmd antes de la "
-"primera sincronización."
-
 #: src/nextsync/ui/setup.py:101
 msgid "Get Started"
 msgstr "Comenzar"
@@ -2020,30 +2012,20 @@ msgstr "Sincronización fallida: credenciales rechazadas"
 msgid "Synchronization failed — view the log"
 msgstr "Error de sincronización — consulta el registro"
 
-
 #~ msgid "The local synchronization folder is missing or unavailable."
 #~ msgstr "La carpeta de sincronización local no existe o no está disponible."
 
 #~ msgid "A previously populated synchronization folder is now empty."
 #~ msgstr "Una carpeta de sincronización antes con contenido está ahora vacía."
 
-
-
 #~ msgid "Checking the local folder…"
 #~ msgstr "Comprobando la carpeta local…"
-
 
 #~ msgid "Could not read the account credential"
 #~ msgstr "No se pudo leer la credencial de la cuenta"
 
-
-
 #~ msgid "Your Nextcloud account needs attention"
 #~ msgstr "Tu cuenta de Nextcloud necesita atención"
-
-
-
-
 
 #~ msgid "Last Successful Sync"
 #~ msgstr "Última sincronización correcta"
@@ -2231,10 +2213,6 @@ msgstr "No se pudo mover la carpeta a la papelera."
 #: src/ui/folder_status.rs
 msgid "{size} local"
 msgstr "{size} en local"
-
-#: src/core/scheduler.rs
-msgid "Another synchronization engine ({name}) is already running on this folder. Close it and try again."
-msgstr "Otro motor de sincronización ({name}) ya está funcionando en esta carpeta. Ciérralo e inténtalo de nuevo."
 
 #: src/core/sync_safety.rs
 msgid "Both the local folder and the remote folder contain files. Confirm that you want to merge their contents."
@@ -2476,7 +2454,6 @@ msgstr "Conexión"
 msgid "Credentials rejected — sign in again to resume synchronization"
 msgstr "Credenciales rechazadas: vuelve a iniciar sesión para reanudar la sincronización"
 
-
 #: src/ui/setup.rs
 msgid "A lightweight desktop synchronizer for Nextcloud and OpenCloud."
 msgstr "Un sincronizador de escritorio ligero para Nextcloud y OpenCloud."
@@ -2565,15 +2542,6 @@ msgstr "Sincronización bloqueada: el almacén de contraseñas está bloqueado"
 msgid "Synchronization blocked: the server is unreachable"
 msgstr "Sincronización bloqueada: el servidor no está disponible"
 
-#: src/core/account_runtime.rs
-#: src/core/scheduler.rs
-msgid "Synchronization blocked: the sync engine is not installed"
-msgstr "Sincronización bloqueada: el motor de sincronización no está instalado"
-
-#: src/core/notifications.rs
-msgid "The sync engine is not installed."
-msgstr "El motor de sincronización no está instalado."
-
 #: src/core/scheduler.rs
 msgid "Waiting for local changes to settle"
 msgstr "Esperando a que los cambios locales se asienten"
@@ -2581,23 +2549,6 @@ msgstr "Esperando a que los cambios locales se asienten"
 #: src/ui/setup.rs
 msgid "Your complete file tree will be stored physically on this computer and synchronized in both directions."
 msgstr "Tu árbol de archivos completo se almacenará físicamente en este equipo y se sincronizará en ambas direcciones."
-
-#: src/ui/setup.rs
-msgid "opencloudcmd is missing. Install the OpenCloud desktop package before the first synchronization."
-msgstr "Falta opencloudcmd. Instala el paquete de escritorio de OpenCloud antes de la primera sincronización."
-
-#: src/ui/setup.rs
-msgid "nextcloudcmd is missing. Install the nextcloud-client package (it provides the sync engine) and finish the setup afterwards."
-msgstr "Falta nextcloudcmd. Instala el paquete nextcloud-client (incluye el motor de sincronización) y termina la configuración después."
-
-#: src/ui/setup.rs
-msgid "opencloudcmd is missing. Install the opencloud-desktop package (it provides the sync engine) and finish the setup afterwards."
-msgstr "Falta opencloudcmd. Instala el paquete opencloud-desktop (incluye el motor de sincronización) y termina la configuración después."
-
-#: src/ui/setup.rs
-msgid "Sync Engine Not Installed"
-msgstr "Motor de sincronización no instalado"
-
 
 #: src/core/scheduler.rs
 msgid "Automatic synchronization is off"
@@ -2739,8 +2690,8 @@ msgstr "Versión del servidor conservada en {count} archivo(s)"
 msgid "Resolve All Conflicts"
 msgstr "Resolver todos los conflictos"
 
-msgid "Local copy of {folder}"
-msgstr "Copia local de {folder}"
+msgid "Remote folder: {folder}"
+msgstr "Carpeta remota: {folder}"
 
 msgid "Waiting to synchronize"
 msgstr "A la espera"
@@ -2768,75 +2719,6 @@ msgstr "{action} · {count}"
 
 msgid "{used} used"
 msgstr "{used} usados"
-
-
-#: src/ui/engine_install.rs
-msgid "This command will run with administrator rights:"
-msgstr "Este comando se ejecutará con derechos de administrador:"
-
-#: src/ui/engine_install.rs
-msgid "Run this command in a terminal:"
-msgstr "Ejecuta este comando en una terminal:"
-
-#: src/ui/engine_install.rs
-msgid "No automatic installation is available for this distribution yet."
-msgstr "Todavía no hay instalación automática disponible para esta distribución."
-
-#: src/ui/engine_install.rs
-msgid "Install"
-msgstr "Instalar"
-
-#: src/ui/engine_install.rs
-msgid "Copy Command"
-msgstr "Copiar comando"
-
-#: src/ui/engine_install.rs
-msgid "Installing…"
-msgstr "Instalando…"
-
-#: src/ui/engine_install.rs
-msgid "Command copied to the clipboard."
-msgstr "Comando copiado al portapapeles."
-
-#: src/ui/engine_install.rs
-msgid "The installation failed."
-msgstr "La instalación ha fallado."
-
-#: src/ui/engine_install.rs
-msgid "Exit code: {code}"
-msgstr "Código de salida: {code}"
-
-#: src/ui/engine_install.rs
-msgid "Installation Failed"
-msgstr "Instalación fallida"
-
-#: src/ui/engine_install.rs
-msgid "Sync Engine Installed"
-msgstr "Motor de sincronización instalado"
-
-#: src/ui/engine_install.rs
-msgid "The sync engine was installed. You can finish the setup now."
-msgstr "Se ha instalado el motor de sincronización. Ya puedes terminar la configuración."
-
-#: src/ui/engine_install.rs
-msgid "Install sync engine…"
-msgstr "Instalar el motor de sincronización…"
-
-#: src/ui/engine_install.rs
-msgid "On distributions without this package, install it from the AUR (for example: yay -S opencloud-desktop)."
-msgstr "En distribuciones sin este paquete, instálalo desde el AUR (por ejemplo: yay -S opencloud-desktop)."
-
-#: src/ui/engine_install.rs
-msgid "The installer crashed."
-msgstr "El instalador se cerró inesperadamente."
-
-#: src/ui/settings.rs
-msgid "Use the native synchronization engine"
-msgstr "Usar el motor de sincronización nativo"
-
-#: src/ui/settings.rs
-msgid "Sync without nextcloudcmd or opencloudcmd. Recommended. Experimental."
-msgstr "Sincroniza sin nextcloudcmd ni opencloudcmd. Recomendado. Experimental."
 
 #: src/ui/setup.rs
 msgid "An account with the same server and username already exists."

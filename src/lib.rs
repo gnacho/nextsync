@@ -1,6 +1,6 @@
 //! NextSync - Nextcloud desktop client for GNOME, rewritten in Rust.
 //!
-//! Thin desktop layer over the `nextcloudcmd` sync engine: configuration,
+//! Thin desktop layer over the native sync engine: configuration,
 //! credentials, scheduling, watchers, tray, windows, logs and conflict
 //! resolution. See `plans/2026-08-13-rust-rewrite.md` for the roadmap.
 //!

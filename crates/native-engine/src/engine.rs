@@ -10,6 +10,111 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+/// Consecutive failed runs after which a path is skipped until its signature
+/// changes. The official engine uses three (nc-desktop
+/// `src/libsync/syncengine.cpp`, `checkErrorBlacklisting`).
+pub const BLACKLIST_AFTER: u32 = 3;
+
+/// Identifies one version of a file so a blacklist entry expires when the file
+/// changes. Avoids re-trying a broken transfer forever, and avoids skipping a
+/// file that was fixed.
+pub fn signature_for(
+    action: &Action,
+    local: &BTreeMap<&str, &LocalEntry>,
+    remote: &BTreeMap<&str, &RemoteEntry>,
+) -> String {
+    match action {
+        Action::Download { rel, etag, .. } => match remote.get(rel.as_str()) {
+            Some(entry) if entry.etag == *etag => format!("r:{etag}"),
+            // The etag moved since planning: the file changed, so the old
+            // failure says nothing about this version.
+            _ => String::new(),
+        },
+        Action::Upload { rel } => match local.get(rel.as_str()) {
+            Some(entry) => format!("l:{}:{}", entry.size, entry.mtime),
+            None => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+/// Refuses a plan that would wipe a large share of the tracked tree, or a
+/// stampede of remote deletions. Modelled on the official engine, which aborts
+/// when every file looks deleted and no file looked untouched
+/// (nc-desktop `src/libsync/syncengine.cpp`, `_hasNoneFiles`/`_hasRemoveFile`).
+pub fn check_delete_guard(
+    cfg: &crate::DeleteGuardConfig,
+    plan: &[Action],
+    local_tracked: usize,
+    known: usize,
+) -> Result<()> {
+    if !cfg.enabled {
+        return Ok(());
+    }
+    let deletes = plan.iter().filter(|a| a.is_delete()).count();
+    if deletes == 0 {
+        return Ok(());
+    }
+    let remote_deletes = plan
+        .iter()
+        .filter(|a| matches!(a, Action::DeleteRemote { .. }))
+        .count();
+    if known > 0 && local_tracked == 0 {
+        return Err(Error::Safety(
+            "local folder is empty but the journal is not; refusing to delete".into(),
+        ));
+    }
+    // Ratio over the tracked tree, not over the plan: a large folder with a
+    // handful of deletions must still be measurable (#271).
+    let total = plan.len().max(local_tracked).max(known).max(1);
+    let ratio = deletes as f64 / total as f64;
+    // Three independent trips:
+    // - the whole tracked tree disappears at once (the signature of a broken
+    //   or truncated remote listing, nc-desktop `_hasNoneFiles`),
+    // - a large share of the tree, but only once it is a real group: a single
+    //   deletion in a small folder is above any ratio and still legitimate,
+    // - an absolute stampede on the server.
+    const MASS_REMOTE_DELETE: usize = 1000;
+    let whole_tree = deletes >= total && total > 0;
+    let group_ratio = deletes >= cfg.min_group.max(1) && ratio > cfg.max_delete_ratio;
+    if whole_tree || group_ratio || remote_deletes >= MASS_REMOTE_DELETE {
+        return Err(Error::Safety(format!(
+            "{deletes} of {total} tracked entries would be deleted ({remote_deletes} on the server, limit {:.0}% or {MASS_REMOTE_DELETE} server deletions)",
+            cfg.max_delete_ratio * 100.0
+        )));
+    }
+    Ok(())
+}
+
+/// Drops transfers that already failed [`BLACKLIST_AFTER`] runs in a row with
+/// the same signature. Returns the filtered plan and how many entries went.
+pub fn filter_blacklisted(
+    plan: Vec<Action>,
+    local: &BTreeMap<&str, &LocalEntry>,
+    remote: &BTreeMap<&str, &RemoteEntry>,
+    db: &StateDb,
+) -> (Vec<Action>, usize) {
+    let mut skipped = 0usize;
+    let kept = plan
+        .into_iter()
+        .filter(|action| {
+            let signature = signature_for(action, local, remote);
+            if signature.is_empty() {
+                return true;
+            }
+            match db.failure_attempts(action.rel(), &signature) {
+                Ok(attempts) if attempts >= BLACKLIST_AFTER => {
+                    log::debug!("{}: blacklisted after {attempts} failures", action.rel());
+                    skipped += 1;
+                    false
+                }
+                _ => true,
+            }
+        })
+        .collect();
+    (kept, skipped)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncSummary {
     pub exit: ExitState,
@@ -70,9 +175,8 @@ impl Engine {
         // can be skipped. Both Nextcloud and OpenCloud bump the root ETag when
         // any descendant changes, so this still sees nested edits.
         let root_etag = self.root_etag(&http, &endpoints)?;
-        let reusable = !db_entries.is_empty()
-            && root_etag.is_some()
-            && db.get_meta("root_etag")? == root_etag;
+        let reusable =
+            !db_entries.is_empty() && root_etag.is_some() && db.get_meta("root_etag")? == root_etag;
         let (remote, complete) = if reusable {
             log::info!("root etag unchanged, reusing the journal instead of walking the tree");
             let entries = db_entries
@@ -98,8 +202,26 @@ impl Engine {
                 }
             }
         };
+        // Drop everything the engine is configured to ignore before planning.
+        // The local scan already skips these, so keeping them in the remote set
+        // would turn every ignored entry into a server-side deletion (#271).
+        let remote: Vec<RemoteEntry> = remote
+            .into_iter()
+            .filter(|entry| !crate::local::ignored(&entry.path, entry.is_dir, &self.cfg))
+            .collect();
         let local = scan_local(&self.cfg.local_root, &self.cfg)?;
         let plan = reconcile(&local, &remote, &db_entries, complete);
+        let loc: BTreeMap<&str, &LocalEntry> = local.iter().map(|e| (e.rel.as_str(), e)).collect();
+        let rem: BTreeMap<&str, &RemoteEntry> =
+            remote.iter().map(|e| (e.path.as_str(), e)).collect();
+        // A transfer that already failed three runs in a row with the same
+        // signature is left alone until the file changes. Without this, one
+        // unreadable file burns a slot and a retry budget on every single run
+        // (nc-desktop src/libsync/syncengine.cpp, checkErrorBlacklisting).
+        let (plan, blacklisted) = filter_blacklisted(plan, &loc, &rem, &db);
+        if blacklisted > 0 {
+            log::warn!("{blacklisted} entries skipped: blacklisted after repeated failures");
+        }
 
         let total_actions = plan.iter().filter(|a| a.is_write()).count();
         self.guard_deletes(&plan, &local, &db)?;
@@ -123,9 +245,6 @@ impl Engine {
             return Ok(summary);
         }
 
-        let loc: BTreeMap<&str, &LocalEntry> = local.iter().map(|e| (e.rel.as_str(), e)).collect();
-        let rem: BTreeMap<&str, &RemoteEntry> =
-            remote.iter().map(|e| (e.path.as_str(), e)).collect();
         let mut processed = 0u32;
         let mut refresh: BTreeSet<String> = BTreeSet::new();
         let mut download_jobs: Vec<&Action> = Vec::new();
@@ -194,6 +313,8 @@ impl Engine {
             let done = std::sync::atomic::AtomicU32::new(0);
             let failures = std::sync::Mutex::new(Vec::<String>::new());
             let dirs = std::sync::Mutex::new(BTreeSet::<String>::new());
+            let ok_paths = std::sync::Mutex::new(Vec::<String>::new());
+            let failed_paths = std::sync::Mutex::new(Vec::<(String, String, String)>::new());
             std::thread::scope(|scope| {
                 for _ in 0..workers {
                     scope.spawn(|| loop {
@@ -207,6 +328,9 @@ impl Engine {
                         match self.run_download(&http, &endpoints, action, &rem, sink, cancel) {
                             Ok(dir) => {
                                 done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                if let Ok(mut paths) = ok_paths.lock() {
+                                    paths.push(action.rel().to_string());
+                                }
                                 if let Ok(mut dirs) = dirs.lock() {
                                     dirs.insert(dir);
                                 }
@@ -220,6 +344,13 @@ impl Engine {
                             Err(Error::Cancelled) => break,
                             Err(e) => {
                                 eprintln!("{} failed: {e}", action.rel());
+                                if let Ok(mut paths) = failed_paths.lock() {
+                                    paths.push((
+                                        action.rel().to_string(),
+                                        signature_for(action, &loc, &rem),
+                                        e.to_string(),
+                                    ));
+                                }
                                 if let Ok(mut failures) = failures.lock() {
                                     failures.push(e.to_string());
                                 }
@@ -229,6 +360,18 @@ impl Engine {
                 }
             });
             summary.downloaded += done.load(std::sync::atomic::Ordering::SeqCst);
+            if let Ok(paths) = ok_paths.into_inner() {
+                for path in paths {
+                    let _ = db.clear_failure(&path);
+                }
+            }
+            if let Ok(entries) = failed_paths.into_inner() {
+                for (path, signature, error) in entries {
+                    if !signature.is_empty() {
+                        let _ = db.record_failure(&path, &signature, &error);
+                    }
+                }
+            }
             if let Ok(dirs) = dirs.into_inner() {
                 refresh.extend(dirs);
             }
@@ -254,6 +397,8 @@ impl Engine {
             let done = std::sync::atomic::AtomicU32::new(0);
             let failures = std::sync::Mutex::new(Vec::<String>::new());
             let dirs = std::sync::Mutex::new(BTreeSet::<String>::new());
+            let ok_paths = std::sync::Mutex::new(Vec::<String>::new());
+            let failed_paths = std::sync::Mutex::new(Vec::<(String, String, String)>::new());
             std::thread::scope(|scope| {
                 for _ in 0..workers {
                     scope.spawn(|| loop {
@@ -267,6 +412,9 @@ impl Engine {
                         match self.run_upload(&http, &endpoints, action, &loc, sink, cancel) {
                             Ok(dir) => {
                                 done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                if let Ok(mut paths) = ok_paths.lock() {
+                                    paths.push(action.rel().to_string());
+                                }
                                 if let Ok(mut dirs) = dirs.lock() {
                                     dirs.insert(dir);
                                 }
@@ -280,6 +428,13 @@ impl Engine {
                             Err(Error::Cancelled) => break,
                             Err(e) => {
                                 eprintln!("{} failed: {e}", action.rel());
+                                if let Ok(mut paths) = failed_paths.lock() {
+                                    paths.push((
+                                        action.rel().to_string(),
+                                        signature_for(action, &loc, &rem),
+                                        e.to_string(),
+                                    ));
+                                }
                                 if let Ok(mut failures) = failures.lock() {
                                     failures.push(e.to_string());
                                 }
@@ -289,6 +444,18 @@ impl Engine {
                 }
             });
             summary.uploaded += done.load(std::sync::atomic::Ordering::SeqCst);
+            if let Ok(paths) = ok_paths.into_inner() {
+                for path in paths {
+                    let _ = db.clear_failure(&path);
+                }
+            }
+            if let Ok(entries) = failed_paths.into_inner() {
+                for (path, signature, error) in entries {
+                    if !signature.is_empty() {
+                        let _ = db.record_failure(&path, &signature, &error);
+                    }
+                }
+            }
             if let Ok(dirs) = dirs.into_inner() {
                 refresh.extend(dirs);
             }
@@ -327,31 +494,7 @@ impl Engine {
     }
 
     fn guard_deletes(&self, plan: &[Action], local: &[LocalEntry], db: &StateDb) -> Result<()> {
-        if !self.cfg.delete_guard.enabled {
-            return Ok(());
-        }
-        let deletes = plan.iter().filter(|a| a.is_delete()).count();
-        if deletes == 0 {
-            return Ok(());
-        }
-        let total = plan.len().max(1);
-        let ratio = deletes as f64 / total as f64;
-        let known = db.count()?;
-        let local_tracked = local.len();
-        if known > 0 && local_tracked == 0 {
-            return Err(Error::Safety(
-                "local folder is empty but the journal is not; refusing to delete".into(),
-            ));
-        }
-        if deletes >= self.cfg.delete_guard.min_group
-            && ratio > self.cfg.delete_guard.max_delete_ratio
-        {
-            return Err(Error::Safety(format!(
-                "{deletes} of {total} actions are deletions (limit {:.0}%)",
-                self.cfg.delete_guard.max_delete_ratio * 100.0
-            )));
-        }
-        Ok(())
+        check_delete_guard(&self.cfg.delete_guard, plan, local.len(), db.count()?)
     }
 
     fn run_download(
@@ -585,6 +728,12 @@ impl Engine {
                     .unwrap_or_default();
                 let url = self.url(ep, rel);
                 let dest = self.local_path(rel);
+                if rem.get(rel.as_str()).map(|r| r.is_dir).unwrap_or(false) {
+                    // The remote side is a collection: fetching it with GET
+                    // would return the server's HTML page, not a file.
+                    std::fs::create_dir_all(&dest)?;
+                    return Ok(());
+                }
                 crate::transfer::download(
                     http,
                     &url,
@@ -630,7 +779,13 @@ impl Engine {
 
     /// Read back the authoritative remote state after a transfer.
     /// Refresh every entry of one directory with a single Depth:1 listing.
-    fn refresh_dir(&self, http: &HttpClient, ep: &Endpoints, db: &StateDb, dir: &str) -> Result<()> {
+    fn refresh_dir(
+        &self,
+        http: &HttpClient,
+        ep: &Endpoints,
+        db: &StateDb,
+        dir: &str,
+    ) -> Result<()> {
         let url = if dir.is_empty() {
             ep.remote_root.clone()
         } else {
@@ -705,6 +860,10 @@ impl Engine {
     }
 
     fn local_path(&self, rel: &str) -> PathBuf {
+        // Defence in depth: the planner never emits an unsafe path (discovery
+        // drops them), but a bug upstream must not be able to write outside
+        // the synced folder.
+        debug_assert!(crate::is_safe_rel(rel), "unsafe relative path: {rel:?}");
         self.cfg.local_root.join(rel)
     }
 
@@ -800,6 +959,12 @@ impl Engine {
                     format!("{prefix}/{}", entry.path)
                 };
                 entry.path = rel.clone();
+                if !crate::is_safe_rel(&rel) {
+                    // Never let a server-chosen path leave the synced folder.
+                    log::warn!("ignoring unsafe remote path: {rel:?}");
+                    complete = false;
+                    continue;
+                }
                 if entry.is_dir {
                     queue.push((
                         rel.clone(),

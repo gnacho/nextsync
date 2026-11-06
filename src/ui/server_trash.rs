@@ -216,14 +216,14 @@ fn restore_all(items: Vec<TrashItem>, account: &AccountConfig, parent: &gtk4::Wi
 /// Pure part of the wiring (kept public for tests): whether the trash
 /// entry point applies to a provider.
 pub fn trash_supported(account: &AccountConfig) -> bool {
-    account.provider == crate::nextcloud::driver::Provider::Nextcloud
+    account.provider == crate::nextcloud::provider::Provider::Nextcloud
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::nextcloud::api::TrashItem;
-    use crate::nextcloud::driver::Provider;
+    use crate::nextcloud::provider::Provider;
     use crate::storage::config::AccountConfig;
 
     fn item(filename: &str, original: Option<&str>, deleted: Option<i64>) -> TrashItem {

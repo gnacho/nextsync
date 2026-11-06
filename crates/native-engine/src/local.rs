@@ -92,8 +92,23 @@ fn inode_of(_meta: &std::fs::Metadata) -> u64 {
     0
 }
 
+/// Whether a relative path is outside the sync scope. Shared by the local scan
+/// and the remote listing so both sides agree on what the engine ignores: an
+/// entry missing from one side because it is ignored must never look like a
+/// deletion (#271).
+pub fn ignored(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    excluded(rel, name, is_dir, cfg)
+}
+
 fn excluded(rel: &str, name: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
-    if !cfg.sync_hidden_files && name.starts_with('.') && name != "." {
+    // Check every segment, not just the leaf: when a hidden directory is out
+    // of scope its children are too, and the remote listing still returns them.
+    if !cfg.sync_hidden_files
+        && rel
+            .split('/')
+            .any(|segment| segment.starts_with('.') && segment != ".")
+    {
         return true;
     }
     cfg.exclude_patterns.iter().any(|p| {
@@ -186,5 +201,32 @@ mod tests {
         assert!(matches_pattern("build*", "build-x"));
         assert!(!matches_pattern("*.tmp", "a.txt"));
         assert!(matches_pattern("a?c", "abc"));
+    }
+
+    #[test]
+    fn ignored_hidden_entries_and_their_children() {
+        let mut config = cfg(Path::new("/tmp/nothing"));
+        config.sync_hidden_files = false;
+        assert!(ignored(".comments/x.xml", false, &config));
+        assert!(ignored(".nextsync/state.db", false, &config));
+        assert!(ignored(".mediaartlocal", true, &config));
+        assert!(!ignored("Documents/notes.md", false, &config));
+        assert!(!ignored(
+            "a/.hidden/b.txt",
+            false,
+            &EngineConfig {
+                sync_hidden_files: true,
+                ..config.clone()
+            }
+        ));
+    }
+
+    #[test]
+    fn ignored_entries_follow_exclude_patterns() {
+        let mut config = cfg(Path::new("/tmp/nothing"));
+        config.exclude_patterns = vec!["*.tmp".to_string(), "build".to_string()];
+        assert!(ignored("a/b.tmp", false, &config));
+        assert!(ignored("build", true, &config));
+        assert!(!ignored("a/b.txt", false, &config));
     }
 }

@@ -4,7 +4,7 @@ use crate::Result;
 use rusqlite::{params, Connection};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbEntry {
@@ -46,6 +46,19 @@ impl StateDb {
             )?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
+        // Retry blacklist: a transfer that keeps failing must not be retried
+        // on every single run, or it burns the whole pass. The official engine
+        // blacklists an item after three consecutive errors
+        // (nc-desktop src/libsync/syncengine.cpp, checkErrorBlacklisting).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS failures(
+                path TEXT PRIMARY KEY,
+                signature TEXT NOT NULL,
+                attempts INTEGER NOT NULL,
+                last_error TEXT NOT NULL,
+                at INTEGER NOT NULL
+            );",
+        )?;
         Ok(Self { conn })
     }
 
@@ -128,6 +141,57 @@ impl StateDb {
         self.conn.execute(
             "INSERT INTO meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=?2",
             params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// A transfer that keeps failing is retried up to `attempts` runs and then
+    /// left alone until its signature changes (`#266`-style blacklisting).
+    pub fn failure_attempts(&self, path: &str, signature: &str) -> Result<u32> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT attempts, signature FROM failures WHERE path = ?1")?;
+        let mut rows = stmt.query(params![path])?;
+        match rows.next()? {
+            Some(row) => {
+                let attempts: i64 = row.get(0)?;
+                let stored: String = row.get(1)?;
+                // A different version of the file gets a fresh chance.
+                if stored != signature {
+                    return Ok(0);
+                }
+                Ok(attempts.max(0) as u32)
+            }
+            None => Ok(0),
+        }
+    }
+
+    pub fn record_failure(&self, path: &str, signature: &str, error: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO failures(path, signature, attempts, last_error, at)
+             VALUES(?1, ?2, 1, ?3, ?4)
+             ON CONFLICT(path) DO UPDATE SET
+                attempts = CASE WHEN failures.signature = ?2 THEN failures.attempts + 1 ELSE 1 END,
+                signature = ?2,
+                last_error = ?3,
+                at = ?4",
+            params![path, signature, error, crate::http::now_epoch()],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_failure(&self, path: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM failures WHERE path = ?1", params![path])?;
+        Ok(())
+    }
+
+    /// Drop blacklist rows for a path and everything below it: a directory that
+    /// disappeared must not keep its children blacklisted forever.
+    pub fn clear_failures_under(&self, path: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM failures WHERE path = ?1 OR path LIKE ?2",
+            params![path, format!("{path}/%")],
         )?;
         Ok(())
     }
