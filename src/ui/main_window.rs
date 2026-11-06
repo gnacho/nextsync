@@ -1366,6 +1366,12 @@ impl MainWindow {
         // Issue #182: paths are grouped by their top-level directory so a
         // mass cleanup (a removed SDK, virtualenv or build cache) shows a
         // handful of expandable groups instead of a wall of paths.
+        let folder_config = account
+            .folders
+            .iter()
+            .find(|candidate| candidate.id == folder_id)
+            .cloned();
+        let mut presence = crate::ui::deletion_presence::PresenceJob::new();
         if !missing.is_empty() {
             const DELETION_LIST_MAX: usize = 50;
             let list = gtk4::ListBox::builder()
@@ -1381,12 +1387,13 @@ impl MainWindow {
                 const LOOSE_PREVIEW_CAP: usize = 15;
                 let mut loose_count = 0usize;
                 let mut loose_preview: Vec<String> = Vec::new();
+                let mut loose_all: Vec<String> = Vec::new();
                 for row in &review_rows {
                     match row {
                         crate::core::delete_guard::DeletionReviewRow::Group {
                             prefix,
                             count,
-                            ..
+                            paths,
                         } => {
                             let group_row = libadwaita::ExpanderRow::builder()
                                 .title(prefix)
@@ -1398,11 +1405,13 @@ impl MainWindow {
                             group_row.add_prefix(&gtk4::Image::from_icon_name("folder-symbolic"));
                             group_row.set_enable_expansion(false);
                             list.append(&group_row);
+                            presence.add_group(paths.clone(), &group_row);
                         }
                         crate::core::delete_guard::DeletionReviewRow::File(path) => {
                             if loose_preview.len() < LOOSE_PREVIEW_CAP {
                                 loose_preview.push(path.clone());
                             }
+                            loose_all.push(path.clone());
                             loose_count += 1;
                         }
                     }
@@ -1422,7 +1431,9 @@ impl MainWindow {
                             .selectable(false)
                             .build();
                         loose_row.add_row(&child);
+                        presence.add_row(path, &child);
                     }
+                    presence.add_group(loose_all, &loose_row);
                     if loose_count > LOOSE_PREVIEW_CAP {
                         let more =
                             libadwaita::ActionRow::builder()
@@ -1473,6 +1484,7 @@ impl MainWindow {
                                     .selectable(false)
                                     .build();
                                 group_row.add_row(&child);
+                                presence.add_row(path, &child);
                                 shown_children += 1;
                             }
                             if paths.len() > GROUP_CHILD_CAP {
@@ -1487,6 +1499,7 @@ impl MainWindow {
                                 group_row.add_row(&more);
                             }
                             list.append(&group_row);
+                            presence.add_group(paths.clone(), &group_row);
                             shown_rows += 1;
                         }
                         crate::core::delete_guard::DeletionReviewRow::File(path) => {
@@ -1496,6 +1509,7 @@ impl MainWindow {
                                 .selectable(false)
                                 .build();
                             list.append(&row);
+                            presence.add_row(path, &row);
                             shown_rows += 1;
                         }
                     }
@@ -1561,6 +1575,9 @@ impl MainWindow {
             _ => {}
         });
         MainWindow::present_modal_dialog(&dialog, &self.window);
+        if let Some(folder_config) = folder_config {
+            presence.start(&account, &folder_config);
+        }
     }
 
     /// Build the Settings callbacks against this window's shared cell.

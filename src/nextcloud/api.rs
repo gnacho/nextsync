@@ -500,6 +500,65 @@ impl NextcloudApi {
         Ok(parse_root_etag(&response.body))
     }
 
+    /// Whether one path inside a synced folder still exists on the server
+    /// (issue #294).
+    ///
+    /// The deletion review lists local paths that the remote listing no
+    /// longer has. A `Depth: 0` PROPFIND per path separates "still there"
+    /// from "already gone", which is what the dialog needs before naming the
+    /// outcome of each row. `404` means gone. Auth failures keep their
+    /// [`ApiError`] so the caller can stop the whole check instead of
+    /// painting every row as gone.
+    pub fn path_exists(
+        &self,
+        server: &str,
+        username: &str,
+        password: &str,
+        remote_path: &str,
+        rel_path: &str,
+    ) -> Result<bool, ApiError> {
+        let url = join_dav_path(&dav_base(server, username), remote_path, rel_path);
+        self.dav_path_exists(&url, username, password)
+    }
+
+    /// Same probe for an OpenCloud space. `remote_path` is the optional
+    /// subfolder the engine maps inside the space (as in
+    /// [`Self::probe_opencloud_space`]). An empty `space_id` is rejected with
+    /// a `400`-style error: there is nothing to probe.
+    pub fn opencloud_path_exists(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+        space_id: &str,
+        remote_path: &str,
+        rel_path: &str,
+    ) -> Result<bool, ApiError> {
+        if space_id.trim_matches('/').is_empty() {
+            return Err(ApiError::Http { status: 400 });
+        }
+        let url = join_dav_path(&opencloud_dav_root(server, space_id), remote_path, rel_path);
+        self.dav_path_exists(&url, username, token)
+    }
+
+    /// Shared `Depth: 0` probe behind both `*_path_exists` helpers.
+    fn dav_path_exists(&self, url: &str, username: &str, secret: &str) -> Result<bool, ApiError> {
+        let authorization = basic_authorization(username, secret);
+        let headers = [
+            ("Depth", "0"),
+            ("Content-Type", "application/xml; charset=utf-8"),
+            ("Authorization", authorization.as_str()),
+        ];
+        let response = self
+            .http
+            .request("PROPFIND", url, &headers, Some(PROPFIND_ETAG_BODY))?;
+        if response.status == 404 {
+            return Ok(false);
+        }
+        map_status(response.status)?;
+        Ok(true)
+    }
+
     /// Estimate the total size in bytes of a remote folder (issue #36).
     ///
     /// A single `PROPFIND` with `Depth: infinity` asks the server to walk
@@ -1106,6 +1165,23 @@ fn dav_base(server: &str, username: &str) -> String {
         server.trim_end_matches('/'),
         percent_encode_path(username)
     )
+}
+
+/// Root of the WebDAV tree of one OpenCloud space.
+fn opencloud_dav_root(server: &str, space_id: &str) -> String {
+    format!(
+        "{}/remote.php/dav/spaces/{}",
+        server.trim_end_matches('/'),
+        percent_encode_path(space_id.trim_matches('/'))
+    )
+}
+
+/// URL of one relative path inside a synced folder: the account (or space)
+/// root, the configured folder path and the relative path, each encoded once.
+fn join_dav_path(root: &str, remote_path: &str, rel_path: &str) -> String {
+    let folder = percent_encode_path(remote_path.trim_end_matches('/'));
+    let relative = percent_encode_path(rel_path.trim_start_matches('/'));
+    format!("{root}{folder}/{relative}")
 }
 
 /// `Basic base64(user:pass)` header value (same as the Python
@@ -1735,6 +1811,108 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    // ---- path_exists (issue #294) -------------------------------------------
+
+    #[test]
+    fn path_exists_true_on_multistatus() {
+        let http = FakeHttp::new(207, ROOT_ETAG_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        let exists = api
+            .path_exists(
+                "https://cloud.example.com",
+                "alice",
+                "secret",
+                "/Documents",
+                "SDK/bin tool",
+            )
+            .unwrap();
+        assert!(exists);
+        let request = &requests.borrow()[0];
+        assert_eq!(request.method, "PROPFIND");
+        assert_eq!(
+            request.url,
+            "https://cloud.example.com/remote.php/dav/files/alice/Documents/SDK/bin%20tool"
+        );
+        assert_eq!(header_value(request, "Depth"), Some("0"));
+    }
+
+    #[test]
+    fn path_exists_false_on_404() {
+        let http = FakeHttp::new(404, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(!api
+            .path_exists(
+                "https://cloud.example.com",
+                "alice",
+                "secret",
+                "",
+                "gone.txt"
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn path_exists_maps_auth_rejection() {
+        let http = FakeHttp::new(401, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.path_exists(
+                "https://cloud.example.com",
+                "alice",
+                "secret",
+                "/Documents",
+                "a.txt"
+            ),
+            Err(ApiError::AuthRejected)
+        );
+    }
+
+    #[test]
+    fn path_exists_keeps_other_http_errors() {
+        let http = FakeHttp::new(500, b"");
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.path_exists("https://cloud.example.com", "alice", "secret", "", "a.txt"),
+            Err(ApiError::Http { status: 500 })
+        );
+    }
+
+    #[test]
+    fn opencloud_path_exists_uses_the_space_root() {
+        let http = FakeHttp::new(207, ROOT_ETAG_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(api
+            .opencloud_path_exists(
+                "https://cloud.example.com/",
+                "alice",
+                "token",
+                "1284d238-aa92-42ce-bdc4-426446b3c735",
+                "/Projects",
+                "notes.txt",
+            )
+            .unwrap());
+        let request = &requests.borrow()[0];
+        assert_eq!(
+            request.url,
+            "https://cloud.example.com/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/Projects/notes.txt"
+        );
+        assert_eq!(header_value(request, "Depth"), Some("0"));
+    }
+
+    #[test]
+    fn opencloud_path_exists_rejects_empty_space() {
+        let http = FakeHttp::new(207, ROOT_ETAG_PROPFIND);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.opencloud_path_exists("https://cloud.example.com", "alice", "token", "/", "", "a"),
+            Err(ApiError::Http { status: 400 })
+        );
+        assert!(requests.borrow().is_empty());
     }
 
     #[test]
