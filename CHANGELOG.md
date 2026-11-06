@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.10] - 2026-11-06
+
+### Added
+
+- The Remote Changes group shows the state of the push channel, so a server without notify_push no longer leaves the user guessing why push is silent (#283).
+
 ## [0.43.8] - 2026-11-06
 
 ### Fixed
