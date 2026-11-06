@@ -91,7 +91,15 @@ pub fn download(
             && total >= multipart_threshold
             && ranges_supported(client, url)
         {
-            try_download_ranges(client, url, &tmp, total, multipart_streams, &mut reporter)
+            try_download_ranges(
+                client,
+                url,
+                &tmp,
+                total,
+                multipart_streams,
+                expected_etag,
+                &mut reporter,
+            )
         } else {
             try_download(client, url, &tmp, expected_etag, &mut reporter)
         };
@@ -117,6 +125,7 @@ pub fn download(
                 // The download is finished: the range bookkeeping is stale
                 // and, left behind, it would upload as a stray file (#272).
                 let _ = std::fs::remove_file(ranges_sidecar(&tmp));
+                let _ = std::fs::remove_file(version_sidecar(&tmp));
                 return Ok(());
             }
             Err(e) => {
@@ -146,9 +155,14 @@ fn try_download_ranges(
     tmp: &Path,
     total: u64,
     streams: u32,
+    expected_etag: Option<&str>,
     reporter: &mut ProgressReporter,
 ) -> Result<()> {
     let plan = split_ranges(total, streams);
+    // Bytes from another version of the file must never be mixed in (#272).
+    if version_of(tmp).as_deref() != expected_etag {
+        discard_part(tmp);
+    }
     let done = completed_ranges(tmp);
     let file = std::fs::OpenOptions::new()
         .create(true)
@@ -157,6 +171,7 @@ fn try_download_ranges(
         .write(true)
         .open(tmp)?;
     file.set_len(total)?;
+    remember_version(tmp, expected_etag)?;
 
     let mut already = 0u64;
     for range in &plan {
@@ -377,15 +392,12 @@ fn backoff(attempt: u32) {
 fn discard_part(part: &Path) {
     let _ = std::fs::remove_file(part);
     let _ = std::fs::remove_file(ranges_sidecar(part));
+    let _ = std::fs::remove_file(version_sidecar(part));
 }
 
 fn temp_path(dest: &Path) -> PathBuf {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
     let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{n}.part"));
+    name.push(".part");
     dest.with_file_name(name)
 }
 
@@ -727,13 +739,13 @@ mod tests {
     }
 
     #[test]
-    fn temp_path_keeps_extension_and_is_unique() {
+    fn temp_path_is_stable_so_a_restart_can_resume() {
         let p = Path::new("/tmp/foto.jpg");
         let t = temp_path(p);
         let name = t.file_name().unwrap().to_string_lossy().to_string();
-        assert!(name.starts_with("foto.jpg."));
+        assert!(name.starts_with("foto.jpg"));
         assert!(name.ends_with(".part"));
-        assert_ne!(t, temp_path(p));
+        assert_eq!(t, temp_path(p));
     }
 
     #[test]
@@ -908,6 +920,24 @@ fn ranges_sidecar(part: &std::path::Path) -> std::path::PathBuf {
     let mut name = part.as_os_str().to_owned();
     name.push(".ranges");
     std::path::PathBuf::from(name)
+}
+
+/// The etag a part file was started from, so a restart does not mix versions
+/// of the same file (issue #272).
+fn version_sidecar(part: &std::path::Path) -> std::path::PathBuf {
+    let mut name = part.as_os_str().to_owned();
+    name.push(".etag");
+    std::path::PathBuf::from(name)
+}
+
+fn version_of(part: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(version_sidecar(part))
+        .ok()
+        .map(|value| value.trim().to_string())
+}
+
+fn remember_version(part: &std::path::Path, etag: Option<&str>) -> std::io::Result<()> {
+    std::fs::write(version_sidecar(part), etag.unwrap_or_default())
 }
 
 #[cfg(test)]

@@ -102,6 +102,15 @@ pub fn ignored(rel: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
 }
 
 fn excluded(rel: &str, name: &str, is_dir: bool, cfg: &EngineConfig) -> bool {
+    // The engine's own download artefacts must never pass for user files
+    // (issue #272): a part file, its range bookkeeping and its version marker.
+    if !is_dir
+        && (name.ends_with(".part")
+            || name.ends_with(".part.ranges")
+            || name.ends_with(".part.etag"))
+    {
+        return true;
+    }
     // Check every segment, not just the leaf: when a hidden directory is out
     // of scope its children are too, and the remote listing still returns them.
     if !cfg.sync_hidden_files
@@ -201,6 +210,21 @@ mod tests {
         assert!(matches_pattern("build*", "build-x"));
         assert!(!matches_pattern("*.tmp", "a.txt"));
         assert!(matches_pattern("a?c", "abc"));
+    }
+
+    #[test]
+    fn engine_temp_files_are_never_synced() {
+        let config = cfg(Path::new("/tmp/nothing"));
+        for name in [
+            "foto.jpg.part",
+            "foto.jpg.part.ranges",
+            "foto.jpg.part.etag",
+            "a/b/video.mp4.part",
+        ] {
+            assert!(ignored(name, false, &config), "{name} must be ignored");
+        }
+        assert!(!ignored("foto.jpg", false, &config));
+        assert!(!ignored("part", false, &config));
     }
 
     #[test]
