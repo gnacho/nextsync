@@ -75,7 +75,7 @@ La reescritura en Rust llegó por razones prácticas: varias cuentas y varios pr
 | Nextcloud | Nativo, en proceso | Login Flow v2 en el navegador, o contraseña de aplicación |
 | OpenCloud | Nativo, en proceso | Contraseña de aplicación desde la web del servidor |
 
-Los dos proveedores pasan por el mismo motor, así que uno nuevo es una capa pequeña de proveedor, no un cambio de arquitectura. El modo heredado sigue disponible por carpeta: un interruptor en Ajustes delega esa carpeta a `nextcloudcmd` o `opencloudcmd` cuando alguno de esos clientes está instalado, para comparar o como salida de emergencia. Las notificaciones push del servidor (`notify_push`) aplican a Nextcloud; las cuentas sin push recurren a un intervalo de sondeo.
+Los dos proveedores pasan por el mismo motor, así que uno nuevo es una capa pequeña de proveedor, no un cambio de arquitectura. El motor nativo es el único: no hay interruptor por carpeta ni cliente externo que instalar. Las notificaciones push del servidor (`notify_push`) aplican a Nextcloud; las cuentas sin push recurren a un intervalo de sondeo.
 
 ## Limitaciones
 
@@ -95,7 +95,7 @@ Descarga el `.pkg.tar.zst` de la [última release](https://github.com/gnacho/nex
 sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
 ```
 
-El paquete depende de `gtk4` y `libadwaita`. Trae su propio motor de sincronización, así que no hace falta ningún cliente externo. Los paquetes opcionales `nextcloud-client` y `opencloud-desktop` solo sirven si quieres pasar una carpeta a modo heredado.
+El paquete depende de `gtk4` y `libadwaita`. Trae su propio motor de sincronización, así que no hace falta ningún cliente externo. Los clientes externos no hacen ninguna falta.
 
 ### Desde el código fuente
 

@@ -75,7 +75,7 @@ The rewrite in Rust happened for practical reasons: several accounts and several
 | Nextcloud | Native, in process | Login Flow v2 in your browser, or app password |
 | OpenCloud | Native, in process | App password from the server web UI |
 
-Both providers go through the same engine, so a new one is a small provider layer, not an architecture change. Legacy mode is still there per folder: a switch in Settings delegates that folder to `nextcloudcmd` or `opencloudcmd` when one of those clients is installed, for comparison or as an escape hatch. Server push notifications (`notify_push`) apply to Nextcloud; accounts without push fall back to a polling interval.
+Both providers go through the same engine, so a new one is a small provider layer, not an architecture change. The native engine is the only one: there is no per-folder switch and no external client to install. Server push notifications (`notify_push`) apply to Nextcloud; accounts without push fall back to a polling interval.
 
 ## Limitations
 
@@ -95,7 +95,7 @@ Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/
 sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
 ```
 
-The package depends on `gtk4` and `libadwaita`. It brings its own sync engine, so no external client is required. The optional `nextcloud-client` and `opencloud-desktop` packages are only useful if you want to switch a folder to legacy mode.
+The package depends on `gtk4` and `libadwaita`. It brings its own sync engine, so no external client is required. The external clients are not needed at all.
 
 ### From source
 
