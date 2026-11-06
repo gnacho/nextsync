@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.43.6",
+  "version": "0.43.8",
   "mandatory": false,
   "summary": "Native sync engine: Nextcloud and OpenCloud synchronize without nextcloudcmd or opencloudcmd.",
   "changelog": [
