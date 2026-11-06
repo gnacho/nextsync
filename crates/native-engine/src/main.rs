@@ -11,8 +11,8 @@ impl ProgressSink for Printer {
     }
 }
 
-fn main() {
-    let mut args = std::env::args().skip(1);
+fn parse_args<I: Iterator<Item = String>>(args: I) -> (Vec<(String, String)>, Vec<String>) {
+    let mut args = args;
     let mut opts: Vec<(String, String)> = Vec::new();
     let mut flags: Vec<String> = Vec::new();
     while let Some(arg) = args.next() {
@@ -30,6 +30,17 @@ fn main() {
             }
         }
     }
+    (opts, flags)
+}
+
+fn opt_db_path(opts: &[(String, String)]) -> Option<std::path::PathBuf> {
+    opts.iter()
+        .find(|(k, _)| k == "db-path")
+        .map(|(_, v)| std::path::PathBuf::from(v))
+}
+
+fn main() {
+    let (opts, flags) = parse_args(std::env::args().skip(1));
     let get = |k: &str| {
         opts.iter()
             .find(|(key, _)| key == k)
@@ -37,7 +48,7 @@ fn main() {
     };
     if flags.iter().any(|f| f == "help") {
         println!(
-            "native-engine-cli --provider nextcloud|opencloud --url URL --user U --password P \\\n  --local DIR [--remote PATH] [--space-id ID] [--dry-run] [--exclude PATTERN]... \\\n  [--no-hidden] [--insecure] [--proxy URL] [--max-retries N]"
+            "native-engine-cli --provider nextcloud|opencloud --url URL --user U --password P \\\n  --local DIR [--remote PATH] [--space-id ID] [--dry-run] [--exclude PATTERN]... \\\n  [--no-hidden] [--insecure] [--proxy URL] [--max-retries N] [--db-path FILE]"
         );
         return;
     }
@@ -83,6 +94,7 @@ fn main() {
         .map(|(_, v)| v.clone())
         .collect();
     cfg.timeout = Duration::from_secs(120);
+    cfg.db_path = opt_db_path(&opts);
 
     match Engine::new(cfg).run(&Printer, &CancelToken::new()) {
         Ok(summary) => {
@@ -105,4 +117,42 @@ fn print_summary(s: &SyncSummary) {
         "actions={} downloaded={} uploaded={} deleted_local={} deleted_remote={} conflicts={} errors={}",
         s.actions, s.downloaded, s.uploaded, s.deleted_local, s.deleted_remote, s.conflicts, s.errors
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{opt_db_path, parse_args};
+
+    fn args(items: &[&str]) -> std::vec::IntoIter<String> {
+        items
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    #[test]
+    fn a_separate_journal_path_reaches_the_config() {
+        let (opts, flags) = parse_args(args(&["--dry-run", "--db-path", "/tmp/scratch.db"]));
+        assert_eq!(
+            opt_db_path(&opts),
+            Some(std::path::PathBuf::from("/tmp/scratch.db"))
+        );
+        assert!(flags.iter().any(|f| f == "dry-run"));
+    }
+
+    #[test]
+    fn a_separate_journal_path_also_accepts_the_equals_form() {
+        let (opts, _) = parse_args(args(&["--db-path=/tmp/other.db"]));
+        assert_eq!(
+            opt_db_path(&opts),
+            Some(std::path::PathBuf::from("/tmp/other.db"))
+        );
+    }
+
+    #[test]
+    fn without_the_flag_the_engine_keeps_using_the_folder_journal() {
+        let (opts, _) = parse_args(args(&["--local", "/home/u/Fotos"]));
+        assert_eq!(opt_db_path(&opts), None);
+    }
 }
