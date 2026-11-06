@@ -738,3 +738,87 @@ mod chunk_resume_tests {
         let _ = client.delete(&dest);
     }
 }
+
+/// Split `size` bytes into the ranges a parallel download requests (#272).
+/// Ranges are contiguous and cover the whole file; the last one takes the
+/// remainder so no byte is left out.
+pub fn split_ranges(size: u64, streams: u32) -> Vec<(u64, u64)> {
+    if size == 0 {
+        return Vec::new();
+    }
+    let streams = u64::from(streams.max(1)).min(size);
+    let chunk = size / streams;
+    let mut out = Vec::with_capacity(streams as usize);
+    let mut start = 0;
+    for index in 0..streams {
+        let end = if index + 1 == streams {
+            size - 1
+        } else {
+            start + chunk - 1
+        };
+        out.push((start, end));
+        start = end + 1;
+    }
+    out
+}
+
+/// Ranges already written into `part`, read from its `<part>.ranges` sidecar.
+/// A missing or unreadable sidecar means nothing was finished yet.
+pub fn completed_ranges(part: &std::path::Path) -> Vec<(u64, u64)> {
+    let Ok(text) = std::fs::read_to_string(ranges_sidecar(part)) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| {
+            let (start, end) = line.split_once('-')?;
+            Some((start.parse().ok()?, end.parse().ok()?))
+        })
+        .collect()
+}
+
+/// Remember a finished range so a restart does not fetch it again (#272).
+pub fn mark_range_complete(part: &std::path::Path, range: (u64, u64)) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(ranges_sidecar(part))?;
+    writeln!(file, "{}-{}", range.0, range.1)
+}
+
+fn ranges_sidecar(part: &std::path::Path) -> std::path::PathBuf {
+    let mut name = part.as_os_str().to_owned();
+    name.push(".ranges");
+    std::path::PathBuf::from(name)
+}
+
+#[cfg(test)]
+mod multipart_download_tests {
+    use super::{completed_ranges, mark_range_complete, split_ranges};
+
+    #[test]
+    fn ranges_cover_the_whole_file_once() {
+        assert_eq!(split_ranges(10, 3), vec![(0, 2), (3, 5), (6, 9)]);
+        assert_eq!(split_ranges(1, 4), vec![(0, 0)]);
+        assert!(split_ranges(0, 4).is_empty());
+        let covered: u64 = split_ranges(1_000_000, 7)
+            .iter()
+            .map(|(start, end)| end - start + 1)
+            .sum();
+        assert_eq!(covered, 1_000_000);
+    }
+
+    #[test]
+    fn a_finished_range_survives_in_the_sidecar() {
+        let dir = std::env::temp_dir().join(format!("nextsync-ranges-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("file.part");
+        assert!(completed_ranges(&part).is_empty());
+
+        mark_range_complete(&part, (0, 99)).unwrap();
+        mark_range_complete(&part, (100, 199)).unwrap();
+
+        assert_eq!(completed_ranges(&part), vec![(0, 99), (100, 199)]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
