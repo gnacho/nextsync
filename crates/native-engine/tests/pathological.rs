@@ -6,7 +6,9 @@
 //! the scanner, without any network, so they run everywhere.
 
 use native_engine::db::DbEntry;
-use native_engine::engine::{check_delete_guard, filter_blacklisted, BLACKLIST_AFTER};
+use native_engine::engine::{
+    accept_remote_entry, check_delete_guard, filter_blacklisted, BLACKLIST_AFTER,
+};
 use native_engine::http::RemoteEntry;
 use native_engine::local::{scan_local, LocalEntry};
 use native_engine::reconcile::{reconcile, Action};
@@ -565,4 +567,70 @@ fn conflicts_never_rename_a_directory_tree() {
     assert!(native_engine::engine::conflict_may_rename(
         &tmp.path().join("ausente.txt")
     ));
+}
+
+/// Issue #271: discovery must drop remote entries the local scan never
+/// produces. Otherwise every hidden or excluded file that only exists on the
+/// server is planned as a local deletion and destroyed there.
+#[test]
+fn remote_entries_the_local_scan_never_yields_are_rejected() {
+    let root = std::env::temp_dir();
+    let mut cfg = config(&root);
+    cfg.sync_hidden_files = false;
+    cfg.exclude_patterns = vec!["*.tmp".into(), "Cache/".into()];
+
+    assert!(!accept_remote_entry(".comments", true, &cfg));
+    assert!(!accept_remote_entry(".comments/note.xml", false, &cfg));
+    assert!(!accept_remote_entry("a/.hidden/b.txt", false, &cfg));
+    assert!(!accept_remote_entry("Fotos/scratch.tmp", false, &cfg));
+    assert!(!accept_remote_entry("Cache", true, &cfg));
+
+    assert!(accept_remote_entry("Fotos", true, &cfg));
+    assert!(accept_remote_entry("Fotos/IMG_1.jpg", false, &cfg));
+    assert!(accept_remote_entry("Fotos/.hidden", false, &cfg) == cfg.sync_hidden_files);
+}
+
+/// The same predicate must accept hidden paths when the user asked for them.
+#[test]
+fn hidden_remote_entries_are_kept_when_hidden_files_are_enabled() {
+    let root = std::env::temp_dir();
+    let mut cfg = config(&root);
+    cfg.sync_hidden_files = true;
+
+    assert!(accept_remote_entry(".comments", true, &cfg));
+    assert!(accept_remote_entry("a/.hidden/b.txt", false, &cfg));
+}
+
+/// Issue #271: a hidden entry that the journal remembers but the local scan
+/// no longer yields looks like a local deletion, so reconciliation asks the
+/// server to delete it. Filtering the remote walk with the same predicate the
+/// local scan uses keeps it out of the plan.
+#[test]
+fn a_journaled_hidden_entry_is_never_deleted_from_the_server() {
+    let cfg = config(&std::env::temp_dir());
+    let local_entries = [local("visible.txt", false, 10, 100)];
+    let remote_entries = [
+        remote(".comments", true, 0, "\"d1\""),
+        remote("visible.txt", false, 10, "\"e1\""),
+    ];
+    let journal_entries = [
+        journal(".comments", true, 0, 100, "\"d1\""),
+        journal("visible.txt", false, 10, 100, "\"e1\""),
+    ];
+
+    // Without the filter the hidden directory is planned as a server deletion:
+    // this is the behaviour that wiped 210 real files in production.
+    let unfiltered = reconcile(&local_entries, &remote_entries, &journal_entries, true);
+    assert_eq!(deletes(&unfiltered), 1);
+
+    let filtered: Vec<RemoteEntry> = [(".comments", true), ("visible.txt", false)]
+        .into_iter()
+        .filter(|(rel, is_dir)| accept_remote_entry(rel, *is_dir, &cfg))
+        .map(|(rel, is_dir)| {
+            let etag = if is_dir { "\"d1\"" } else { "\"e1\"" };
+            remote(rel, is_dir, 0, etag)
+        })
+        .collect();
+    let plan = reconcile(&local_entries, &filtered, &journal_entries, true);
+    assert_eq!(deletes(&plan), 0);
 }
