@@ -429,6 +429,11 @@ mod tests {
     use super::*;
 
     const TEST_ACCOUNT: &str = "5fcc57b6eeae77370e1f1b1a1a608d97511bab8cf29c0e02beabeb3e9a393592";
+    // Each keyring test owns its own account id: they delete the item at the
+    // start and in their cleanup, so a shared id makes them delete each
+    // other's secret when cargo runs them in parallel threads.
+    const TEST_LEGACY_ACCOUNT: &str =
+        "4d1c8f2a6b9e0d3c7a5f1b8e2d6c9a4f0b3e7d1c5a8f2b6e9d4c0a3f7b1e5d8c";
     const TEST_PASSWORD: &str = "correct-horse-battery-staple";
     const TEST_LEGACY_SERVER: &str = "https://legacy-unit-test.example.net";
     const TEST_LEGACY_LOGIN: &str = "legacy-unit-test@example.net";
@@ -497,7 +502,7 @@ mod tests {
                     }
                 }
             }
-            let _ = CredentialsStore::delete(TEST_ACCOUNT);
+            let _ = CredentialsStore::delete(TEST_LEGACY_ACCOUNT);
         }
     }
 
@@ -514,7 +519,7 @@ mod tests {
         }
         let _guard = LegacyCleanup;
 
-        let _ = CredentialsStore::delete(TEST_ACCOUNT);
+        let _ = CredentialsStore::delete(TEST_LEGACY_ACCOUNT);
         let service = SecretService::connect(EncryptionType::Dh).expect("connect");
         let collection = collection(&service).expect("collection");
         collection
@@ -532,12 +537,12 @@ mod tests {
 
         // No Rust-key item yet: the fallback must find the legacy secret.
         let resolved =
-            CredentialsStore::get_for_account(TEST_ACCOUNT, TEST_LEGACY_SERVER, TEST_LEGACY_LOGIN)
+            CredentialsStore::get_for_account(TEST_LEGACY_ACCOUNT, TEST_LEGACY_SERVER, TEST_LEGACY_LOGIN)
                 .expect("get_for_account should succeed");
         assert_eq!(resolved.as_deref(), Some(TEST_PASSWORD));
 
         // The legacy hit must have been adopted under `account_id`.
-        let adopted = CredentialsStore::get(TEST_ACCOUNT).expect("get should succeed");
+        let adopted = CredentialsStore::get(TEST_LEGACY_ACCOUNT).expect("get should succeed");
         assert_eq!(adopted.as_deref(), Some(TEST_PASSWORD));
 
         // The legacy item itself must survive for the Python app.
