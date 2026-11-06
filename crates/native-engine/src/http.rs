@@ -149,6 +149,23 @@ impl HttpClient {
     /// GET that may resume: sends `Range: bytes=<offset>-` when `offset > 0`.
     /// Returns the reader plus the status so the caller can tell 206 (resumed)
     /// from 200 (server ignored the range and restarted).
+    /// GET one byte range (`Range: bytes=start-end`). The status is returned
+    /// untouched: 206 means the server honoured the range, 200 means it sent
+    /// the whole file and the caller must fall back to a single stream
+    /// (issue #272).
+    pub fn get_range(
+        &self,
+        url: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<(Box<dyn Read + Send>, u16)> {
+        let range = format!("bytes={start}-{end}");
+        let resp = self.request("GET", url, &[("Range", range.as_str())], None)?;
+        let status = resp.status().as_u16();
+        self.check(&resp, url)?;
+        Ok((Box::new(resp.into_body().into_reader()), status))
+    }
+
     pub fn get_reader_from(&self, url: &str, offset: u64) -> Result<(Box<dyn Read + Send>, u16)> {
         let range;
         let headers: &[(&str, &str)] = if offset > 0 {
