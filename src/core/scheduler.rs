@@ -105,7 +105,11 @@ pub trait SyncRunner {
     /// Begin a reconciliation for the given reasons. `on_finished` must be
     /// invoked exactly once when the run ends, and never synchronously from
     /// inside `start`.
-    fn start(&mut self, reasons: &[Trigger], on_finished: Box<dyn FnOnce(SyncOutcome) + 'static>);
+    fn start(
+        &mut self,
+        reasons: &[Trigger],
+        on_finished: Box<dyn FnOnce(SyncOutcome, u64) + 'static>,
+    );
 
     /// Cancel a running reconciliation (best effort).
     fn cancel(&mut self) {}
@@ -875,16 +879,16 @@ impl SchedulerInner {
         let weak = self.self_ref.clone();
         self.runner.start(
             &reasons,
-            Box::new(move |outcome| {
+            Box::new(move |outcome, deleted_local| {
                 if let Some(inner) = weak.upgrade() {
-                    inner.borrow_mut().finished(outcome);
+                    inner.borrow_mut().finished(outcome, deleted_local);
                 }
             }),
         );
         StartAttempt::Ran
     }
 
-    fn finished(&mut self, outcome: SyncOutcome) {
+    fn finished(&mut self, outcome: SyncOutcome, deleted_local: u64) {
         if self.stopped {
             return;
         }
@@ -975,7 +979,11 @@ impl SchedulerInner {
         // Fase 3: after a successful run the guard baseline is refreshed so
         // it reflects what the run just reconciled (Python: only for
         // `result.successful`, which covers conflicts too).
-        if matches!(outcome, SyncOutcome::Success | SyncOutcome::Conflict)
+        // Issue #276: a run that mirrored server deletions and then failed
+        // leaves a stale baseline, so the next run reports a mass local
+        // deletion that never happened. Those deletions are already applied,
+        // so the baseline may move even when the run failed.
+        if (matches!(outcome, SyncOutcome::Success | SyncOutcome::Conflict) || deleted_local > 0)
             && self.delete_alert.is_none()
         {
             if let Some(guard) = &mut self.guard {
@@ -1425,12 +1433,12 @@ mod tests {
     struct FakeRunnerState {
         start_calls: usize,
         reasons: Vec<Vec<Trigger>>,
-        pending: Option<Box<dyn FnOnce(SyncOutcome)>>,
+        pending: Option<Box<dyn FnOnce(SyncOutcome, u64)>>,
         cancelled: bool,
     }
 
     impl SyncRunner for FakeRunner {
-        fn start(&mut self, reasons: &[Trigger], on_finished: Box<dyn FnOnce(SyncOutcome)>) {
+        fn start(&mut self, reasons: &[Trigger], on_finished: Box<dyn FnOnce(SyncOutcome, u64)>) {
             let mut state = self.0.borrow_mut();
             state.start_calls += 1;
             state.reasons.push(reasons.to_vec());
@@ -1488,7 +1496,14 @@ mod tests {
 
     fn finish(runner: &FakeRunner, outcome: SyncOutcome) {
         let callback = runner.0.borrow_mut().pending.take().unwrap();
-        callback(outcome);
+        callback(outcome, 0);
+    }
+
+    /// Completes the pending run with a deletion count, covering a run that
+    /// failed after applying local deletions (issue #276).
+    fn finish_after_deleting(runner: &FakeRunner, outcome: SyncOutcome, deleted_local: u64) {
+        let callback = runner.0.borrow_mut().pending.take().unwrap();
+        callback(outcome, deleted_local);
     }
 
     #[test]
@@ -2573,6 +2588,18 @@ mod tests {
         run_idle(&source);
         assert_eq!(guard.0.borrow().record_calls, 0);
         finish(&runner, SyncOutcome::Success);
+        assert_eq!(guard.0.borrow().record_calls, 1);
+    }
+
+    #[test]
+    fn a_failed_run_that_deleted_locally_refreshes_the_baseline() {
+        let (scheduler, source, runner) = make_scheduler(None);
+        let guard = FakeGuard::default();
+        scheduler.set_guard(Some(Box::new(guard.clone())));
+
+        scheduler.request(Trigger::Manual);
+        run_idle(&source);
+        finish_after_deleting(&runner, SyncOutcome::Failed, 3);
         assert_eq!(guard.0.borrow().record_calls, 1);
     }
 

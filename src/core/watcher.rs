@@ -413,14 +413,14 @@ mod tests {
     #[derive(Default)]
     struct FakeRunnerState {
         start_calls: usize,
-        pending: Option<Box<dyn FnOnce(crate::core::scheduler::SyncOutcome)>>,
+        pending: Option<Box<dyn FnOnce(crate::core::scheduler::SyncOutcome, u64)>>,
     }
 
     impl crate::core::scheduler::SyncRunner for FakeRunner {
         fn start(
             &mut self,
             _reasons: &[crate::core::triggers::Trigger],
-            on_finished: Box<dyn FnOnce(crate::core::scheduler::SyncOutcome) + 'static>,
+            on_finished: Box<dyn FnOnce(crate::core::scheduler::SyncOutcome, u64) + 'static>,
         ) {
             self.0.borrow_mut().start_calls += 1;
             self.0.borrow_mut().pending = Some(on_finished);
