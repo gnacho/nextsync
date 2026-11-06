@@ -2,6 +2,16 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.24] - 2026-11-06
+
+### Added
+
+- The deletion review counts the local conflicted copies left for each missing file and can restore the newest one under its original name, which is often the only thing a file deleted on both sides still has going for it (#302).
+
+### Fixed
+
+- The Spanish catalog source no longer drifts from the shipped translations: eleven strings the interface already translated were missing from `po/es.po`, two unused entries and the old legal paragraph that mentioned nextcloudcmd were still there.
+
 ## [0.43.22] - 2026-11-06
 
 ### Added
