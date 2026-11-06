@@ -2758,3 +2758,33 @@ msgstr "1 sigue ahí"
 
 msgid "{count} still there"
 msgstr "{count} siguen ahí"
+
+msgid "1 local conflicted copy"
+msgstr "1 copia local en conflicto"
+
+msgid "{count} local conflicted copies"
+msgstr "{count} copias locales en conflicto"
+
+msgid "Restore 1 file from its local conflicted copy"
+msgstr "Restaurar 1 archivo desde su copia local en conflicto"
+
+msgid "Restore {count} files from local conflicted copies"
+msgstr "Restaurar {count} archivos desde copias locales en conflicto"
+
+msgid "Restored local copies"
+msgstr "Copias locales restauradas"
+
+msgid "No file could be restored from its local conflicted copy."
+msgstr "No se pudo restaurar ningún archivo desde su copia local en conflicto."
+
+msgid "1 file was restored from a local conflicted copy and will be uploaded on the next sync."
+msgstr "Se restauró 1 archivo desde su copia local en conflicto y se subirá en la próxima sincronización."
+
+msgid "{count} files were restored from local conflicted copies and will be uploaded on the next sync."
+msgstr "Se restauraron {count} archivos desde copias locales en conflicto y se subirán en la próxima sincronización."
+
+msgid "1 copy could not be restored."
+msgstr "1 copia no se pudo restaurar."
+
+msgid "{count} copies could not be restored."
+msgstr "{count} copias no se pudieron restaurar."

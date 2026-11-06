@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 use libadwaita::prelude::*;
 
 use crate::core::server_state::{
-    group_subtitle, row_subtitle, PathPresence, PresenceSummary, GROUP_PRESENCE_CAP,
-    MAX_PRESENCE_CHECKS,
+    copies_note, group_subtitle, row_subtitle_with, PathPresence, PresenceSummary,
+    GROUP_PRESENCE_CAP, MAX_PRESENCE_CHECKS,
 };
 use crate::nextcloud::api::{ApiError, NextcloudApi};
 use crate::nextcloud::credentials::CredentialsStore;
@@ -30,6 +30,8 @@ const PRESENCE_WORKERS: usize = 4;
 struct PresenceRow {
     path: String,
     row: libadwaita::ActionRow,
+    /// Local conflicted copies that could restore the path (issue #302).
+    copies: usize,
 }
 
 /// One group row plus every path it counts, so its subtitle can summarize
@@ -37,6 +39,8 @@ struct PresenceRow {
 struct PresenceGroup {
     paths: Vec<String>,
     row: libadwaita::ExpanderRow,
+    /// Local conflicted copies among the paths of the group.
+    copies: usize,
 }
 
 /// Rows of a deletion review, ready to be marked with the server state.
@@ -51,19 +55,32 @@ impl PresenceJob {
         Self::default()
     }
 
-    /// Register one row that shows a single path.
-    pub(crate) fn add_row(&mut self, path: impl Into<String>, row: &libadwaita::ActionRow) {
+    /// Register one row that shows a single path and how many local
+    /// conflicted copies could restore it.
+    pub(crate) fn add_row(
+        &mut self,
+        path: impl Into<String>,
+        row: &libadwaita::ActionRow,
+        copies: usize,
+    ) {
         self.rows.push(PresenceRow {
             path: path.into(),
             row: row.clone(),
+            copies,
         });
     }
 
     /// Register one group row with all the paths it counts.
-    pub(crate) fn add_group(&mut self, paths: Vec<String>, row: &libadwaita::ExpanderRow) {
+    pub(crate) fn add_group(
+        &mut self,
+        paths: Vec<String>,
+        row: &libadwaita::ExpanderRow,
+        copies: usize,
+    ) {
         self.groups.push(PresenceGroup {
             paths,
             row: row.clone(),
+            copies,
         });
     }
 
@@ -75,7 +92,11 @@ impl PresenceJob {
             return;
         }
         for reviewed in &self.rows {
-            reviewed.row.set_subtitle(t("checking the server…"));
+            let checking = t("checking the server…");
+            reviewed.row.set_subtitle(&match reviewed.copies {
+                0 => checking.to_string(),
+                copies => format!("{checking} · {}", copies_note(copies)),
+            });
         }
         let account = account.clone();
         let folder = folder.clone();
@@ -91,7 +112,9 @@ impl PresenceJob {
                 // Nothing could be checked (offline, rejected credentials):
                 // go back to the plain list instead of labelling every row.
                 for reviewed in &self.rows {
-                    reviewed.row.set_subtitle("");
+                    reviewed
+                        .row
+                        .set_subtitle(&row_subtitle_with(PathPresence::Unchecked, reviewed.copies));
                 }
                 return;
             }
@@ -100,11 +123,12 @@ impl PresenceJob {
                 .map(|(path, presence)| (path.as_str(), *presence))
                 .collect();
             for reviewed in &self.rows {
-                let subtitle = by_path
+                let presence = by_path
                     .get(reviewed.path.as_str())
-                    .map(|presence| row_subtitle(*presence))
-                    .unwrap_or_default();
-                reviewed.row.set_subtitle(subtitle);
+                    .copied()
+                    .unwrap_or(PathPresence::Unchecked);
+                let subtitle = row_subtitle_with(presence, reviewed.copies);
+                reviewed.row.set_subtitle(&subtitle);
             }
             for group in &self.groups {
                 let summary =
@@ -118,9 +142,12 @@ impl PresenceJob {
                                 .unwrap_or(PathPresence::Unchecked)
                         }
                     }));
-                group
-                    .row
-                    .set_subtitle(&group_subtitle(group.paths.len(), &summary));
+                let mut subtitle = group_subtitle(group.paths.len(), &summary);
+                if group.copies > 0 {
+                    subtitle.push_str(" · ");
+                    subtitle.push_str(&copies_note(group.copies));
+                }
+                group.row.set_subtitle(&subtitle);
             }
         });
     }
@@ -256,9 +283,10 @@ mod tests {
             job.add_group(
                 vec!["Documents/a.txt".to_string(), "Documents/b.txt".to_string()],
                 &group,
+                0,
             );
-            job.add_row("Documents/b.txt", &libadwaita::ActionRow::new());
-            job.add_row("top.txt", &libadwaita::ActionRow::new());
+            job.add_row("Documents/b.txt", &libadwaita::ActionRow::new(), 0);
+            job.add_row("top.txt", &libadwaita::ActionRow::new(), 2);
             assert_eq!(
                 job.targets(),
                 vec![
@@ -275,7 +303,11 @@ mod tests {
         crate::ui::test_helpers::gtk_smoke(|| {
             let mut job = PresenceJob::new();
             for index in 0..(MAX_PRESENCE_CHECKS + 10) {
-                job.add_row(format!("file-{index}.txt"), &libadwaita::ActionRow::new());
+                job.add_row(
+                    format!("file-{index}.txt"),
+                    &libadwaita::ActionRow::new(),
+                    0,
+                );
             }
             assert_eq!(job.targets().len(), MAX_PRESENCE_CHECKS);
         });
@@ -286,7 +318,7 @@ mod tests {
         crate::ui::test_helpers::gtk_smoke(|| {
             let mut job = PresenceJob::new();
             let paths: Vec<String> = (0..40).map(|index| format!("SDK/f{index}")).collect();
-            job.add_group(paths, &libadwaita::ExpanderRow::new());
+            job.add_group(paths, &libadwaita::ExpanderRow::new(), 0);
             assert_eq!(job.targets().len(), GROUP_PRESENCE_CAP);
         });
     }

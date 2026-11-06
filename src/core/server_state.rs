@@ -70,6 +70,35 @@ pub fn row_subtitle(presence: PathPresence) -> &'static str {
     }
 }
 
+/// Note naming the local conflicted copies that could restore a path (issue
+/// #302): the content is on disk under the engine's conflict name.
+pub fn copies_note(count: usize) -> String {
+    counted(
+        count,
+        t("1 local conflicted copy"),
+        t("{count} local conflicted copies"),
+    )
+}
+
+/// Subtitle of one reviewed row: the server answer plus any local copies.
+///
+/// A path the server already dropped still reads as recoverable when a copy
+/// sits next to it, and a failed probe falls back to the copy note instead of
+/// hiding it.
+pub fn row_subtitle_with(presence: PathPresence, copies: usize) -> String {
+    let server = match presence {
+        PathPresence::Unchecked => None,
+        checked => Some(row_subtitle(checked).to_string()),
+    };
+    let note = (copies > 0).then(|| copies_note(copies));
+    match (server, note) {
+        (Some(server), Some(note)) => format!("{server} · {note}"),
+        (Some(server), None) => server,
+        (None, Some(note)) => note,
+        (None, None) => String::new(),
+    }
+}
+
 /// Subtitle of a group row: its size plus what the probes found. A partial
 /// check says so, so the numbers are never read as the whole group.
 pub fn group_subtitle(total: usize, summary: &PresenceSummary) -> String {
@@ -253,5 +282,35 @@ mod tests {
             row_subtitle(PathPresence::Gone),
             "already gone from the server"
         );
+    }
+
+    #[test]
+    fn copy_notes_count_the_copies() {
+        english();
+        assert_eq!(copies_note(1), "1 local conflicted copy");
+        assert_eq!(copies_note(3), "3 local conflicted copies");
+    }
+
+    #[test]
+    fn row_subtitle_with_joins_server_state_and_copies() {
+        english();
+        assert_eq!(
+            row_subtitle_with(PathPresence::Gone, 2),
+            "already gone from the server · 2 local conflicted copies"
+        );
+        assert_eq!(
+            row_subtitle_with(PathPresence::Present, 0),
+            "still on the server"
+        );
+    }
+
+    #[test]
+    fn unchecked_rows_keep_the_copy_note() {
+        english();
+        assert_eq!(
+            row_subtitle_with(PathPresence::Unchecked, 1),
+            "1 local conflicted copy"
+        );
+        assert_eq!(row_subtitle_with(PathPresence::Unchecked, 0), "");
     }
 }

@@ -5,6 +5,7 @@ pub mod account_settings;
 pub mod activity;
 pub mod conflict_resolver;
 pub mod deletion_presence;
+pub mod deletion_restore;
 pub mod folder_emblems;
 pub mod folder_status;
 pub mod main_window;
