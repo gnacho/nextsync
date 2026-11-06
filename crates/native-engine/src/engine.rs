@@ -15,6 +15,12 @@ use std::path::PathBuf;
 /// `src/libsync/syncengine.cpp`, `checkErrorBlacklisting`).
 pub const BLACKLIST_AFTER: u32 = 3;
 
+/// Only files may be moved aside for a conflict. A directory carries a whole
+/// tree: renaming it makes the next pass delete the remote collection.
+pub fn conflict_may_rename(path: &std::path::Path) -> bool {
+    !path.is_dir()
+}
+
 /// Identifies one version of a file so a blacklist entry expires when the file
 /// changes. Avoids re-trying a broken transfer forever, and avoids skipping a
 /// file that was fixed.
@@ -713,6 +719,15 @@ impl Engine {
             Action::Conflict { rel } => {
                 progress("conflict", rel);
                 let path = self.local_path(rel);
+                let remote_is_dir = rem.get(rel.as_str()).map(|r| r.is_dir).unwrap_or(false);
+                // A conflict on a directory is a planner artefact (a type
+                // change or a stale journal), never user content. Renaming it
+                // moves the whole tree aside and the next run then deletes the
+                // remote collection. Files can be renamed, trees cannot.
+                if !conflict_may_rename(&path) {
+                    log::warn!("conflict on a directory left untouched: {rel}");
+                    return Ok(());
+                }
                 if path.exists() {
                     let mut target = path.with_file_name(conflict_name(&path)?);
                     let mut n = 2;
@@ -728,7 +743,7 @@ impl Engine {
                     .unwrap_or_default();
                 let url = self.url(ep, rel);
                 let dest = self.local_path(rel);
-                if rem.get(rel.as_str()).map(|r| r.is_dir).unwrap_or(false) {
+                if remote_is_dir {
                     // The remote side is a collection: fetching it with GET
                     // would return the server's HTML page, not a file.
                     std::fs::create_dir_all(&dest)?;
