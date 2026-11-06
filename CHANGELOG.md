@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.2] - 2026-11-06
+
+### Fixed
+
+- Tray icon: retry the status notifier registration when the watcher is not
+  up yet, so the icon no longer disappears at startup.
+
 ## [0.43.0] - 2026-11-06
 
 ### Removed
