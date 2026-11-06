@@ -503,16 +503,19 @@ pub(crate) fn sync_option_groups(
         .build();
     push_status.set_visible(false);
     if let Some(reader) = callbacks.push_state.clone() {
+        refresh_push_status(&push_status, &reader);
+        {
+            let reader = reader.clone();
+            push_status.connect_map(move |row| refresh_push_status(row, &reader));
+        }
+        // The channel finishes its handshake a moment after the page opens;
+        // one delayed read catches that without keeping a timer running.
         let row = push_status.downgrade();
-        let refresh = move || {
-            let Some(row) = row.upgrade() else {
-                return libadwaita::glib::ControlFlow::Break;
-            };
-            refresh_push_status(&row, &reader);
-            libadwaita::glib::ControlFlow::Continue
-        };
-        refresh();
-        libadwaita::glib::timeout_add_seconds_local(2, refresh);
+        libadwaita::glib::timeout_add_seconds_local_once(3, move || {
+            if let Some(row) = row.upgrade() {
+                refresh_push_status(&row, &reader);
+            }
+        });
     }
     let remote_timer = libadwaita::SwitchRow::builder()
         .title(t("Run a remote interval"))
