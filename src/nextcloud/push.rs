@@ -27,6 +27,8 @@
 
 use std::cell::RefCell;
 use std::io::{self, Read, Write};
+
+use crate::util::i18n::t;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -354,13 +356,13 @@ impl NotifyPushClient {
             }
             PushEventKind::AuthRequired => {
                 self.clear_connection();
-                self.on_state(PushState::AuthRequired, "Push authentication failed.");
+                self.on_state(PushState::AuthRequired, t("Push authentication failed."));
             }
             PushEventKind::Unsupported => {
                 self.clear_connection();
                 self.on_state(
                     PushState::Unsupported,
-                    "This server does not offer notify_push.",
+                    t("This server does not offer notify_push."),
                 );
             }
             PushEventKind::Authenticated => {
@@ -369,7 +371,7 @@ impl NotifyPushClient {
                 inner.backoff_index = 0;
                 inner.auth_failure_count = 0;
                 drop(inner);
-                self.on_state(PushState::Connected, "Connected");
+                self.on_state(PushState::Connected, t("Connected"));
             }
             PushEventKind::FileNotification(file_ids) => {
                 let callback = self.inner.borrow().on_file_notification.clone();
@@ -418,7 +420,7 @@ impl NotifyPushClient {
                 if exhausted {
                     self.on_state(
                         PushState::AuthRequired,
-                        "Push authentication failed after several attempts.",
+                        t("Push authentication failed after several attempts."),
                     );
                 } else if let Some(details) = details {
                     self.schedule_reconnect(details);
