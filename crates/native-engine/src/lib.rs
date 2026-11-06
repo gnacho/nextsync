@@ -89,6 +89,10 @@ pub struct EngineConfig {
     /// Files at or above this size use chunked upload (Nextcloud chunked v2,
     /// OpenCloud TUS).
     pub chunk_threshold: u64,
+    /// Files at or above this size download in parallel ranges (issue #272).
+    pub multipart_threshold: u64,
+    /// Parallel range requests per download; one disables the feature.
+    pub multipart_streams: u32,
     /// Journal location. Defaults to `<local_root>/.nextsync/state.db`.
     pub db_path: Option<PathBuf>,
 }
@@ -117,6 +121,8 @@ impl std::fmt::Debug for EngineConfig {
             .field("dry_run", &self.dry_run)
             .field("timeout", &self.timeout)
             .field("chunk_threshold", &self.chunk_threshold)
+            .field("multipart_threshold", &self.multipart_threshold)
+            .field("multipart_streams", &self.multipart_streams)
             .field("db_path", &self.db_path)
             .finish()
     }
@@ -148,6 +154,8 @@ impl EngineConfig {
             dry_run: false,
             timeout: Duration::from_secs(60),
             chunk_threshold: 10 * 1024 * 1024,
+            multipart_threshold: 64 * 1024 * 1024,
+            multipart_streams: default_multipart_streams(),
             db_path: None,
         }
     }
@@ -297,3 +305,39 @@ impl From<ureq::Error> for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Parallel download streams, overridable with `NATIVE_DOWNLOAD_WORKERS`
+/// (issue #272). Unparsable values fall back to four and the result is
+/// clamped so a typo cannot open a hundred sockets.
+fn default_multipart_streams() -> u32 {
+    parallel_streams(std::env::var("NATIVE_DOWNLOAD_WORKERS").ok().as_deref())
+}
+
+fn parallel_streams(raw: Option<&str>) -> u32 {
+    raw.and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(4)
+        .clamp(1, 8)
+}
+
+#[cfg(test)]
+mod multipart_tests {
+    use super::parallel_streams;
+
+    #[test]
+    fn streams_default_to_four() {
+        assert_eq!(parallel_streams(None), 4);
+    }
+
+    #[test]
+    fn the_environment_can_pick_the_stream_count() {
+        assert_eq!(parallel_streams(Some("2")), 2);
+        assert_eq!(parallel_streams(Some(" 6 ")), 6);
+    }
+
+    #[test]
+    fn nonsense_and_extremes_are_clamped() {
+        assert_eq!(parallel_streams(Some("many")), 4);
+        assert_eq!(parallel_streams(Some("0")), 1);
+        assert_eq!(parallel_streams(Some("99")), 8);
+    }
+}
