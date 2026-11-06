@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.16] - 2026-11-06
+
+### Fixed
+
+- Turning server push on or off now applies immediately instead of waiting for a restart, and the four remaining push state messages are translated (#287).
+
 ## [0.43.14] - 2026-11-06
 
 ### Changed
