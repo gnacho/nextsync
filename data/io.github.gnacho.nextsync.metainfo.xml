@@ -58,6 +58,7 @@
   <icon type="stock">io.github.gnacho.nextsync</icon>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.43.26" date="2026-11-07"/>
     <release version="0.43.24" date="2026-11-06"/>
     <release version="0.43.22" date="2026-11-06"/>
     <release version="0.43.20" date="2026-11-06"/>

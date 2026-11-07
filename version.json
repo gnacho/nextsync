@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "version": "0.43.24",
+  "version": "0.43.26",
   "mandatory": false,
-  "summary": "Native sync engine: Nextcloud and OpenCloud synchronize without nextcloudcmd or opencloudcmd.",
+  "summary": "Hidden files toggle in Settings, folder queue fairness and a fix for the Preferences crash.",
   "changelog": [
-    "New Rust sync engine that replaces the command line clients: WebDAV discovery, its own SQLite journal, per file progress, conflict names the existing resolver reads, a delete guard and cancellation.",
-    "Chunked uploads on Nextcloud and TUS uploads on OpenCloud, with resume, plus streaming downloads that keep the mtime.",
-    "Opt-in per account in Settings, so existing accounts keep using nextcloudcmd or opencloudcmd until the switch is turned on.",
-    "Removes the Qt dependency and the need for a sync client installed on the host, which is the blocker for a Flatpak build."
+    "Per account hidden files toggle in Settings, so folders like .private can be synchronized from the interface (#306).",
+    "Folders of the same account take turns fairly: continuous changes in one folder no longer starve the rest (#309).",
+    "Add Folder lives in Settings > Synchronization instead of a detached button in the account summary (#311).",
+    "Opening Preferences no longer aborts the application with a RefCell panic (#307)."
   ],
-  "released_at": "2026-11-06T00:00:00Z"
+  "released_at": "2026-11-07T00:00:00Z"
 }

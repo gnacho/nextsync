@@ -2,6 +2,19 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.26] - 2026-11-07
+
+### Added
+
+- Per account hidden files toggle in Settings, so folders like `.private` can be synchronized from the interface instead of editing the configuration file (#306).
+- Add Folder lives in Settings > Synchronization, replacing the detached button in the account summary (#311).
+
+### Fixed
+
+- Folders of the same account take turns fairly: the permit waiter keeps its FIFO position until its callback claims the turn, so continuous changes in one folder no longer starve the rest (#309).
+- Opening Preferences no longer aborts the application: the push state subscription resolves the runtime before building the view instead of borrowing the window again inside the callback (#307).
+- The Flatpak manifest tracks the current release and uses the current `app-id` key (#305).
+
 ## [0.43.24] - 2026-11-06
 
 ### Added
