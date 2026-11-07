@@ -25,7 +25,7 @@ use crate::ui::about;
 use crate::ui::folder_status::{pair_folder_runtimes, FolderRowCallbacks, FolderStatusRow};
 use crate::ui::settings::{
     page as settings_page, present_add_folder_dialog, refresh_push_status, ExclusionsDialog,
-    SettingsCallbacks, SettingsHost, SettingsView,
+    PushStateSubscription, SettingsCallbacks, SettingsHost, SettingsView,
 };
 use crate::util::i18n::{plural, t};
 
@@ -1174,7 +1174,8 @@ impl MainWindow {
         };
         if self.settings_view.is_none() {
             let host = SettingsHost::new(&self.window, &self.toast_overlay);
-            let callbacks = self.build_settings_callbacks();
+            let mut callbacks = self.build_settings_callbacks();
+            callbacks.push_state = self.build_push_state_subscription();
             let view = SettingsView::new(
                 self.config_store.clone(),
                 account,
@@ -1655,37 +1656,32 @@ impl MainWindow {
                     }
                 }))
             },
-            push_state: {
-                let weak = weak.clone();
-                Some(Rc::new(move |row: &libadwaita::ActionRow| {
-                    let Some(main) = weak.upgrade() else {
-                        return;
-                    };
-                    let (current, receiver) = {
-                        let main = main.borrow();
-                        let Some(account_id) = main.active_account_id.clone() else {
-                            return;
-                        };
-                        let Some(runtime) = main.account_manager.runtimes().get(&account_id) else {
-                            return;
-                        };
-                        (runtime.push_state(), runtime.subscribe_push_state())
-                    };
-                    refresh_push_status(row, current);
-                    // The receiver lives in the main context and dies with the
-                    // row, which closes the channel on the runtime side.
-                    let row = row.downgrade();
-                    glib::spawn_future_local(async move {
-                        while let Ok(state) = receiver.recv().await {
-                            let Some(row) = row.upgrade() else {
-                                break;
-                            };
-                            refresh_push_status(&row, Some(state));
-                        }
-                    });
-                }))
-            },
+            push_state: None,
         }
+    }
+
+    fn build_push_state_subscription(&self) -> Option<PushStateSubscription> {
+        // Settings subscribes synchronously while building its rows, when the
+        // caller may already hold a mutable borrow of the shared window.
+        let account_id = self.active_account_id.as_ref()?;
+        let runtime = self.account_manager.runtimes().get(account_id)?;
+        let current = runtime.push_state();
+        let receiver = runtime.subscribe_push_state();
+        Some(Rc::new(move |row: &libadwaita::ActionRow| {
+            refresh_push_status(row, current.clone());
+            // The receiver lives in the main context and dies with the
+            // row, which closes the channel on the runtime side.
+            let row = row.downgrade();
+            let receiver = receiver.clone();
+            glib::spawn_future_local(async move {
+                while let Ok(state) = receiver.recv().await {
+                    let Some(row) = row.upgrade() else {
+                        break;
+                    };
+                    refresh_push_status(&row, Some(state));
+                }
+            });
+        }))
     }
 
     /// Remove the active account (config + runtime), then refresh the window.
@@ -2663,6 +2659,48 @@ mod tests {
             ]
         );
         reset_locale();
+    }
+
+    #[test]
+    fn preferences_open_during_a_mutable_window_borrow() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let store = ConfigStore::with_path(std::env::temp_dir().join(format!(
+                "nextsync-preferences-borrow-{}.json",
+                std::process::id()
+            )));
+            let config = Config {
+                accounts: vec![window_account()],
+                ..Config::default()
+            };
+            let mut manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            manager.start(&config);
+            let main = std::rc::Rc::new_cyclic(|weak: &Weak<std::cell::RefCell<MainWindow>>| {
+                std::cell::RefCell::new(MainWindow::new(
+                    &app,
+                    config,
+                    store,
+                    manager,
+                    crate::core::log::LogBuffer::new(),
+                    None,
+                    weak.clone(),
+                ))
+            });
+
+            let context = glib::MainContext::new();
+            context
+                .with_thread_default(|| {
+                    main.borrow_mut().show_preferences();
+                    assert!(main.borrow().settings_view.is_some());
+                })
+                .expect("the test main context is available");
+            reset_locale();
+        });
     }
 
     #[test]
