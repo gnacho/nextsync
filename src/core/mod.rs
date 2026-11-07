@@ -9,6 +9,7 @@ pub mod delete_guard;
 pub mod desktop_integration;
 pub mod etag_store;
 pub mod exclusions;
+pub mod journal_stats;
 pub mod log;
 pub mod network;
 pub mod notifications;

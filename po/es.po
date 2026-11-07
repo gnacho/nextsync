@@ -2608,6 +2608,14 @@ msgid "{count} file"
 msgstr "{count} archivo"
 
 #: src/ui/main_window.rs
+msgid "{count} synchronized files"
+msgstr "{count} archivos sincronizados"
+
+#: src/ui/main_window.rs
+msgid "{count} synchronized file"
+msgstr "{count} archivo sincronizado"
+
+#: src/ui/main_window.rs
 msgid "{count} more…"
 msgstr "{count} más…"
 
