@@ -1858,10 +1858,6 @@ msgid "Add a new account"
 msgstr "Añadir una cuenta nueva"
 
 #: src/ui/settings.rs
-msgid "Add a local folder to synchronize with this account"
-msgstr "Añade una carpeta local para sincronizar con esta cuenta"
-
-#: src/ui/settings.rs
 msgid "Choose a local folder to synchronize"
 msgstr "Elige una carpeta local para sincronizar"
 

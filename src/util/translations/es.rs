@@ -27,7 +27,6 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Add Folder", "Añadir carpeta"),
     ("Add Pattern", "Añadir patrón"),
     ("Add a local folder to synchronize", "Añade una carpeta local para sincronizar"),
-    ("Add a local folder to synchronize with this account", "Añade una carpeta local para sincronizar con esta cuenta"),
     ("Add a new account", "Añadir una cuenta nueva"),
     ("Add folders from Settings", "Añade carpetas desde Ajustes"),
     ("Added a branded folder icon and settings for all three desktop integrations.", "Se añadieron un icono propio para la carpeta y ajustes para las tres integraciones con el escritorio."),

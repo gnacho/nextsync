@@ -76,8 +76,6 @@ pub struct SettingsCallbacks {
     pub on_remove_account: Option<SettingsCallback>,
     /// Invoked after a folder is added or removed (refreshes the account view).
     pub on_folder_changed: Option<SettingsCallback>,
-    /// Invoked when the user asks to add a folder from the Synchronization page.
-    pub on_add_folder: Option<SettingsCallback>,
     /// Invoked after trigger/logging settings change (hot-reconfigures the
     /// account runtimes).
     pub on_reconfigure: Option<SettingsCallback>,
@@ -294,7 +292,6 @@ fn build_account_page(
     selector_row.add_suffix(&selector);
     selector_group.add(&selector_row);
     page.add(&selector_group);
-    page.add(&folder_group(callbacks));
     page.add(&hidden_files_group(store, account_id, account, callbacks));
     page.add(&account_connection_group(
         store, account_id, account, callbacks,
@@ -303,29 +300,6 @@ fn build_account_page(
         page.add(&group);
     }
     page
-}
-
-fn folder_group(callbacks: &SettingsCallbacks) -> libadwaita::PreferencesGroup {
-    let folders = libadwaita::PreferencesGroup::builder()
-        .title(t("Synchronization Folders"))
-        .build();
-    let add_folder = libadwaita::ActionRow::builder()
-        .title(t("Add Folder"))
-        .subtitle(t("Add a local folder to synchronize with this account"))
-        .activatable(callbacks.on_add_folder.is_some())
-        .build();
-    let next = gtk4::Image::builder()
-        .icon_name("go-next-symbolic")
-        .pixel_size(16)
-        .build();
-    add_folder.add_suffix(&next);
-    if let Some(on_add_folder) = callbacks.on_add_folder.clone() {
-        add_folder.connect_activated(move |_| {
-            on_add_folder();
-        });
-    }
-    folders.add(&add_folder);
-    folders
 }
 
 fn hidden_files_group(
@@ -2708,32 +2682,47 @@ mod tests {
         None
     }
 
+    fn find_preferences_group(
+        widget: &gtk4::Widget,
+        title: &str,
+    ) -> Option<libadwaita::PreferencesGroup> {
+        if let Ok(group) = widget.clone().downcast::<libadwaita::PreferencesGroup>() {
+            if group.title().as_str() == title {
+                return Some(group);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(group) = find_preferences_group(&widget, title) {
+                return Some(group);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
     #[test]
-    fn account_page_opens_the_add_folder_action() {
+    fn account_page_keeps_add_folder_only_in_the_main_view() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let dir = tempdir().unwrap();
             let store = ConfigStore::with_path(dir.path().join("settings.json"));
             let account = sample_account();
             let account_id = store.add_account(&account).unwrap();
-            let invoked = Rc::new(std::cell::Cell::new(false));
-            let invoked_from_callback = invoked.clone();
-            let callbacks = SettingsCallbacks {
-                on_add_folder: Some(Rc::new(move || {
-                    invoked_from_callback.set(true);
-                })),
-                ..SettingsCallbacks::default()
-            };
-            let view = SettingsView::new(store, account, account_id, callbacks, &test_host());
+            let view = SettingsView::new(
+                store,
+                account,
+                account_id,
+                SettingsCallbacks::default(),
+                &test_host(),
+            );
             let page = view
                 .stack
                 .child_by_name(page::ACCOUNT)
                 .expect("account page");
-            let row = find_action_row(&page, "Add Folder").expect("Add Folder row in Settings");
 
-            libadwaita::prelude::ActionRowExt::activate(&row);
-
-            assert!(invoked.get(), "the Settings row invokes the shared action");
+            assert!(find_action_row(&page, "Add Folder").is_none());
+            assert!(find_preferences_group(&page, "Synchronization Folders").is_none());
             reset_locale();
         });
     }
