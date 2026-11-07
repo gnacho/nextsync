@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.44.4",
+  "version": "0.44.6",
   "mandatory": false,
-  "summary": "Account cards show connection, storage used and synchronized files on one line.",
+  "summary": "The file watcher now ignores events inside excluded directories.",
   "changelog": [
-    "Account status, storage used and synchronized file count share a single compact line (#322)."
+    "The watcher filters every path component, so writes inside .nextsync no longer re-trigger the scheduler in a loop (#324)."
   ],
   "released_at": "2026-11-07T00:00:00Z"
 }
