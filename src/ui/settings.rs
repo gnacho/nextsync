@@ -1,10 +1,11 @@
 //! Settings window (Task 5.2).
 //!
 //! Port of `ui/settings.py` (v0.4.0) to gtk-rs/libadwaita: a single in-app
-//! `SettingsView` (ToolbarView + ViewStack + ViewSwitcherBar) with General,
-//! Synchronization, Advanced synchronization, Network and Advanced pages, and
-//! the typed Remove account confirmation. Folder status lives in the sync view;
-//! the Synchronization page opens the shared Add Folder dialog.
+//! `SettingsView` (ToolbarView + ViewStack + ViewSwitcherBar) with Account,
+//! General, Synchronization, Advanced synchronization, Network and Advanced
+//! pages, and the typed Remove account confirmation. The Account page selects
+//! the configured account and groups folder creation, connection and account
+//! actions. Folder status lives in the sync view.
 //!
 //! # Deviations from `settings.py` (motivated)
 //!
@@ -59,6 +60,9 @@ use crate::util::paths::state_dir;
 /// A simple no-argument callback.
 pub type SettingsCallback = Rc<dyn Fn()>;
 
+/// Selects another configured account and rebuilds its preferences.
+pub type AccountSelectionCallback = Rc<dyn Fn(String)>;
+
 /// Attaches a live listener for the remote push channel to its status row:
 /// renders the current state and then every later change (issue #283).
 pub type PushStateSubscription = Rc<dyn Fn(&libadwaita::ActionRow)>;
@@ -66,6 +70,8 @@ pub type PushStateSubscription = Rc<dyn Fn(&libadwaita::ActionRow)>;
 /// Callbacks the Settings window invokes after mutating the configuration.
 #[derive(Clone, Default)]
 pub struct SettingsCallbacks {
+    /// Invoked when the Preferences account selector chooses another account.
+    pub on_account_selected: Option<AccountSelectionCallback>,
     /// Invoked after the typed Remove account confirmation succeeds.
     pub on_remove_account: Option<SettingsCallback>,
     /// Invoked after a folder is added or removed (refreshes the account view).
@@ -142,8 +148,14 @@ impl SettingsView {
         // configuration; account-owned settings come from the snapshot.
         let config = config_store.load().unwrap_or_default();
 
-        // Folder status and removal stay in the sync view. The Synchronization
-        // page owns folder creation so the action is not detached from Settings.
+        let account_page = build_account_page(
+            &config_store,
+            &config.accounts,
+            &account_id,
+            &account,
+            &callbacks,
+            host,
+        );
         let general = build_general_page(&config_store, &config.general);
         let (sync_groups, sync_advanced_groups) =
             sync_option_groups(&config_store, &account_id, &account, &callbacks, host);
@@ -174,12 +186,13 @@ impl SettingsView {
             switcher: switcher.clone(),
             page_names,
         };
+        view.add_page("account", account_page);
         view.add_page("general", general);
         view.add_page("synchronization", synchronization);
         view.add_page("synchronization-advanced", sync_advanced);
         view.add_page("network", network);
         view.add_page("advanced", advanced);
-        stack.set_visible_child_name("general");
+        stack.set_visible_child_name("account");
         view
     }
 
@@ -217,6 +230,7 @@ impl SettingsView {
 
 /// Stable identifiers for the settings pages.
 pub mod page {
+    pub const ACCOUNT: &str = "account";
     pub const GENERAL: &str = "general";
     pub const SYNCHRONIZATION: &str = "synchronization";
     pub const SYNCHRONIZATION_ADVANCED: &str = "synchronization-advanced";
@@ -227,6 +241,165 @@ pub mod page {
 // ---------------------------------------------------------------------------
 // Page builders
 // ---------------------------------------------------------------------------
+
+fn build_account_page(
+    store: &ConfigStore,
+    accounts: &[AccountConfig],
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+    host: &SettingsHost,
+) -> libadwaita::PreferencesPage {
+    let page = libadwaita::PreferencesPage::builder()
+        .title(t("Account"))
+        .icon_name("avatar-default-symbolic")
+        .build();
+
+    let selector_group = libadwaita::PreferencesGroup::new();
+    let selector_row = libadwaita::ActionRow::builder()
+        .title(t("Account"))
+        .activatable(false)
+        .build();
+    let labels: Vec<String> = accounts
+        .iter()
+        .map(|account| {
+            format!(
+                "{} @ {}",
+                account.login_name,
+                crate::util::url::server_host(&account.server_url)
+            )
+        })
+        .collect();
+    let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let selector = gtk4::DropDown::from_strings(&label_refs);
+    let selected = accounts
+        .iter()
+        .position(|candidate| candidate.id == account_id)
+        .unwrap_or(0);
+    selector.set_selected(selected as u32);
+    selector.set_sensitive(accounts.len() > 1 && callbacks.on_account_selected.is_some());
+    selector.set_valign(gtk4::Align::Center);
+    if let Some(on_account_selected) = callbacks.on_account_selected.clone() {
+        let account_ids: Vec<String> = accounts
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect();
+        selector.connect_selected_notify(move |selector| {
+            let Some(account_id) = account_ids.get(selector.selected() as usize) else {
+                return;
+            };
+            on_account_selected(account_id.clone());
+        });
+    }
+    selector_row.add_suffix(&selector);
+    selector_group.add(&selector_row);
+    page.add(&selector_group);
+    page.add(&folder_group(callbacks));
+    page.add(&hidden_files_group(store, account_id, account, callbacks));
+    page.add(&account_connection_group(
+        store, account_id, account, callbacks,
+    ));
+    for group in account_action_groups(store, account_id, account, callbacks, host) {
+        page.add(&group);
+    }
+    page
+}
+
+fn folder_group(callbacks: &SettingsCallbacks) -> libadwaita::PreferencesGroup {
+    let folders = libadwaita::PreferencesGroup::builder()
+        .title(t("Synchronization Folders"))
+        .build();
+    let add_folder = libadwaita::ActionRow::builder()
+        .title(t("Add Folder"))
+        .subtitle(t("Add a local folder to synchronize with this account"))
+        .activatable(callbacks.on_add_folder.is_some())
+        .build();
+    let next = gtk4::Image::builder()
+        .icon_name("go-next-symbolic")
+        .pixel_size(16)
+        .build();
+    add_folder.add_suffix(&next);
+    if let Some(on_add_folder) = callbacks.on_add_folder.clone() {
+        add_folder.connect_activated(move |_| {
+            on_add_folder();
+        });
+    }
+    folders.add(&add_folder);
+    folders
+}
+
+fn hidden_files_group(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+) -> libadwaita::PreferencesGroup {
+    let group = libadwaita::PreferencesGroup::new();
+    let hidden_files = libadwaita::SwitchRow::builder()
+        .title(t("Sync hidden files and folders"))
+        .subtitle(t(
+            "Dot-prefixed files and folders are skipped when off. Exclude patterns still apply.",
+        ))
+        .active(account.sync.sync_hidden_files)
+        .build();
+    let store = store.clone();
+    let account_id = account_id.to_string();
+    let callbacks = callbacks.clone();
+    hidden_files.connect_active_notify(move |row| {
+        if let Err(error) = persist_account(&store, &account_id, |account| {
+            account.sync.sync_hidden_files = row.is_active();
+        }) {
+            eprintln!("Settings: could not save hidden-file synchronization: {error}");
+            return;
+        }
+        invoke(&callbacks.on_reconfigure);
+    });
+    group.add(&hidden_files);
+    group
+}
+
+fn account_connection_group(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+) -> libadwaita::PreferencesGroup {
+    let connection = libadwaita::PreferencesGroup::builder()
+        .title(t("Connection"))
+        .build();
+    let proxy = libadwaita::EntryRow::new();
+    proxy.set_title(t("Custom HTTP proxy"));
+    proxy.set_text(account.custom_proxy.as_deref().unwrap_or(""));
+    proxy.set_show_apply_button(true);
+    proxy.set_tooltip_text(Some(t("Save the custom HTTP proxy")));
+    let trust = libadwaita::SwitchRow::builder()
+        .title(t("Allow invalid or self-signed certificates"))
+        .active(account.trust_invalid_certificates)
+        .build();
+    {
+        let store = store.clone();
+        let account_id = account_id.to_string();
+        let callbacks = callbacks.clone();
+        let proxy_guard = proxy.clone();
+        let trust_guard = trust.clone();
+        proxy.connect_apply({
+            let store = store.clone();
+            let account_id = account_id.clone();
+            let callbacks = callbacks.clone();
+            let proxy_guard = proxy_guard.clone();
+            let trust_guard = trust_guard.clone();
+            move |_| {
+                save_account_network(&store, &account_id, &proxy_guard, &trust_guard, &callbacks)
+            }
+        });
+        trust.connect_active_notify(move |_| {
+            save_account_network(&store, &account_id, &proxy_guard, &trust_guard, &callbacks);
+        });
+    }
+    connection.add(&proxy);
+    connection.add(&trust);
+    connection
+}
 
 /// General page: Startup and Notifications switches.
 fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwaita::PreferencesPage {
@@ -425,12 +598,11 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
     page
 }
 
-/// Build the per-account synchronization option groups (issue #56): they are
-/// shared by the account settings panel in the main window and were the former
-/// Synchronization page.
+/// Build the per-account synchronization option groups (issue #56) for the
+/// Synchronization pages in Preferences.
 ///
-/// Returns the everyday groups (folder creation, manual-only banner, local and
-/// remote changes) and the advanced ones (exclusions and reliability). Issue
+/// Returns the everyday groups (manual-only banner, local and remote changes)
+/// and the advanced ones (exclusions and reliability). Issue
 /// #249 splits them across two pages because the whole block did not fit in a 960 px tall
 /// window.
 /// Render the push channel message into its status row. A channel without a
@@ -459,27 +631,6 @@ pub(crate) fn sync_option_groups(
     let sync = &account.sync;
     let mut groups: Vec<libadwaita::PreferencesGroup> = Vec::new();
     let mut advanced: Vec<libadwaita::PreferencesGroup> = Vec::new();
-
-    let folders = libadwaita::PreferencesGroup::builder()
-        .title(t("Synchronization Folders"))
-        .build();
-    let add_folder = libadwaita::ActionRow::builder()
-        .title(t("Add Folder"))
-        .subtitle(t("Add a local folder to synchronize with this account"))
-        .activatable(callbacks.on_add_folder.is_some())
-        .build();
-    let next = gtk4::Image::builder()
-        .icon_name("go-next-symbolic")
-        .pixel_size(16)
-        .build();
-    add_folder.add_suffix(&next);
-    if let Some(on_add_folder) = callbacks.on_add_folder.clone() {
-        add_folder.connect_activated(move |_| {
-            on_add_folder();
-        });
-    }
-    folders.add(&add_folder);
-    groups.push(folders);
 
     let manual_group = libadwaita::PreferencesGroup::new();
     let banner = libadwaita::Banner::new(t(
@@ -545,17 +696,6 @@ pub(crate) fn sync_option_groups(
     remote.add(&remote_minutes);
     groups.push(remote);
 
-    let hidden_files_group = libadwaita::PreferencesGroup::new();
-    let hidden_files = libadwaita::SwitchRow::builder()
-        .title(t("Sync hidden files and folders"))
-        .subtitle(t(
-            "Dot-prefixed files and folders are skipped when off. Exclude patterns still apply.",
-        ))
-        .active(sync.sync_hidden_files)
-        .build();
-    hidden_files_group.add(&hidden_files);
-    groups.push(hidden_files_group);
-
     let excluded = libadwaita::PreferencesGroup::builder()
         .title(t("Excluded Files"))
         .build();
@@ -608,7 +748,6 @@ pub(crate) fn sync_option_groups(
         push,
         remote_timer,
         remote_minutes,
-        hidden_files,
         exclusions_enabled,
         retries,
     };
@@ -672,15 +811,6 @@ pub(crate) fn sync_option_groups(
         let account_id = account_id.to_string();
         let callbacks = callbacks.clone();
         let widgets_guard = widgets.clone();
-        widgets.hidden_files.connect_active_notify(move |_| {
-            save_sync(&store, &account_id, &callbacks, &widgets_guard);
-        });
-    }
-    {
-        let store = store.clone();
-        let account_id = account_id.to_string();
-        let callbacks = callbacks.clone();
-        let widgets_guard = widgets.clone();
         widgets.exclusions_enabled.connect_active_notify(move |_| {
             save_sync(&store, &account_id, &callbacks, &widgets_guard);
         });
@@ -699,9 +829,9 @@ pub(crate) fn sync_option_groups(
     (groups, advanced)
 }
 
-/// Synchronization page: the everyday trigger switches (issue #63 moved them
-/// here from the account panel). Exclusions, reliability, detailed output and
-/// the deletion guard live on the advanced synchronization page since #249.
+/// Synchronization page: the everyday trigger switches. Exclusions,
+/// reliability, detailed output and the deletion guard live on the advanced
+/// synchronization page since #249.
 fn build_sync_page(groups: Vec<libadwaita::PreferencesGroup>) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("Synchronization"))
@@ -957,8 +1087,7 @@ fn build_advanced_page(
     page
 }
 
-/// Detailed-output switch row (account-owned, issue #56): reused by the
-/// account settings panel.
+/// Detailed-output switch row (account-owned, issue #56).
 pub(crate) fn detailed_output_row(
     store: &ConfigStore,
     account_id: &str,
@@ -1076,9 +1205,8 @@ pub(crate) fn deletion_guard_group(
     guard
 }
 
-/// Authentication and account-removal groups (issue #56): reused by the
-/// account settings panel.
-pub(crate) fn account_action_groups(
+/// Authentication and account-removal groups for the Account page.
+fn account_action_groups(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
@@ -1173,8 +1301,8 @@ fn invoke(callback: &Option<SettingsCallback>) {
 }
 
 /// Persist an account's proxy + TLS-trust overrides and refresh the runtime
-/// network config (issue #56). Shared by the account settings panel.
-pub(crate) fn save_account_network(
+/// network config (issue #56).
+fn save_account_network(
     store: &ConfigStore,
     account_id: &str,
     proxy: &libadwaita::EntryRow,
@@ -1272,7 +1400,6 @@ fn save_sync(
         account.sync.remote_push_enabled = widgets.push.is_active();
         account.sync.remote_interval_enabled = widgets.remote_timer.is_active();
         account.sync.remote_interval_minutes = remote_minutes;
-        account.sync.sync_hidden_files = widgets.hidden_files.is_active();
         account.sync.exclude_patterns_enabled = widgets.exclusions_enabled.is_active();
         account.sync.max_sync_retries = retries;
     }) {
@@ -2040,7 +2167,6 @@ struct SyncWidgets {
     push: libadwaita::SwitchRow,
     remote_timer: libadwaita::SwitchRow,
     remote_minutes: libadwaita::SpinRow,
-    hidden_files: libadwaita::SwitchRow,
     exclusions_enabled: libadwaita::SwitchRow,
     retries: libadwaita::SpinRow,
 }
@@ -2547,7 +2673,7 @@ mod tests {
                 SettingsCallbacks::default(),
                 &host,
             );
-            assert_eq!(view.page_names().len(), 5);
+            assert_eq!(view.page_names().len(), 6);
             assert!(view
                 .page_names()
                 .iter()
@@ -2561,7 +2687,7 @@ mod tests {
                 SettingsCallbacks::default(),
                 &host,
             );
-            assert_eq!(view.page_names().len(), 5);
+            assert_eq!(view.page_names().len(), 6);
             reset_locale();
         });
     }
@@ -2583,7 +2709,7 @@ mod tests {
     }
 
     #[test]
-    fn synchronization_page_opens_the_add_folder_action() {
+    fn account_page_opens_the_add_folder_action() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let dir = tempdir().unwrap();
@@ -2601,8 +2727,8 @@ mod tests {
             let view = SettingsView::new(store, account, account_id, callbacks, &test_host());
             let page = view
                 .stack
-                .child_by_name(page::SYNCHRONIZATION)
-                .expect("synchronization page");
+                .child_by_name(page::ACCOUNT)
+                .expect("account page");
             let row = find_action_row(&page, "Add Folder").expect("Add Folder row in Settings");
 
             libadwaita::prelude::ActionRowExt::activate(&row);
@@ -2651,12 +2777,16 @@ mod tests {
                 })),
                 ..SettingsCallbacks::default()
             };
-            let (groups, _) =
-                sync_option_groups(&store, &account_id, &account, &callbacks, &test_host());
-            let row = groups
-                .iter()
-                .find_map(|group| find_switch(group.upcast_ref(), "Sync hidden files and folders"))
-                .expect("the synchronization page exposes the hidden-files switch");
+            let page = build_account_page(
+                &store,
+                std::slice::from_ref(&account),
+                &account_id,
+                &account,
+                &callbacks,
+                &test_host(),
+            );
+            let row = find_switch(page.upcast_ref(), "Sync hidden files and folders")
+                .expect("the Account page exposes the hidden-files switch");
 
             assert!(!row.is_active());
             assert_eq!(
@@ -2674,10 +2804,10 @@ mod tests {
         });
     }
 
-    /// The in-app view embeds exactly the five preference pages and switches
+    /// The in-app view embeds exactly the six preference pages and switches
     /// between them in place (issue #10: no separate window anywhere).
     #[test]
-    fn settings_view_embeds_five_pages_and_switches_in_place() {
+    fn settings_view_embeds_six_pages_and_switches_in_place() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let dir = tempdir().unwrap();
@@ -2696,6 +2826,7 @@ mod tests {
             assert_eq!(
                 names,
                 [
+                    page::ACCOUNT,
                     page::GENERAL,
                     page::SYNCHRONIZATION,
                     page::SYNCHRONIZATION_ADVANCED,
@@ -2713,7 +2844,7 @@ mod tests {
             // The pages switch in place inside the single embedded view.
             assert_eq!(
                 view.stack.visible_child_name().as_deref(),
-                Some(page::GENERAL)
+                Some(page::ACCOUNT)
             );
             // The page switcher must be revealed or only General is ever
             // reachable (issue #51).
