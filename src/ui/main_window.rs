@@ -1188,7 +1188,7 @@ impl MainWindow {
         }
     }
 
-    /// Open the Add Folder dialog for the active account from Settings.
+    /// Open the Add Folder dialog for the active account.
     /// On success it refreshes the account view, and validation errors surface as
     /// a toast on the main window's overlay (in addition to the dialog's own
     /// inline re-present).
@@ -1618,14 +1618,6 @@ impl MainWindow {
                 Some(Rc::new(move || {
                     if let Some(main) = weak.upgrade() {
                         main.borrow_mut().refresh_after_config_change();
-                    }
-                }))
-            },
-            on_add_folder: {
-                let weak = weak.clone();
-                Some(Rc::new(move || {
-                    if let Some(main) = weak.upgrade() {
-                        main.borrow_mut().show_add_folder_dialog();
                     }
                 }))
             },
@@ -2848,11 +2840,12 @@ mod tests {
                 let proxy = find_settings_entry(widget, "Custom HTTP proxy")
                     .expect("the selected account exposes its proxy");
                 assert_eq!(proxy.text().as_str(), "http://proxy-b.example.com:8080");
-                for title in ["Add Folder", "Sign in again", "Remove account"] {
+                for title in ["Sign in again", "Remove account"] {
                     let row = find_settings_action(widget, title)
                         .unwrap_or_else(|| panic!("the selected account exposes {title}"));
                     assert!(row.is_activatable(), "{title} remains actionable");
                 }
+                assert!(find_settings_action(widget, "Add Folder").is_none());
                 let account_page = find_preferences_page(widget, "Account")
                     .expect("Preferences has an Account page");
                 let hidden = find_settings_switch(
@@ -3145,8 +3138,8 @@ mod tests {
                 "starts with no folders"
             );
 
-            // What Settings' Add Folder flow does: mutate the store, then
-            // fire on_folder_changed (refresh_after_config_change).
+            // What the main view's Add Folder flow does: mutate the store,
+            // then refresh_after_config_change.
             store
                 .add_folder(
                     &account_id,
