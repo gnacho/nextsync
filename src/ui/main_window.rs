@@ -126,6 +126,94 @@ pub struct AccountCallbacks {
     pub on_avatar_cached: Option<AvatarCachedCallback>,
 }
 
+#[derive(Clone)]
+struct AccountSummary {
+    root: gtk4::Box,
+    light: gtk4::Image,
+    status: gtk4::Label,
+    usage: gtk4::Label,
+    file_count: gtk4::Label,
+    usage_separator: gtk4::Label,
+    file_count_separator: gtk4::Label,
+}
+
+impl AccountSummary {
+    fn new(state: AppState) -> Self {
+        let root = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .margin_bottom(4)
+            .hexpand(true)
+            .build();
+        let light = gtk4::Image::builder().pixel_size(22).margin_end(10).build();
+        light.set_icon_name(Some(summary_light_for(state)));
+        root.append(&light);
+
+        let status = gtk4::Label::builder()
+            .label(summary_connection_text(state))
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
+        root.append(&status);
+
+        let usage_separator = gtk4::Label::builder()
+            .label(" - ")
+            .css_classes(["dim-label"])
+            .visible(false)
+            .build();
+        root.append(&usage_separator);
+        let usage = gtk4::Label::builder()
+            .css_classes(["dim-label"])
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
+        root.append(&usage);
+
+        let file_count_separator = gtk4::Label::builder()
+            .label(" - ")
+            .css_classes(["dim-label"])
+            .visible(false)
+            .build();
+        root.append(&file_count_separator);
+        let file_count = gtk4::Label::builder()
+            .css_classes(["dim-label"])
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
+        root.append(&file_count);
+
+        Self {
+            root,
+            light,
+            status,
+            usage,
+            file_count,
+            usage_separator,
+            file_count_separator,
+        }
+    }
+
+    fn set_state(&self, state: AppState) {
+        self.light.set_icon_name(Some(summary_light_for(state)));
+        self.status.set_text(summary_connection_text(state));
+    }
+
+    fn set_usage(&self, used: &str) {
+        self.usage.set_text(used);
+        self.usage_separator.set_visible(!used.is_empty());
+    }
+
+    fn clear_usage(&self) {
+        self.usage.set_text("");
+        self.usage_separator.set_visible(false);
+    }
+
+    fn set_file_count(&self, count: u64) {
+        self.file_count.set_text(&synchronized_files_label(count));
+        self.file_count_separator.set_visible(true);
+    }
+}
+
 /// One account rendered as the content of the split view: a list of folder
 /// rows plus the Sync Now / Pause buttons.
 pub struct AccountView {
@@ -167,55 +255,10 @@ impl AccountView {
             .selection_mode(gtk4::SelectionMode::None)
             .build();
 
-        // Account summary (issues #81 and #93): one line with the
-        // connection status - a green Lucide globe when reachable, a red
-        // globe-off when not - plus the used space below (no capacity, no
-        // server or user: those live in the sidebar).
-        let summary_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(10)
-            .margin_bottom(4)
-            .build();
-        let summary_lines = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .hexpand(true)
-            .build();
-        let line_one = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        let light = gtk4::Image::builder().pixel_size(22).build();
-        // Issue #165: use the same severity mapping the live subscription
-        // applies (summary_light_for), so the initial render and the updates
-        // agree instead of flipping between globes and status icons.
-        light.set_icon_name(Some(summary_light_for(runtime.state().snapshot().state)));
-        line_one.append(&light);
-        // The status label doubles as the anti-race guard for the
-        // background quota fetch (detached rows keep their text).
-        let name_label = gtk4::Label::builder()
-            .label(summary_connection_text(runtime.state().snapshot().state))
-            .xalign(0.0)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        line_one.append(&name_label);
-        // Line two: how much space the account uses.
-        let usage_label = gtk4::Label::builder()
-            .css_classes(["dim-label"])
-            .halign(gtk4::Align::Start)
-            .xalign(0.0)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        let file_count_label = gtk4::Label::builder()
-            .css_classes(["dim-label"])
-            .halign(gtk4::Align::Start)
-            .xalign(0.0)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        summary_lines.append(&line_one);
-        summary_lines.append(&usage_label);
-        summary_lines.append(&file_count_label);
-        summary_box.append(&summary_lines);
+        // Status, quota and file count share one horizontal line. Separate
+        // labels keep asynchronous updates independent and preserve the
+        // status label as the anti-race guard for detached account views.
+        let summary = AccountSummary::new(runtime.state().snapshot().state);
         {
             // Quota fetch: only plain data crosses to the blocking thread;
             // widget clones are captured in the main-loop continuation.
@@ -239,27 +282,26 @@ impl AccountView {
                         .ok()
                 })
             });
-            let usage_label = usage_label.clone();
-            let name_label = name_label.clone();
-            let title_for_check = name_label.text().to_string();
+            let summary_widget = summary.clone();
+            let title_for_check = summary_widget.status.text().to_string();
             glib::spawn_future_local(async move {
-                let Ok(Some(summary)) = handle.await else {
+                let Ok(Some(account_summary)) = handle.await else {
                     return;
                 };
                 // The view may have been rebuilt for another account while
                 // the fetch ran; a detached row keeps its title, so compare
                 // against the one captured at fetch start.
-                if name_label.text() != title_for_check {
+                if summary_widget.status.text() != title_for_check {
                     return;
                 }
-                // Line two of the summary (issue #93): just the used space;
-                // the identity lives in the sidebar.
-                let used = summary
+                match account_summary
                     .used
                     .map(crate::nextcloud::api::format_bytes)
                     .map(|used| t("{used} used").replace("{used}", &used))
-                    .unwrap_or_default();
-                usage_label.set_text(&used);
+                {
+                    Some(used) => summary_widget.set_usage(&used),
+                    None => summary_widget.clear_usage(),
+                }
             });
         }
         {
@@ -273,17 +315,16 @@ impl AccountView {
             let handle = gio::spawn_blocking(move || {
                 crate::core::journal_stats::account_synchronized_file_count(&local_roots)
             });
-            let file_count_label = file_count_label.clone();
-            let name_label = name_label.clone();
-            let title_for_check = name_label.text().to_string();
+            let summary_widget = summary.clone();
+            let title_for_check = summary_widget.status.text().to_string();
             glib::spawn_future_local(async move {
                 let Ok(count) = handle.await else {
                     return;
                 };
-                if name_label.text() != title_for_check {
+                if summary_widget.status.text() != title_for_check {
                     return;
                 }
-                file_count_label.set_text(&synchronized_files_label(count));
+                summary_widget.set_file_count(count);
             });
         }
 
@@ -466,16 +507,13 @@ impl AccountView {
         root.append(&account_list);
         // The summary sits BELOW the folders and above the account settings
         // (issue #69).
-        root.append(&summary_box);
+        root.append(&summary.root);
 
         // Live update of the summary state light from the account state
         // (the Sync/Pause buttons are gone; the light carries the state).
         let aggregate = runtime.state();
-        let light = light.clone();
-        let name_label = name_label.clone();
         let subscription = aggregate.subscribe(move |snapshot: &StateSnapshot| {
-            light.set_icon_name(Some(summary_light_for(snapshot.state)));
-            name_label.set_text(summary_connection_text(snapshot.state));
+            summary.set_state(snapshot.state);
         });
 
         Self {
@@ -2690,6 +2728,63 @@ mod tests {
             "1234 archivos sincronizados"
         );
         reset_locale();
+    }
+
+    #[test]
+    fn account_summary_combines_async_sections_in_widget_order() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let summary = AccountSummary::new(AppState::IdleOk);
+
+            // Complete the file count first: the later quota update must take
+            // its own slot instead of replacing or reordering the count.
+            summary.set_file_count(5432);
+            summary.set_usage("1.2 GB used");
+
+            assert_eq!(summary.root.orientation(), gtk4::Orientation::Horizontal);
+            let mut text = String::new();
+            let mut child = summary.root.first_child();
+            while let Some(widget) = child {
+                if let Ok(label) = widget.clone().downcast::<gtk4::Label>() {
+                    if label.is_visible() {
+                        text.push_str(&label.label());
+                    }
+                }
+                child = widget.next_sibling();
+            }
+            assert_eq!(text, "Connected - 1.2 GB used - 5432 synchronized files");
+            assert_eq!(
+                summary.file_count.ellipsize(),
+                gtk4::pango::EllipsizeMode::End
+            );
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn account_summary_without_quota_has_no_dangling_separator() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let summary = AccountSummary::new(AppState::IdleOk);
+            summary.set_file_count(5432);
+            summary.clear_usage();
+
+            let mut text = String::new();
+            let mut child = summary.root.first_child();
+            while let Some(widget) = child {
+                if let Ok(label) = widget.clone().downcast::<gtk4::Label>() {
+                    if label.is_visible() {
+                        text.push_str(&label.label());
+                    }
+                }
+                child = widget.next_sibling();
+            }
+            assert_eq!(text, "Connected - 5432 synchronized files");
+            assert!(!text.starts_with(" - "));
+            assert!(!text.ends_with(" - "));
+            assert_eq!(text.matches(" - ").count(), 1);
+            reset_locale();
+        });
     }
 
     #[test]
