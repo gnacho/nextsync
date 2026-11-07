@@ -111,6 +111,7 @@ pub type AddAccountHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
 
 /// Folder row callbacks as plain functions the view can invoke.
 pub struct AccountCallbacks {
+    pub on_add_folder: Option<Rc<dyn Fn()>>,
     pub on_open_folder: Option<OpenFolderCallback>,
     pub on_remove_folder: Option<RemoveFolderCallback>,
     pub on_edit_ignored: Option<EditIgnoredCallback>,
@@ -430,6 +431,15 @@ impl AccountView {
                 .build();
             row.add_prefix(&icon);
             account_list.append(&row);
+        }
+
+        if let Some(on_add_folder) = callbacks.on_add_folder {
+            let add_folder = gtk4::Button::builder()
+                .label(t("Add Folder"))
+                .halign(gtk4::Align::End)
+                .build();
+            add_folder.connect_clicked(move |_| on_add_folder());
+            root.append(&add_folder);
         }
 
         root.append(&account_list);
@@ -1183,9 +1193,6 @@ impl MainWindow {
     /// a toast on the main window's overlay (in addition to the dialog's own
     /// inline re-present).
     pub fn show_add_folder_dialog(&mut self) {
-        let Some(account_id) = self.active_account_id.clone() else {
-            return;
-        };
         let store = self.config_store.clone();
         let weak = self.self_weak.clone();
         let on_folder_added = Rc::new(move || {
@@ -1197,15 +1204,17 @@ impl MainWindow {
         let on_error = Rc::new(move |message: String| {
             overlay.add_toast(libadwaita::Toast::new(&message));
         });
-        present_add_folder_dialog(
-            store,
-            account_id,
-            self.window.upcast_ref::<gtk4::Widget>(),
-            on_folder_added,
-            on_error,
-            None,
-            None,
-        );
+        present_active_add_folder_dialog(self.active_account_id.as_deref(), |account_id| {
+            present_add_folder_dialog(
+                store,
+                account_id,
+                self.window.upcast_ref::<gtk4::Widget>(),
+                on_folder_added,
+                on_error,
+                None,
+                None,
+            );
+        });
     }
 
     /// Re-read the configuration, refresh the sidebar and re-present the
@@ -1896,6 +1905,14 @@ impl MainWindow {
             return;
         };
         let callbacks = AccountCallbacks {
+            on_add_folder: {
+                let weak = self.self_weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().show_add_folder_dialog();
+                    }
+                }))
+            },
             on_open_folder: Some(Rc::new(|local_root| {
                 let _ = gio::AppInfo::launch_default_for_uri(
                     &format!("file://{local_root}"),
@@ -2081,6 +2098,12 @@ impl MainWindow {
     }
 }
 
+fn present_active_add_folder_dialog(active_account_id: Option<&str>, present: impl FnOnce(String)) {
+    if let Some(account_id) = active_account_id {
+        present(account_id.to_string());
+    }
+}
+
 /// Build the hamburger menu model (official-client style): Synchronization
 /// slides back to the sync view, Preferences/Advanced open the in-app
 /// settings view over it and About keeps its dialog.
@@ -2205,20 +2228,20 @@ mod tests {
     use crate::util::i18n::{reset_locale, set_locale, Locale};
     use crate::util::url::server_host;
 
-    fn contains_button_label(widget: &gtk4::Widget, label: &str) -> bool {
+    fn find_button_label(widget: &gtk4::Widget, label: &str) -> Option<gtk4::Button> {
         if let Ok(button) = widget.clone().downcast::<gtk4::Button>() {
             if button.label().as_deref() == Some(label) {
-                return true;
+                return Some(button);
             }
         }
         let mut child = widget.first_child();
         while let Some(widget) = child {
-            if contains_button_label(&widget, label) {
-                return true;
+            if let Some(button) = find_button_label(&widget, label) {
+                return Some(button);
             }
             child = widget.next_sibling();
         }
-        false
+        None
     }
 
     fn contains_label_text(widget: &gtk4::Widget, label: &str) -> bool {
@@ -3157,7 +3180,7 @@ mod tests {
     }
 
     #[test]
-    fn account_view_has_no_detached_add_folder_button() {
+    fn account_view_add_folder_button_invokes_callback() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let mut account = window_account();
@@ -3172,7 +3195,12 @@ mod tests {
                 false,
             );
             runtime.start_without_watchers();
+            let clicks = Rc::new(Cell::new(0));
             let callbacks = AccountCallbacks {
+                on_add_folder: Some({
+                    let clicks = clicks.clone();
+                    Rc::new(move || clicks.set(clicks.get() + 1))
+                }),
                 on_open_folder: None,
                 on_remove_folder: None,
                 on_edit_ignored: None,
@@ -3183,11 +3211,61 @@ mod tests {
             };
             let view = AccountView::new(runtime, callbacks, crate::core::log::LogBuffer::new());
 
-            assert!(!contains_button_label(
-                view.root.upcast_ref::<gtk4::Widget>(),
-                "Add Folder"
-            ));
+            let button = find_button_label(view.root.upcast_ref::<gtk4::Widget>(), "Add Folder")
+                .expect("the main account view exposes Add Folder");
+            button.emit_clicked();
+            assert_eq!(clicks.get(), 1);
             reset_locale();
+        });
+    }
+
+    #[test]
+    fn add_folder_dialog_targets_only_the_active_account() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let store = ConfigStore::with_path(
+                std::env::temp_dir()
+                    .join(format!("nextsync-add-active-{}.json", std::process::id())),
+            );
+            let account_a = window_account();
+            let account_b = crate::storage::config::AccountConfig {
+                id: "acct-window-2".to_string(),
+                server_url: "https://cloud-b.example.com".to_string(),
+                login_name: "bob".to_string(),
+                ..crate::storage::config::AccountConfig::default()
+            };
+            let config = Config {
+                accounts: vec![account_a, account_b],
+                ..Config::default()
+            };
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let mut window = MainWindow::new(
+                &app,
+                config,
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            window.present_account(Some("acct-window-2"));
+
+            let presented = Rc::new(RefCell::new(Vec::new()));
+            present_active_add_folder_dialog(window.active_account_id.as_deref(), {
+                let presented = presented.clone();
+                move |account_id| presented.borrow_mut().push(account_id)
+            });
+            assert_eq!(presented.borrow().as_slice(), ["acct-window-2"]);
+
+            present_active_add_folder_dialog(None, {
+                let presented = presented.clone();
+                move |account_id| presented.borrow_mut().push(account_id)
+            });
+            assert_eq!(presented.borrow().len(), 1, "no account means no dialog");
         });
     }
 
@@ -3221,6 +3299,7 @@ mod tests {
             );
             runtime.start_without_watchers();
             let callbacks = AccountCallbacks {
+                on_add_folder: None,
                 on_open_folder: None,
                 on_remove_folder: None,
                 on_edit_ignored: None,
