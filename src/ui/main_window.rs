@@ -1136,7 +1136,7 @@ impl MainWindow {
     /// Open the in-app Preferences view (slides over the sync view), building
     /// it for the active account on first use.
     pub fn show_preferences(&mut self) {
-        self.show_settings_page(settings_page::GENERAL);
+        self.show_settings_page(settings_page::ACCOUNT);
     }
 
     /// Ensure the settings view exists for the active account and slide to the
@@ -1605,6 +1605,16 @@ impl MainWindow {
     fn build_settings_callbacks(&mut self) -> SettingsCallbacks {
         let weak = self.self_weak.clone();
         SettingsCallbacks {
+            on_account_selected: {
+                let weak = weak.clone();
+                Some(Rc::new(move |account_id: String| {
+                    if let Some(main) = weak.upgrade() {
+                        let mut main = main.borrow_mut();
+                        main.present_account(Some(&account_id));
+                        main.show_settings_page(settings_page::ACCOUNT);
+                    }
+                }))
+            },
             on_folder_changed: {
                 let weak = weak.clone();
                 Some(Rc::new(move || {
@@ -2274,6 +2284,68 @@ mod tests {
         false
     }
 
+    fn find_account_drop_down(widget: &gtk4::Widget) -> Option<gtk4::DropDown> {
+        if let Ok(drop_down) = widget.clone().downcast::<gtk4::DropDown>() {
+            return Some(drop_down);
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(drop_down) = find_account_drop_down(&widget) {
+                return Some(drop_down);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    fn find_settings_entry(widget: &gtk4::Widget, title: &str) -> Option<libadwaita::EntryRow> {
+        if let Ok(row) = widget.clone().downcast::<libadwaita::EntryRow>() {
+            if row.title().as_str() == title {
+                return Some(row);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = find_settings_entry(&widget, title) {
+                return Some(row);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    fn find_settings_action(widget: &gtk4::Widget, title: &str) -> Option<libadwaita::ActionRow> {
+        if let Ok(row) = widget.clone().downcast::<libadwaita::ActionRow>() {
+            if row.title().as_str() == title {
+                return Some(row);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = find_settings_action(&widget, title) {
+                return Some(row);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    fn find_settings_switch(widget: &gtk4::Widget, title: &str) -> Option<libadwaita::SwitchRow> {
+        if let Ok(row) = widget.clone().downcast::<libadwaita::SwitchRow>() {
+            if row.title().as_str() == title {
+                return Some(row);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = find_settings_switch(&widget, title) {
+                return Some(row);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
     #[test]
     fn window_constants_are_stable() {
         set_locale(Locale::English);
@@ -2696,6 +2768,99 @@ mod tests {
                     assert!(main.borrow().settings_view.is_some());
                 })
                 .expect("the test main context is available");
+            reset_locale();
+        });
+    }
+
+    #[test]
+    fn preferences_account_selector_switches_every_account_option() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let dir = tempfile::tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let mut account_a = window_account();
+            account_a.custom_proxy = Some("http://proxy-a.example.com:8080".to_string());
+            let mut account_b = crate::storage::config::AccountConfig {
+                id: "acct-window-2".to_string(),
+                server_url: "https://cloud-b.example.com".to_string(),
+                login_name: "bob".to_string(),
+                custom_proxy: Some("http://proxy-b.example.com:8080".to_string()),
+                ..crate::storage::config::AccountConfig::default()
+            };
+            account_b.sync.sync_hidden_files = true;
+            let id_a = store.add_account(&account_a).unwrap();
+            let id_b = store.add_account(&account_b).unwrap();
+            account_a.id = id_a;
+            account_b.id = id_b.clone();
+            let config = Config {
+                accounts: vec![account_a, account_b],
+                ..Config::default()
+            };
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let mut manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            manager.start(&config);
+            let main = std::rc::Rc::new_cyclic(|weak: &Weak<std::cell::RefCell<MainWindow>>| {
+                std::cell::RefCell::new(MainWindow::new(
+                    &app,
+                    config,
+                    store,
+                    manager,
+                    crate::core::log::LogBuffer::new(),
+                    None,
+                    weak.clone(),
+                ))
+            });
+
+            main.borrow_mut().show_preferences();
+            let selector = {
+                let main = main.borrow();
+                let view = main.settings_view.as_ref().expect("Preferences opens");
+                find_account_drop_down(view.widget().upcast_ref())
+                    .expect("Preferences has an account selector")
+            };
+            selector.set_selected(1);
+
+            {
+                let main = main.borrow();
+                assert_eq!(main.active_account_id.as_deref(), Some(id_b.as_str()));
+                let view = main.settings_view.as_ref().expect("Preferences stays open");
+                let widget = view.widget().upcast_ref::<gtk4::Widget>();
+                let proxy = find_settings_entry(widget, "Custom HTTP proxy")
+                    .expect("the selected account exposes its proxy");
+                assert_eq!(proxy.text().as_str(), "http://proxy-b.example.com:8080");
+                for title in ["Add Folder", "Sign in again", "Remove account"] {
+                    let row = find_settings_action(widget, title)
+                        .unwrap_or_else(|| panic!("the selected account exposes {title}"));
+                    assert!(row.is_activatable(), "{title} remains actionable");
+                }
+                let hidden = find_settings_switch(widget, "Sync hidden files and folders")
+                    .expect("synchronization options follow the selected account");
+                assert!(hidden.is_active());
+            }
+
+            let selector = {
+                let main = main.borrow();
+                let view = main.settings_view.as_ref().expect("rebuilt Preferences");
+                find_account_drop_down(view.widget().upcast_ref())
+                    .expect("the rebuilt view has an account selector")
+            };
+            selector.set_selected(0);
+            let main = main.borrow();
+            let view = main
+                .settings_view
+                .as_ref()
+                .expect("Preferences switches back");
+            let widget = view.widget().upcast_ref::<gtk4::Widget>();
+            let proxy = find_settings_entry(widget, "Custom HTTP proxy")
+                .expect("the original account exposes its proxy again");
+            assert_eq!(proxy.text().as_str(), "http://proxy-a.example.com:8080");
+            let hidden = find_settings_switch(widget, "Sync hidden files and folders")
+                .expect("the original synchronization options return");
+            assert!(!hidden.is_active());
             reset_locale();
         });
     }

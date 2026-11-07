@@ -10,9 +10,8 @@ use libadwaita::prelude::*;
 
 use crate::storage::config::{AccountConfig, ConfigStore};
 use crate::ui::settings::{
-    account_action_groups, save_account_network, SettingsCallbacks, SettingsHost,
+    account_action_groups, account_connection_group, SettingsCallbacks, SettingsHost,
 };
-use crate::util::i18n::t;
 
 /// Build the account settings panel widget. The caller toggles it below the
 /// folder list.
@@ -34,42 +33,9 @@ pub fn build_account_settings_panel(
     page.set_margin_start(12);
     page.set_margin_end(12);
 
-    // Connection: per-account proxy + TLS trust (issue #56).
-    let connection = libadwaita::PreferencesGroup::builder()
-        .title(t("Connection"))
-        .build();
-    let proxy = libadwaita::EntryRow::new();
-    proxy.set_title(t("Custom HTTP proxy"));
-    proxy.set_text(account.custom_proxy.as_deref().unwrap_or(""));
-    proxy.set_show_apply_button(true);
-    proxy.set_tooltip_text(Some(t("Save the custom HTTP proxy")));
-    let trust = libadwaita::SwitchRow::builder()
-        .title(t("Allow invalid or self-signed certificates"))
-        .active(account.trust_invalid_certificates)
-        .build();
-    {
-        let store = store.clone();
-        let account_id = account_id.to_string();
-        let callbacks = callbacks.clone();
-        let proxy_guard = proxy.clone();
-        let trust_guard = trust.clone();
-        proxy.connect_apply({
-            let store = store.clone();
-            let account_id = account_id.clone();
-            let callbacks = callbacks.clone();
-            let proxy_guard = proxy_guard.clone();
-            let trust_guard = trust_guard.clone();
-            move |_| {
-                save_account_network(&store, &account_id, &proxy_guard, &trust_guard, &callbacks)
-            }
-        });
-        trust.connect_active_notify(move |_| {
-            save_account_network(&store, &account_id, &proxy_guard, &trust_guard, &callbacks);
-        });
-    }
-    connection.add(&proxy);
-    connection.add(&trust);
-    page.add(&connection);
+    page.add(&account_connection_group(
+        store, account_id, account, callbacks,
+    ));
 
     // The synchronization options live in Preferences (Synchronization
     // page); this panel keeps only the account identity and connection
