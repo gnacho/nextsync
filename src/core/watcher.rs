@@ -100,10 +100,11 @@ impl FsWatcher {
         let event_sender = sender.clone();
         let overflow = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let overflow_signal = overflow.clone();
+        let filter_root = root.clone();
         let mut watcher =
             notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
                 let event = match result {
-                    Ok(event) => classify_event(&event, &matcher),
+                    Ok(event) => classify_event(&event, &matcher, &filter_root),
                     Err(error) => Some(WatcherEvent::Degraded(WatcherError::from(error))),
                 };
                 if let Some(event) = event {
@@ -179,7 +180,11 @@ impl FsWatcher {
 /// meta events are ignored. Excluded names are skipped for file events, like
 /// `inotify.py` does (directory events always pass, so a folder matching an
 /// exclude pattern still gets watched).
-pub fn classify_event(event: &Event, matcher: &ExclusionMatcher) -> Option<WatcherEvent> {
+pub fn classify_event(
+    event: &Event,
+    matcher: &ExclusionMatcher,
+    root: &Path,
+) -> Option<WatcherEvent> {
     // `notify` reports an inotify queue overflow as an `Other` event flagged
     // `Rescan`: local event history is incomplete, so the consumer must
     // rescan. A bare `Other` is a meta event and is ignored below.
@@ -189,18 +194,30 @@ pub fn classify_event(event: &Event, matcher: &ExclusionMatcher) -> Option<Watch
     let path = event.paths.first()?;
     match event.kind {
         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) | EventKind::Any => {
-            if !is_directory_event(event) {
-                let name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if matcher.matches_name(&name) {
-                    return None;
-                }
+            if !is_directory_event(event) && is_excluded(path, root, matcher) {
+                return None;
             }
             Some(WatcherEvent::Change(path.clone()))
         }
         EventKind::Access(_) | EventKind::Other => None,
+    }
+}
+
+/// Whether the event path, or any of its ancestors below `root`, matches an
+/// exclude pattern.
+///
+/// Exclude patterns are name patterns, so a pattern that names a directory
+/// (nextsync's own `.nextsync` state directory, for example) has to hide every
+/// file inside it. Comparing only the basename let those events through, and
+/// each write of the state database re-triggered the scheduler, which wrote the
+/// database again: an endless sync loop that transferred nothing (issue #324).
+fn is_excluded(path: &Path, root: &Path, matcher: &ExclusionMatcher) -> bool {
+    match path.strip_prefix(root) {
+        Ok(relative) => relative
+            .components()
+            .filter_map(|component| component.as_os_str().to_str())
+            .any(|name| matcher.matches_name(name)),
+        Err(_) => matcher.matches_path(path),
     }
 }
 
@@ -248,7 +265,7 @@ mod tests {
     #[test]
     fn overflow_event_is_reported_as_degraded_overflow() {
         let event = Event::new(EventKind::Other).set_flag(Flag::Rescan);
-        let classified = classify_event(&event, &empty_matcher());
+        let classified = classify_event(&event, &empty_matcher(), Path::new("/tmp"));
         assert_eq!(
             classified,
             Some(WatcherEvent::Degraded(WatcherError::Overflow))
@@ -281,7 +298,7 @@ mod tests {
         ] {
             let event = Event::new(kind).add_path(PathBuf::from("/tmp/x.txt"));
             assert_eq!(
-                classify_event(&event, &empty_matcher()),
+                classify_event(&event, &empty_matcher(), Path::new("/tmp")),
                 Some(WatcherEvent::Change(PathBuf::from("/tmp/x.txt"))),
                 "kind {kind:?}"
             );
@@ -292,9 +309,9 @@ mod tests {
     fn access_and_other_events_are_ignored() {
         let access = Event::new(EventKind::Access(notify::event::AccessKind::Read))
             .add_path(PathBuf::from("/tmp/x.txt"));
-        assert!(classify_event(&access, &empty_matcher()).is_none());
+        assert!(classify_event(&access, &empty_matcher(), Path::new("/tmp")).is_none());
         let other = Event::new(EventKind::Other);
-        assert!(classify_event(&other, &empty_matcher()).is_none());
+        assert!(classify_event(&other, &empty_matcher(), Path::new("/tmp")).is_none());
     }
 
     #[test]
@@ -302,11 +319,29 @@ mod tests {
         let matcher = ExclusionMatcher::new(["*.tmp"], true);
         let event = Event::new(EventKind::Create(CreateKind::File))
             .add_path(PathBuf::from("/tmp/draft.tmp"));
-        assert!(classify_event(&event, &matcher).is_none());
+        assert!(classify_event(&event, &matcher, Path::new("/tmp")).is_none());
         // Directory events pass even when the name matches a pattern.
         let dir = Event::new(EventKind::Create(CreateKind::Folder))
             .add_path(PathBuf::from("/tmp/draft.tmp"));
-        assert!(classify_event(&dir, &matcher).is_some());
+        assert!(classify_event(&dir, &matcher, Path::new("/tmp")).is_some());
+    }
+
+    #[test]
+    fn excluded_directory_hides_its_children() {
+        // Issue #324: a pattern that names a directory must also hide every
+        // file inside it, or nextsync's own `.nextsync/state.db` writes keep
+        // re-triggering the scheduler in a loop.
+        let matcher = ExclusionMatcher::new([".nextsync"], true);
+        let root = Path::new("/home/u/Fotos");
+        let state = Event::new(EventKind::Modify(notify::event::ModifyKind::Data(
+            notify::event::DataChange::Any,
+        )))
+        .add_path(PathBuf::from("/home/u/Fotos/.nextsync/state.db-wal"));
+        assert!(classify_event(&state, &matcher, root).is_none());
+        // The same basename outside the excluded directory still gets through.
+        let sibling = Event::new(EventKind::Create(CreateKind::File))
+            .add_path(PathBuf::from("/home/u/Fotos/state.db"));
+        assert!(classify_event(&sibling, &matcher, root).is_some());
     }
 
     #[test]
