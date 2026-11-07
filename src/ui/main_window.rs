@@ -143,14 +143,6 @@ pub struct AccountView {
 }
 
 impl AccountView {
-    /// Append a widget under the folder list (used by the account-settings
-    /// toggle row and panel, issue #56).
-    pub fn append_widget(&self, widget: &impl IsA<gtk4::Widget>) {
-        self.root.append(widget);
-    }
-}
-
-impl AccountView {
     /// Build the folder-focused view for one account.
     pub fn new(
         account_runtime: AccountRuntime,
@@ -529,11 +521,6 @@ pub struct MainWindow {
     /// #50); rebuilt together with the rows.
     avatar_widgets: std::collections::HashMap<String, libadwaita::Avatar>,
     account_view: Option<AccountView>,
-    /// The account-settings revealer for the current account, kept for
-    /// tests and live inspection (issue #63).
-    account_settings_panel: Option<gtk4::Revealer>,
-    /// The Account settings toggle button (issue #63).
-    account_settings_toggle: Option<gtk4::Button>,
     settings_handler: SettingsHandler,
     add_account_handler: AddAccountHandler,
     self_weak: Weak<RefCell<MainWindow>>,
@@ -761,8 +748,6 @@ impl MainWindow {
             account_rows: std::collections::HashMap::new(),
             avatar_widgets: std::collections::HashMap::new(),
             account_view: None,
-            account_settings_panel: None,
-            account_settings_toggle: None,
             settings_handler,
             add_account_handler,
             self_weak,
@@ -1610,8 +1595,12 @@ impl MainWindow {
                 Some(Rc::new(move |account_id: String| {
                     if let Some(main) = weak.upgrade() {
                         let mut main = main.borrow_mut();
+                        let transition = main.root_stack.transition_type();
+                        main.root_stack
+                            .set_transition_type(gtk4::StackTransitionType::None);
                         main.present_account(Some(&account_id));
                         main.show_settings_page(settings_page::ACCOUNT);
+                        main.root_stack.set_transition_type(transition);
                     }
                 }))
             },
@@ -2086,58 +2075,6 @@ impl MainWindow {
         };
         let view = AccountView::new(runtime, callbacks, self.logger.clone());
 
-        // Account settings panel (issue #56): a toggle row under the folder
-        // list reveals the per-account preferences (server, connection,
-        // synchronization, deletion guard, credentials).
-        if let Some(account) = self
-            .config
-            .accounts
-            .iter()
-            .find(|account| account.id == account_id)
-            .cloned()
-        {
-            let store = self.config_store.clone();
-            let settings_callbacks = self.build_settings_callbacks();
-            let host = SettingsHost::new(&self.window, &self.toast_overlay);
-            let panel = crate::ui::account_settings::build_account_settings_panel(
-                &store,
-                &account,
-                account_id,
-                &settings_callbacks,
-                &host,
-            );
-            let toggle = gtk4::Button::builder()
-                .tooltip_text(t(
-                    "Server, proxy and synchronization options for this account",
-                ))
-                .css_classes(["flat"])
-                .halign(gtk4::Align::Fill)
-                .build();
-            // Icon AND label together: a plain label-or-icon button shows
-            // only one of them.
-            let toggle_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-            let gear = gtk4::Image::builder()
-                .icon_name("preferences-system-symbolic")
-                .pixel_size(16)
-                .build();
-            toggle_content.append(&gear);
-            let toggle_label = gtk4::Label::new(Some(t("Account settings")));
-            toggle_label.set_xalign(0.0);
-            toggle_label.set_hexpand(true);
-            toggle_content.append(&toggle_label);
-            toggle.set_child(Some(&toggle_content));
-            {
-                let panel = panel.clone();
-                toggle.connect_clicked(move |_| {
-                    panel.set_reveal_child(!panel.is_child_revealed());
-                });
-            }
-            view.append_widget(&toggle);
-            view.append_widget(&panel);
-            self.account_settings_panel = Some(panel.clone());
-            self.account_settings_toggle = Some(toggle.clone());
-        }
-
         self.content_stack.add_named(&view.root, Some("account"));
         self.content_stack.set_visible_child_name("account");
         self.account_view = Some(view);
@@ -2277,6 +2214,22 @@ mod tests {
         let mut child = widget.first_child();
         while let Some(widget) = child {
             if contains_button_label(&widget, label) {
+                return true;
+            }
+            child = widget.next_sibling();
+        }
+        false
+    }
+
+    fn contains_label_text(widget: &gtk4::Widget, label: &str) -> bool {
+        if let Ok(text) = widget.clone().downcast::<gtk4::Label>() {
+            if text.label().as_str() == label {
+                return true;
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if contains_label_text(&widget, label) {
                 return true;
             }
             child = widget.next_sibling();
@@ -2841,7 +2794,28 @@ mod tests {
                 find_account_drop_down(view.widget().upcast_ref())
                     .expect("Preferences has an account selector")
             };
+            let observed_transitions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let root_stack = main.borrow().root_stack.clone();
+            root_stack.connect_visible_child_notify({
+                let observed_transitions = observed_transitions.clone();
+                move |stack| {
+                    observed_transitions
+                        .borrow_mut()
+                        .push(stack.transition_type());
+                }
+            });
             selector.set_selected(1);
+            assert!(
+                !observed_transitions.borrow().is_empty(),
+                "the account selector rebuilds Preferences"
+            );
+            assert!(
+                observed_transitions
+                    .borrow()
+                    .iter()
+                    .all(|transition| *transition == gtk4::StackTransitionType::None),
+                "account changes never slide through the sync view"
+            );
 
             let hidden_b = {
                 let main = main.borrow();
@@ -2934,6 +2908,18 @@ mod tests {
                     .unwrap()
                     .sync
                     .sync_hidden_files
+            );
+            assert!(
+                observed_transitions
+                    .borrow()
+                    .iter()
+                    .all(|transition| *transition == gtk4::StackTransitionType::None),
+                "switching back is instantaneous too"
+            );
+            assert_eq!(
+                main.borrow().root_stack.transition_type(),
+                gtk4::StackTransitionType::SlideLeftRight,
+                "normal Preferences navigation keeps its transition"
             );
             reset_locale();
         });
@@ -3288,11 +3274,7 @@ mod tests {
     }
 
     #[test]
-    fn account_settings_toggle_reveals_the_panel() {
-        // The Account settings row must open the panel when activated
-        // (issue #63). The panel and row live in the account view built at
-        // construction; we activate the row through the shared cell and check
-        // the revealer flips.
+    fn main_view_has_no_account_settings_panel() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let app = libadwaita::Application::builder()
@@ -3320,27 +3302,14 @@ mod tests {
                 Weak::new(),
             );
 
-            let revealer = window
-                .account_settings_panel
-                .as_ref()
-                .expect("account settings panel built at construction");
-            let toggle = window
-                .account_settings_toggle
-                .as_ref()
-                .expect("account settings toggle built");
-            assert!(!revealer.is_child_revealed(), "panel starts hidden");
-
-            // Clicking the button reveals the panel (issue #63).
-            toggle.emit_clicked();
-            assert!(
-                revealer.is_child_revealed(),
-                "clicking the button reveals the panel"
-            );
-            // A second click hides it again.
-            toggle.emit_clicked();
-            assert!(
-                !revealer.is_child_revealed(),
-                "a second click hides the panel"
+            let view = window.account_view.as_ref().expect("the sync view remains");
+            assert!(!contains_label_text(
+                view.root.upcast_ref(),
+                "Account settings"
+            ));
+            assert_eq!(
+                window.content_stack.visible_child_name().as_deref(),
+                Some("account")
             );
             reset_locale();
         });

@@ -358,7 +358,7 @@ fn hidden_files_group(
     group
 }
 
-pub(crate) fn account_connection_group(
+fn account_connection_group(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
@@ -598,9 +598,8 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
     page
 }
 
-/// Build the per-account synchronization option groups (issue #56): they are
-/// shared by the account settings panel in the main window and were the former
-/// Synchronization page.
+/// Build the per-account synchronization option groups (issue #56) for the
+/// Synchronization pages in Preferences.
 ///
 /// Returns the everyday groups (manual-only banner, local and remote changes)
 /// and the advanced ones (exclusions and reliability). Issue
@@ -830,9 +829,9 @@ pub(crate) fn sync_option_groups(
     (groups, advanced)
 }
 
-/// Synchronization page: the everyday trigger switches (issue #63 moved them
-/// here from the account panel). Exclusions, reliability, detailed output and
-/// the deletion guard live on the advanced synchronization page since #249.
+/// Synchronization page: the everyday trigger switches. Exclusions,
+/// reliability, detailed output and the deletion guard live on the advanced
+/// synchronization page since #249.
 fn build_sync_page(groups: Vec<libadwaita::PreferencesGroup>) -> libadwaita::PreferencesPage {
     let page = libadwaita::PreferencesPage::builder()
         .title(t("Synchronization"))
@@ -1088,8 +1087,7 @@ fn build_advanced_page(
     page
 }
 
-/// Detailed-output switch row (account-owned, issue #56): reused by the
-/// account settings panel.
+/// Detailed-output switch row (account-owned, issue #56).
 pub(crate) fn detailed_output_row(
     store: &ConfigStore,
     account_id: &str,
@@ -1207,9 +1205,8 @@ pub(crate) fn deletion_guard_group(
     guard
 }
 
-/// Authentication and account-removal groups (issue #56): reused by the
-/// account settings panel.
-pub(crate) fn account_action_groups(
+/// Authentication and account-removal groups for the Account page.
+fn account_action_groups(
     store: &ConfigStore,
     account_id: &str,
     account: &AccountConfig,
@@ -1304,8 +1301,8 @@ fn invoke(callback: &Option<SettingsCallback>) {
 }
 
 /// Persist an account's proxy + TLS-trust overrides and refresh the runtime
-/// network config (issue #56). Shared by the account settings panel.
-pub(crate) fn save_account_network(
+/// network config (issue #56).
+fn save_account_network(
     store: &ConfigStore,
     account_id: &str,
     proxy: &libadwaita::EntryRow,
