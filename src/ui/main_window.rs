@@ -207,8 +207,15 @@ impl AccountView {
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
+        let file_count_label = gtk4::Label::builder()
+            .css_classes(["dim-label"])
+            .halign(gtk4::Align::Start)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
         summary_lines.append(&line_one);
         summary_lines.append(&usage_label);
+        summary_lines.append(&file_count_label);
         summary_box.append(&summary_lines);
         {
             // Quota fetch: only plain data crosses to the blocking thread;
@@ -254,6 +261,30 @@ impl AccountView {
                     .map(|used| t("{used} used").replace("{used}", &used))
                     .unwrap_or_default();
                 usage_label.set_text(&used);
+            });
+        }
+        {
+            // Journal reads stay off the main loop. A folder without a native
+            // journal contributes zero files and no remote listing is needed.
+            let local_roots = account
+                .folders
+                .iter()
+                .map(|folder| crate::storage::config::expanduser(&folder.local_root))
+                .collect::<Vec<_>>();
+            let handle = gio::spawn_blocking(move || {
+                crate::core::journal_stats::account_synchronized_file_count(&local_roots)
+            });
+            let file_count_label = file_count_label.clone();
+            let name_label = name_label.clone();
+            let title_for_check = name_label.text().to_string();
+            glib::spawn_future_local(async move {
+                let Ok(count) = handle.await else {
+                    return;
+                };
+                if name_label.text() != title_for_check {
+                    return;
+                }
+                file_count_label.set_text(&synchronized_files_label(count));
             });
         }
 
@@ -2165,6 +2196,17 @@ pub fn summary_connection_text(state: crate::state::AppState) -> &'static str {
     }
 }
 
+/// File count from the local journals, labelled as synchronized so it is not
+/// mistaken for a fresh recursive count of the remote account.
+pub fn synchronized_files_label(count: u64) -> String {
+    plural(
+        count,
+        t("{count} synchronized file"),
+        t("{count} synchronized files"),
+    )
+    .replace("{count}", &count.to_string())
+}
+
 /// Host part of a server URL (`https://cloud.example.com` ->
 /// `cloud.example.com`); the raw URL when it does not parse as expected.
 pub use crate::util::url::server_host;
@@ -2632,6 +2674,22 @@ mod tests {
         assert_eq!(
             summary_connection_text(AppState::DeleteReview),
             "Review deletions"
+        );
+        reset_locale();
+    }
+
+    #[test]
+    fn synchronized_files_label_translates_and_pluralizes() {
+        set_locale(Locale::English);
+        assert_eq!(synchronized_files_label(0), "0 synchronized files");
+        assert_eq!(synchronized_files_label(1), "1 synchronized file");
+        assert_eq!(synchronized_files_label(1234), "1234 synchronized files");
+        set_locale(Locale::Spanish);
+        assert_eq!(synchronized_files_label(0), "0 archivos sincronizados");
+        assert_eq!(synchronized_files_label(1), "1 archivo sincronizado");
+        assert_eq!(
+            synchronized_files_label(1234),
+            "1234 archivos sincronizados"
         );
         reset_locale();
     }

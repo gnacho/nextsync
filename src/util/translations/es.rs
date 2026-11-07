@@ -539,6 +539,8 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("{count} more…", "{count} más…"),
     ("{count} of {total} items were restored from the server trash.", "Se restauraron {count} de {total} elementos de la papelera del servidor."),
     ("{count} still there", "{count} siguen ahí"),
+    ("{count} synchronized file", "{count} archivo sincronizado"),
+    ("{count} synchronized files", "{count} archivos sincronizados"),
     ("{size} local", "{size} en local"),
     ("{used} used", "{used} usados"),
 ];
