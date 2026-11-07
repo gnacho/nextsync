@@ -1444,10 +1444,24 @@ fn save_network(store: &ConfigStore, impact: &libadwaita::SwitchRow, ssids: &lib
 // Add Folder dialog
 // ---------------------------------------------------------------------------
 
+fn add_folder_account_label(account: &AccountConfig) -> gtk4::Label {
+    gtk4::Label::builder()
+        .label(format!(
+            "{}: {} ({})",
+            t("Account"),
+            account.login_name,
+            account.server_url
+        ))
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["dim-label"])
+        .build()
+}
+
 /// Present the Add Folder dialog for an account against a config store.
 ///
-/// This is the single construction site for the dialog, shared by the
-/// Settings window and the main window's account view. `parent`
+/// This is the single construction site for the dialog opened from the main
+/// window's application menu. `parent`
 /// is the transient-for widget — the Settings `PreferencesWindow` or the main
 /// `ApplicationWindow`. `on_folder_added` runs after a folder is committed;
 /// `on_error` is invoked with the validation message (the caller usually
@@ -1465,6 +1479,7 @@ pub fn present_add_folder_dialog(
     previous: Option<(String, String)>,
     error: Option<String>,
 ) {
+    let account = store.account(&account_id).ok().flatten();
     let (previous_local, previous_remote) = previous.unwrap_or_default();
     let local_default = if previous_local.is_empty() {
         default_sync_root().to_string_lossy().into_owned()
@@ -1479,6 +1494,9 @@ pub fn present_add_folder_dialog(
         )),
     );
     let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    if let Some(account) = account.as_ref() {
+        entry_box.append(&add_folder_account_label(account));
+    }
     // A floor on the dialog width (issue #75): with narrow defaults the
     // entries clip the paths they display.
     entry_box.set_width_request(560);
@@ -1546,7 +1564,7 @@ pub fn present_add_folder_dialog(
     dialog.add_response("add", t("Add"));
     dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
 
-    if let Ok(Some(account)) = store.account(&account_id) {
+    if let Some(account) = account {
         populate_remote_picker(
             &account_id,
             &account.server_url,
@@ -2451,6 +2469,24 @@ mod tests {
     }
 
     // ---- pure helpers ------------------------------------------------------
+
+    #[test]
+    fn add_folder_dialog_identifies_the_destination_account() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let account = AccountConfig {
+                server_url: "https://cloud-b.example.com".to_string(),
+                login_name: "bob".to_string(),
+                ..AccountConfig::default()
+            };
+            let label = add_folder_account_label(&account);
+            assert_eq!(
+                label.text().as_str(),
+                "Account: bob (https://cloud-b.example.com)"
+            );
+            reset_locale();
+        });
+    }
 
     #[test]
     fn typed_confirmation_requires_literal_remove() {
