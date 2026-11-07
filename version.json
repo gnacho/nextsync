@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.44.0",
+  "version": "0.44.2",
   "mandatory": false,
-  "summary": "Add Folder shortcut in the main window for the active account.",
+  "summary": "Add Folder in the application menu and OpenCloud storage usage with synchronized file counts.",
   "changelog": [
-    "Add Folder lives above the folder list in the main window and opens the wizard for the active account (#316).",
-    "The Add Folder row leaves Preferences, so the action has a single obvious home."
+    "Add Folder moves to the application menu and the wizard names the target account (#318).",
+    "OpenCloud account cards show the storage used through LibreGraph (#320).",
+    "Account cards show the number of synchronized files in small print."
   ],
   "released_at": "2026-11-07T00:00:00Z"
 }

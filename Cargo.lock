@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "nextsync"
-version = "0.44.0"
+version = "0.44.2"
 dependencies = [
  "async-channel",
  "data-encoding",
