@@ -523,6 +523,17 @@ pub(crate) fn sync_option_groups(
     remote.add(&remote_minutes);
     groups.push(remote);
 
+    let hidden_files_group = libadwaita::PreferencesGroup::new();
+    let hidden_files = libadwaita::SwitchRow::builder()
+        .title(t("Sync hidden files and folders"))
+        .subtitle(t(
+            "Dot-prefixed files and folders are skipped when off. Exclude patterns still apply.",
+        ))
+        .active(sync.sync_hidden_files)
+        .build();
+    hidden_files_group.add(&hidden_files);
+    groups.push(hidden_files_group);
+
     let excluded = libadwaita::PreferencesGroup::builder()
         .title(t("Excluded Files"))
         .build();
@@ -575,6 +586,7 @@ pub(crate) fn sync_option_groups(
         push,
         remote_timer,
         remote_minutes,
+        hidden_files,
         exclusions_enabled,
         retries,
     };
@@ -630,6 +642,15 @@ pub(crate) fn sync_option_groups(
         let callbacks = callbacks.clone();
         let widgets_guard = widgets.clone();
         widgets.remote_minutes.connect_value_notify(move |_| {
+            save_sync(&store, &account_id, &callbacks, &widgets_guard);
+        });
+    }
+    {
+        let store = store.clone();
+        let account_id = account_id.to_string();
+        let callbacks = callbacks.clone();
+        let widgets_guard = widgets.clone();
+        widgets.hidden_files.connect_active_notify(move |_| {
             save_sync(&store, &account_id, &callbacks, &widgets_guard);
         });
     }
@@ -1229,6 +1250,7 @@ fn save_sync(
         account.sync.remote_push_enabled = widgets.push.is_active();
         account.sync.remote_interval_enabled = widgets.remote_timer.is_active();
         account.sync.remote_interval_minutes = remote_minutes;
+        account.sync.sync_hidden_files = widgets.hidden_files.is_active();
         account.sync.exclude_patterns_enabled = widgets.exclusions_enabled.is_active();
         account.sync.max_sync_retries = retries;
     }) {
@@ -1996,6 +2018,7 @@ struct SyncWidgets {
     push: libadwaita::SwitchRow,
     remote_timer: libadwaita::SwitchRow,
     remote_minutes: libadwaita::SpinRow,
+    hidden_files: libadwaita::SwitchRow,
     exclusions_enabled: libadwaita::SwitchRow,
     retries: libadwaita::SpinRow,
 }
@@ -2464,6 +2487,14 @@ mod tests {
         assert_eq!(t("Settings"), "Configuración");
         assert_eq!(t("Synchronization"), "Sincronización");
         assert_eq!(
+            t("Sync hidden files and folders"),
+            "Sincronizar archivos y carpetas ocultos"
+        );
+        assert_eq!(
+            t("Dot-prefixed files and folders are skipped when off. Exclude patterns still apply."),
+            "Cuando está desactivado, se omiten los archivos y carpetas que empiezan por punto. Los patrones de exclusión se siguen aplicando."
+        );
+        assert_eq!(
             t("Start NextSync when I sign in"),
             "Iniciar NextSync al iniciar sesión"
         );
@@ -2518,6 +2549,61 @@ mod tests {
         let window = gtk4::Window::new();
         let toast = libadwaita::ToastOverlay::new();
         SettingsHost::new(&window, &toast)
+    }
+
+    fn find_switch(widget: &gtk4::Widget, title: &str) -> Option<libadwaita::SwitchRow> {
+        if let Ok(row) = widget.clone().downcast::<libadwaita::SwitchRow>() {
+            if row.title().as_str() == title {
+                return Some(row);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = find_switch(&widget, title) {
+                return Some(row);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    #[test]
+    fn hidden_files_switch_persists_and_reconfigures_the_account() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let dir = tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let account_id = store.add_account(&sample_account()).unwrap();
+            let account = store.account(&account_id).unwrap().unwrap();
+            let reconfigured = std::rc::Rc::new(std::cell::Cell::new(false));
+            let reconfigured_from_callback = reconfigured.clone();
+            let callbacks = SettingsCallbacks {
+                on_reconfigure: Some(std::rc::Rc::new(move || {
+                    reconfigured_from_callback.set(true);
+                })),
+                ..SettingsCallbacks::default()
+            };
+            let (groups, _) =
+                sync_option_groups(&store, &account_id, &account, &callbacks, &test_host());
+            let row = groups
+                .iter()
+                .find_map(|group| find_switch(group.upcast_ref(), "Sync hidden files and folders"))
+                .expect("the synchronization page exposes the hidden-files switch");
+
+            assert!(!row.is_active());
+            assert_eq!(
+                row.subtitle().as_deref(),
+                Some(
+                    "Dot-prefixed files and folders are skipped when off. Exclude patterns still apply."
+                )
+            );
+            row.set_active(true);
+
+            let saved = store.account(&account_id).unwrap().unwrap();
+            assert!(saved.sync.sync_hidden_files);
+            assert!(reconfigured.get());
+            reset_locale();
+        });
     }
 
     /// The in-app view embeds exactly the five preference pages and switches

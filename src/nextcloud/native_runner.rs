@@ -184,6 +184,10 @@ impl SyncRunner for NativeEngineRunner {
         });
     }
 
+    fn update_sync_config(&mut self, sync: &crate::storage::config::SyncConfig) {
+        self.account.sync = sync.clone();
+    }
+
     fn cancel(&mut self) {
         self.cancel.cancel();
     }
@@ -249,6 +253,31 @@ mod tests {
         assert_eq!(cfg.proxy.as_deref(), Some("http://proxy.invalid:3128"));
         assert!(cfg.trust_invalid_certificates);
         assert!(!cfg.dry_run);
+    }
+
+    #[test]
+    fn sync_config_update_changes_hidden_files_for_the_next_run() {
+        let (tx, _rx) = async_channel::bounded(4);
+        let mut runner = NativeEngineRunner::new(
+            account(
+                crate::nextcloud::provider::Provider::OpenCloud,
+                "https://cloud.example.com/",
+            ),
+            folder("/tmp/ignored"),
+            NetworkConfig::default(),
+            tx,
+        );
+        let sync = crate::storage::config::SyncConfig {
+            sync_hidden_files: true,
+            ..crate::storage::config::SyncConfig::default()
+        };
+
+        <NativeEngineRunner as crate::core::scheduler::SyncRunner>::update_sync_config(
+            &mut runner,
+            &sync,
+        );
+
+        assert!(runner.config("secret").sync_hidden_files);
     }
 
     #[test]
