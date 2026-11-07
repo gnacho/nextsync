@@ -768,6 +768,17 @@ impl SchedulerInner {
     }
 
     fn start(&mut self) -> StartAttempt {
+        self.start_with_permit_turn(false)
+    }
+
+    fn start_after_permit_release(&mut self) -> StartAttempt {
+        if let Some(permit) = &self.permit {
+            permit.claim_released_turn();
+        }
+        self.start_with_permit_turn(true)
+    }
+
+    fn start_with_permit_turn(&mut self, released_turn: bool) -> StartAttempt {
         self.start_source = None;
         if self.stopped || self.preparing || self.running || self.queue.is_empty() || !self.online {
             return StartAttempt::Aborted;
@@ -817,27 +828,35 @@ impl SchedulerInner {
             }
         }
         self.delete_bypass_once = false;
-        self.prepare_sync(reasons)
+        self.prepare_sync(reasons, released_turn)
     }
 
-    fn prepare_sync(&mut self, reasons: Vec<Trigger>) -> StartAttempt {
+    fn prepare_sync(&mut self, reasons: Vec<Trigger>, released_turn: bool) -> StartAttempt {
         if let Some(flag) = &self.run_active {
             flag.set(true);
         }
         self.state.set(AppState::Syncing, t("Synchronizing files…"));
         self.state.set_progress(None);
         self.preparing = true;
-        self.begin_run(reasons)
+        self.begin_run(reasons, released_turn)
     }
 
-    fn begin_run(&mut self, reasons: Vec<Trigger>) -> StartAttempt {
+    fn begin_run(&mut self, reasons: Vec<Trigger>, released_turn: bool) -> StartAttempt {
         self.preparing = false;
         if let Some(permit) = &self.permit {
-            // Issue #35: acquire for the local root when known so another
-            // scheduler on an overlapping folder is queued instead of run.
-            let acquired = match &self.local_root {
-                Some(root) => permit.try_acquire_root(root),
-                None => permit.try_acquire(),
+            // Issue #309: a release wakes the oldest waiter through an idle
+            // callback. Until that callback runs, new attempts must join the
+            // FIFO instead of acquiring the free slot ahead of it. The woken
+            // waiter itself keeps the released turn even with waiters behind.
+            let acquired = if released_turn || permit.waiter_count() == 0 {
+                // Issue #35: acquire for the local root when known so another
+                // scheduler on an overlapping folder is queued instead of run.
+                match &self.local_root {
+                    Some(root) => permit.try_acquire_root(root),
+                    None => permit.try_acquire(),
+                }
+            } else {
+                false
             };
             if !acquired {
                 self.queue.extend(reasons.iter().copied());
@@ -865,7 +884,7 @@ impl SchedulerInner {
                     // `start` directly, like Python's `idle_add(self._start)`.
                     let _ = source.borrow_mut().add_idle(Box::new(move || {
                         if let Some(inner) = weak.upgrade() {
-                            let attempt = inner.borrow_mut().start();
+                            let attempt = inner.borrow_mut().start_after_permit_release();
                             if attempt == StartAttempt::Aborted {
                                 // Issue #197: this waiter was woken by a
                                 // release but could not start (empty queue,
@@ -2777,6 +2796,50 @@ mod tests {
             source.borrow().pending() >= 1,
             "interval now schedules a run"
         );
+    }
+
+    /// Issue #309: releasing a permit schedules the oldest waiter through an
+    /// idle callback. A new run from the busy folder must not acquire the free
+    /// permit before that callback gets its turn.
+    #[test]
+    fn new_run_cannot_overtake_an_existing_permit_waiter() {
+        let permit = SyncPermit::try_new(1).unwrap();
+        let (busy, source_busy, runner_busy) = make_scheduler(Some(permit.clone()));
+        let (queued, source_queued, runner_queued) = make_scheduler(Some(permit.clone()));
+
+        busy.request(Trigger::Manual);
+        run_idle(&source_busy);
+        assert_eq!(runner_busy.0.borrow().start_calls, 1);
+
+        queued.request(Trigger::Manual);
+        run_idle(&source_queued);
+        assert_eq!(runner_queued.0.borrow().start_calls, 0);
+
+        finish(&runner_busy, SyncOutcome::Success);
+        assert_eq!(source_queued.borrow().pending(), 1);
+
+        run_idle(&source_busy); // cooldown elapsed
+        busy.request(Trigger::LocalInotify);
+        run_idle(&source_busy); // debounce elapsed -> start idle armed
+
+        // A different ready callback may run before the waiter's idle. The
+        // busy folder must join the FIFO instead of taking its released slot.
+        run_idle(&source_busy);
+        assert!(permit.available());
+        assert_eq!(runner_busy.0.borrow().start_calls, 1);
+        assert_eq!(queued.queue_len(), 1);
+        run_idle(&source_queued);
+
+        assert_eq!(
+            runner_queued.0.borrow().start_calls,
+            1,
+            "the existing waiter must run before the busy folder's follow-up"
+        );
+        assert_eq!(runner_busy.0.borrow().start_calls, 1);
+
+        finish(&runner_queued, SyncOutcome::Success);
+        run_idle(&source_busy);
+        assert_eq!(runner_busy.0.borrow().start_calls, 2);
     }
 
     /// Issue #197: a permit waiter that wakes up but cannot start must pass

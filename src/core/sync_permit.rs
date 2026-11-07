@@ -69,6 +69,8 @@ struct SyncPermitInner {
     max_concurrent: usize,
     in_use: usize,
     waiters: Vec<Box<dyn FnOnce()>>,
+    /// Waiters whose release callback is scheduled but has not run yet.
+    pending_wakeups: usize,
     /// Canonical roots of the holders that acquired with
     /// [`SyncPermit::try_acquire_root`], oldest first. Plain `try_acquire`
     /// holders stay untracked (they still consume a slot).
@@ -86,6 +88,7 @@ impl SyncPermit {
                 max_concurrent,
                 in_use: 0,
                 waiters: Vec::new(),
+                pending_wakeups: 0,
                 roots: Vec::new(),
             })),
         })
@@ -160,7 +163,15 @@ impl SyncPermit {
     /// can name the folder it is waiting on; anyone behind it should use the
     /// generic wording instead of repeating the same folder name.
     pub fn waiter_count(&self) -> usize {
-        self.inner.borrow().waiters.len()
+        let inner = self.inner.borrow();
+        inner.waiters.len() + inner.pending_wakeups
+    }
+
+    /// Consume the turn assigned to a waiter whose release callback is now
+    /// running. Until then the pending wakeup keeps new runs behind the FIFO.
+    pub fn claim_released_turn(&self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.pending_wakeups = inner.pending_wakeups.saturating_sub(1);
     }
 
     /// Release one slot and wake the oldest waiter, if any.
@@ -180,6 +191,7 @@ impl SyncPermit {
             if inner.waiters.is_empty() {
                 None
             } else {
+                inner.pending_wakeups += 1;
                 Some(inner.waiters.remove(0))
             }
         };
