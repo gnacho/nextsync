@@ -43,6 +43,6 @@ modules:
         done
     sources:
       - type: archive
-        url: https://github.com/gnacho/nextsync/archive/refs/tags/v0.44.2.tar.gz
-        sha256: 082ca3aafac3afd9fcc4c978cf7fe2853200281751145607ce394c45cb399f5b
+        url: https://github.com/gnacho/nextsync/archive/refs/tags/v0.44.4.tar.gz
+        sha256: f32f9dc472aa2602f7d2cd3673523fa16ec8c19812331b1f8a873c9b92b7e8a6
       - cargo-sources.json
