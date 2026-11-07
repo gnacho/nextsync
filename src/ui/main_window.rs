@@ -224,7 +224,8 @@ impl AccountView {
                 .flatten()
                 .and_then(|password| {
                     crate::nextcloud::api::NextcloudApi::new()
-                        .account_summary(
+                        .account_summary_for_provider(
+                            account_for_quota.provider,
                             &account_for_quota.server_url,
                             &account_for_quota.login_name,
                             &password,

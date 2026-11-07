@@ -151,6 +151,21 @@ impl AccountSummary {
     }
 }
 
+fn quota_values(payload: &serde_json::Value) -> (Option<u64>, Option<u64>) {
+    let quota = payload.get("quota");
+    let used = quota
+        .and_then(|quota| quota.get("used"))
+        .and_then(serde_json::Value::as_f64)
+        .filter(|used| *used >= 0.0)
+        .map(|used| used as u64);
+    let total = quota
+        .and_then(|quota| quota.get("total"))
+        .and_then(serde_json::Value::as_f64)
+        .filter(|total| *total > 0.0)
+        .map(|total| total as u64);
+    (used, total)
+}
+
 /// One OpenCloud space discovered over WebDAV.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenCloudSpace {
@@ -331,22 +346,80 @@ impl NextcloudApi {
             .get("display-name")
             .and_then(|name| name.as_str())
             .map(str::to_owned);
-        let used = data
-            .get("quota")
-            .and_then(|quota| quota.get("used"))
-            .and_then(|used| used.as_f64())
-            .filter(|used| *used >= 0.0)
-            .map(|used| used as u64);
-        let total = data
-            .get("quota")
-            .and_then(|quota| quota.get("total"))
-            .and_then(|total| total.as_f64())
-            .filter(|total| *total > 0.0)
-            .map(|total| total as u64);
+        let (used, total) = quota_values(&data);
         Ok(AccountSummary {
             display_name,
             used,
             total,
+        })
+    }
+
+    /// Account summary through the API that belongs to each provider.
+    pub fn account_summary_for_provider(
+        &self,
+        provider: crate::nextcloud::provider::Provider,
+        server: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<AccountSummary, ApiError> {
+        match provider {
+            crate::nextcloud::provider::Provider::Nextcloud => {
+                self.account_summary(server, username, password)
+            }
+            crate::nextcloud::provider::Provider::OpenCloud => {
+                self.opencloud_account_summary(server, username, password)
+            }
+        }
+    }
+
+    /// Account-level quota from every LibreGraph drive visible to the user.
+    ///
+    /// OpenCloud has no account quota in the Nextcloud OCS user endpoint. The
+    /// account card therefore sums `quota.used` across `/me/drives`. A total
+    /// is available only when every drive reports a finite positive total.
+    /// Missing or negative usage values stay unknown, matching the Nextcloud
+    /// summary behavior.
+    pub fn opencloud_account_summary(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+    ) -> Result<AccountSummary, ApiError> {
+        let url = format!("{}/graph/v1.0/me/drives", server.trim_end_matches('/'));
+        let authorization = basic_authorization(username, token);
+        let headers = [("Authorization", authorization.as_str())];
+        let response = self.http.request("GET", &url, &headers, None)?;
+        map_status(response.status)?;
+        let payload: serde_json::Value =
+            serde_json::from_slice(&response.body).map_err(|_| ApiError::InvalidResponse)?;
+        let drives = payload
+            .get("value")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(ApiError::InvalidResponse)?;
+        let mut used = None;
+        let mut total = 0u64;
+        let mut all_totals = !drives.is_empty();
+        for drive in drives {
+            let (drive_used, drive_total) = quota_values(drive);
+            if let Some(drive_used) = drive_used {
+                used = Some(
+                    used.unwrap_or(0u64)
+                        .checked_add(drive_used)
+                        .ok_or(ApiError::InvalidResponse)?,
+                );
+            }
+            if let Some(drive_total) = drive_total {
+                total = total
+                    .checked_add(drive_total)
+                    .ok_or(ApiError::InvalidResponse)?;
+            } else {
+                all_totals = false;
+            }
+        }
+        Ok(AccountSummary {
+            display_name: None,
+            used,
+            total: all_totals.then_some(total),
         })
     }
 
@@ -627,13 +700,7 @@ impl NextcloudApi {
         map_status(response.status)?;
         let payload: serde_json::Value =
             serde_json::from_slice(&response.body).map_err(|_| ApiError::InvalidResponse)?;
-        let used = payload
-            .get("quota")
-            .and_then(|quota| quota.get("used"))
-            .and_then(serde_json::Value::as_f64)
-            .filter(|used| *used >= 0.0)
-            .map(|used| used as u64);
-        Ok(used)
+        Ok(quota_values(&payload).0)
     }
 
     /// List the top-level folders that already exist for the account.
@@ -2734,6 +2801,91 @@ mod tests {
         assert_eq!(summary.total, None, "negative total means unlimited");
         assert!(summary.usage_label().ends_with("· unlimited"));
         assert!(summary.usage_label().starts_with("53.2 GiB"));
+    }
+
+    #[test]
+    fn opencloud_account_summary_aggregates_drive_quota() {
+        let body = br#"{"value":[
+            {"driveType":"personal","quota":{"used":100,"total":1000}},
+            {"driveType":"project","quota":{"used":200,"total":2000}}
+        ]}"#;
+        let http = FakeHttp::new(200, body);
+        let requests = http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(http));
+        let summary = api
+            .opencloud_account_summary("https://cloud.example.com/", "alice", "token")
+            .unwrap();
+        assert_eq!(summary.used, Some(300));
+        assert_eq!(summary.total, Some(3000));
+        assert_eq!(summary.display_name, None);
+        let requests = requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(
+            requests[0].url,
+            "https://cloud.example.com/graph/v1.0/me/drives"
+        );
+        assert!(header_value(&requests[0], "Authorization")
+            .unwrap()
+            .starts_with("Basic "));
+    }
+
+    #[test]
+    fn opencloud_account_summary_handles_unlimited_and_partial_quota() {
+        let body = br#"{"value":[
+            {"driveType":"personal","quota":{"used":150,"total":-3}},
+            {"driveType":"project"},
+            {"driveType":"virtual","quota":{"used":-1,"total":0}}
+        ]}"#;
+        let http = FakeHttp::new(200, body);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let summary = api
+            .opencloud_account_summary("https://cloud.example.com", "alice", "token")
+            .unwrap();
+        assert_eq!(summary.used, Some(150));
+        assert_eq!(summary.total, None);
+    }
+
+    #[test]
+    fn opencloud_account_summary_without_quota_is_empty() {
+        let http = FakeHttp::new(200, br#"{"value":[{"driveType":"personal"}]}"#);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.opencloud_account_summary("https://cloud.example.com", "alice", "token"),
+            Ok(AccountSummary::default())
+        );
+    }
+
+    #[test]
+    fn account_summary_for_provider_uses_the_matching_endpoint() {
+        let nextcloud_http =
+            FakeHttp::new(200, br#"{"ocs":{"data":{"quota":{"used":10,"total":20}}}}"#);
+        let nextcloud_requests = nextcloud_http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(nextcloud_http));
+        api.account_summary_for_provider(
+            crate::nextcloud::provider::Provider::Nextcloud,
+            "https://cloud.example.com",
+            "alice",
+            "secret",
+        )
+        .unwrap();
+        assert!(nextcloud_requests.borrow()[0]
+            .url
+            .ends_with("/ocs/v2.php/cloud/user?format=json"));
+
+        let opencloud_http = FakeHttp::new(200, br#"{"value":[]}"#);
+        let opencloud_requests = opencloud_http.requests.clone();
+        let api = NextcloudApi::with_http(Box::new(opencloud_http));
+        api.account_summary_for_provider(
+            crate::nextcloud::provider::Provider::OpenCloud,
+            "https://cloud.example.com",
+            "alice",
+            "token",
+        )
+        .unwrap();
+        assert!(opencloud_requests.borrow()[0]
+            .url
+            .ends_with("/graph/v1.0/me/drives"));
     }
 
     #[test]
