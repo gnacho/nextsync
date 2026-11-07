@@ -2,6 +2,16 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.0] - 2026-11-07
+
+### Added
+
+- Add Folder lives above the folder list in the main window and opens the wizard for the active account, without going through Preferences (#316).
+
+### Changed
+
+- The Add Folder row leaves Preferences, so the action has a single obvious home.
+
 ## [0.43.28] - 2026-11-07
 
 ### Added

@@ -1,12 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.43.28",
+  "version": "0.44.0",
   "mandatory": false,
-  "summary": "All per-account options grouped in Preferences behind an account selector.",
+  "summary": "Add Folder shortcut in the main window for the active account.",
   "changelog": [
-    "Preferences opens an Account page with a selector: hidden files, Add Folder, proxy and TLS, authentication and account removal all apply to the chosen account (#314).",
-    "The account settings panel leaves the main window, which keeps only folders, status and Sync Now.",
-    "Switching accounts in the selector is instant, without the sliding transition."
+    "Add Folder lives above the folder list in the main window and opens the wizard for the active account (#316).",
+    "The Add Folder row leaves Preferences, so the action has a single obvious home."
   ],
   "released_at": "2026-11-07T00:00:00Z"
 }
