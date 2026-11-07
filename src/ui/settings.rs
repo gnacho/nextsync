@@ -3,8 +3,8 @@
 //! Port of `ui/settings.py` (v0.4.0) to gtk-rs/libadwaita: a single in-app
 //! `SettingsView` (ToolbarView + ViewStack + ViewSwitcherBar) with General,
 //! Synchronization, Advanced synchronization, Network and Advanced pages, and
-//! the typed Remove account confirmation. Folder management lives in the sync view (issue #18); the
-//! standalone Add Folder dialog here is shared with it.
+//! the typed Remove account confirmation. Folder status lives in the sync view;
+//! the Synchronization page opens the shared Add Folder dialog.
 //!
 //! # Deviations from `settings.py` (motivated)
 //!
@@ -70,6 +70,8 @@ pub struct SettingsCallbacks {
     pub on_remove_account: Option<SettingsCallback>,
     /// Invoked after a folder is added or removed (refreshes the account view).
     pub on_folder_changed: Option<SettingsCallback>,
+    /// Invoked when the user asks to add a folder from the Synchronization page.
+    pub on_add_folder: Option<SettingsCallback>,
     /// Invoked after trigger/logging settings change (hot-reconfigures the
     /// account runtimes).
     pub on_reconfigure: Option<SettingsCallback>,
@@ -140,9 +142,8 @@ impl SettingsView {
         // configuration; account-owned settings come from the snapshot.
         let config = config_store.load().unwrap_or_default();
 
-        // Folder management (list, Add Folder, desktop integration) was
-        // removed from Settings by user decision (issue #18): the sync view
-        // owns it, so the settings pages never duplicate it.
+        // Folder status and removal stay in the sync view. The Synchronization
+        // page owns folder creation so the action is not detached from Settings.
         let general = build_general_page(&config_store, &config.general);
         let (sync_groups, sync_advanced_groups) =
             sync_option_groups(&config_store, &account_id, &account, &callbacks, host);
@@ -428,9 +429,9 @@ fn build_general_page(store: &ConfigStore, general: &GeneralConfig) -> libadwait
 /// shared by the account settings panel in the main window and were the former
 /// Synchronization page.
 ///
-/// Returns the everyday groups (manual-only banner, local and remote changes)
-/// and the advanced ones (exclusions and reliability). Issue #249 splits them
-/// across two pages because the whole block did not fit in a 960 px tall
+/// Returns the everyday groups (folder creation, manual-only banner, local and
+/// remote changes) and the advanced ones (exclusions and reliability). Issue
+/// #249 splits them across two pages because the whole block did not fit in a 960 px tall
 /// window.
 /// Render the push channel message into its status row. A channel without a
 /// message (connected, or no runtime yet) hides the row instead of showing it
@@ -458,6 +459,27 @@ pub(crate) fn sync_option_groups(
     let sync = &account.sync;
     let mut groups: Vec<libadwaita::PreferencesGroup> = Vec::new();
     let mut advanced: Vec<libadwaita::PreferencesGroup> = Vec::new();
+
+    let folders = libadwaita::PreferencesGroup::builder()
+        .title(t("Synchronization Folders"))
+        .build();
+    let add_folder = libadwaita::ActionRow::builder()
+        .title(t("Add Folder"))
+        .subtitle(t("Add a local folder to synchronize with this account"))
+        .activatable(callbacks.on_add_folder.is_some())
+        .build();
+    let next = gtk4::Image::builder()
+        .icon_name("go-next-symbolic")
+        .pixel_size(16)
+        .build();
+    add_folder.add_suffix(&next);
+    if let Some(on_add_folder) = callbacks.on_add_folder.clone() {
+        add_folder.connect_activated(move |_| {
+            on_add_folder();
+        });
+    }
+    folders.add(&add_folder);
+    groups.push(folders);
 
     let manual_group = libadwaita::PreferencesGroup::new();
     let banner = libadwaita::Banner::new(t(
@@ -2509,6 +2531,52 @@ mod tests {
                 &host,
             );
             assert_eq!(view.page_names().len(), 5);
+            reset_locale();
+        });
+    }
+
+    fn find_action_row(widget: &gtk4::Widget, title: &str) -> Option<libadwaita::ActionRow> {
+        if let Ok(row) = widget.clone().downcast::<libadwaita::ActionRow>() {
+            if row.title().as_str() == title {
+                return Some(row);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(row) = find_action_row(&widget, title) {
+                return Some(row);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
+    #[test]
+    fn synchronization_page_opens_the_add_folder_action() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let dir = tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let account = sample_account();
+            let account_id = store.add_account(&account).unwrap();
+            let invoked = Rc::new(std::cell::Cell::new(false));
+            let invoked_from_callback = invoked.clone();
+            let callbacks = SettingsCallbacks {
+                on_add_folder: Some(Rc::new(move || {
+                    invoked_from_callback.set(true);
+                })),
+                ..SettingsCallbacks::default()
+            };
+            let view = SettingsView::new(store, account, account_id, callbacks, &test_host());
+            let page = view
+                .stack
+                .child_by_name(page::SYNCHRONIZATION)
+                .expect("synchronization page");
+            let row = find_action_row(&page, "Add Folder").expect("Add Folder row in Settings");
+
+            libadwaita::prelude::ActionRowExt::activate(&row);
+
+            assert!(invoked.get(), "the Settings row invokes the shared action");
             reset_locale();
         });
     }
