@@ -2330,6 +2330,25 @@ mod tests {
         None
     }
 
+    fn find_preferences_page(
+        widget: &gtk4::Widget,
+        title: &str,
+    ) -> Option<libadwaita::PreferencesPage> {
+        if let Ok(page) = widget.clone().downcast::<libadwaita::PreferencesPage>() {
+            if page.title().as_str() == title {
+                return Some(page);
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(page) = find_preferences_page(&widget, title) {
+                return Some(page);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+
     fn find_settings_switch(widget: &gtk4::Widget, title: &str) -> Option<libadwaita::SwitchRow> {
         if let Ok(row) = widget.clone().downcast::<libadwaita::SwitchRow>() {
             if row.title().as_str() == title {
@@ -2790,7 +2809,7 @@ mod tests {
             account_b.sync.sync_hidden_files = true;
             let id_a = store.add_account(&account_a).unwrap();
             let id_b = store.add_account(&account_b).unwrap();
-            account_a.id = id_a;
+            account_a.id = id_a.clone();
             account_b.id = id_b.clone();
             let config = Config {
                 accounts: vec![account_a, account_b],
@@ -2807,7 +2826,7 @@ mod tests {
                 std::cell::RefCell::new(MainWindow::new(
                     &app,
                     config,
-                    store,
+                    store.clone(),
                     manager,
                     crate::core::log::LogBuffer::new(),
                     None,
@@ -2824,7 +2843,7 @@ mod tests {
             };
             selector.set_selected(1);
 
-            {
+            let hidden_b = {
                 let main = main.borrow();
                 assert_eq!(main.active_account_id.as_deref(), Some(id_b.as_str()));
                 let view = main.settings_view.as_ref().expect("Preferences stays open");
@@ -2837,10 +2856,40 @@ mod tests {
                         .unwrap_or_else(|| panic!("the selected account exposes {title}"));
                     assert!(row.is_activatable(), "{title} remains actionable");
                 }
-                let hidden = find_settings_switch(widget, "Sync hidden files and folders")
-                    .expect("synchronization options follow the selected account");
+                let account_page = find_preferences_page(widget, "Account")
+                    .expect("Preferences has an Account page");
+                let hidden = find_settings_switch(
+                    account_page.upcast_ref(),
+                    "Sync hidden files and folders",
+                )
+                .expect("the Account page exposes hidden-file synchronization");
                 assert!(hidden.is_active());
-            }
+                let sync_page = find_preferences_page(widget, "Synchronization")
+                    .expect("the Synchronization page remains available");
+                assert!(
+                    find_settings_switch(sync_page.upcast_ref(), "Sync hidden files and folders")
+                        .is_none(),
+                    "the toggle lives only on the Account page"
+                );
+                hidden
+            };
+            hidden_b.set_active(false);
+            assert!(
+                !store
+                    .account(&id_b)
+                    .unwrap()
+                    .unwrap()
+                    .sync
+                    .sync_hidden_files
+            );
+            assert!(
+                !store
+                    .account(&id_a)
+                    .unwrap()
+                    .unwrap()
+                    .sync
+                    .sync_hidden_files
+            );
 
             let selector = {
                 let main = main.borrow();
@@ -2849,18 +2898,43 @@ mod tests {
                     .expect("the rebuilt view has an account selector")
             };
             selector.set_selected(0);
-            let main = main.borrow();
-            let view = main
-                .settings_view
-                .as_ref()
-                .expect("Preferences switches back");
-            let widget = view.widget().upcast_ref::<gtk4::Widget>();
-            let proxy = find_settings_entry(widget, "Custom HTTP proxy")
-                .expect("the original account exposes its proxy again");
-            assert_eq!(proxy.text().as_str(), "http://proxy-a.example.com:8080");
-            let hidden = find_settings_switch(widget, "Sync hidden files and folders")
-                .expect("the original synchronization options return");
-            assert!(!hidden.is_active());
+            let hidden_a = {
+                let main = main.borrow();
+                let view = main
+                    .settings_view
+                    .as_ref()
+                    .expect("Preferences switches back");
+                let widget = view.widget().upcast_ref::<gtk4::Widget>();
+                let proxy = find_settings_entry(widget, "Custom HTTP proxy")
+                    .expect("the original account exposes its proxy again");
+                assert_eq!(proxy.text().as_str(), "http://proxy-a.example.com:8080");
+                let account_page =
+                    find_preferences_page(widget, "Account").expect("the rebuilt Account page");
+                let hidden = find_settings_switch(
+                    account_page.upcast_ref(),
+                    "Sync hidden files and folders",
+                )
+                .expect("the original account exposes hidden-file synchronization");
+                assert!(!hidden.is_active());
+                hidden
+            };
+            hidden_a.set_active(true);
+            assert!(
+                store
+                    .account(&id_a)
+                    .unwrap()
+                    .unwrap()
+                    .sync
+                    .sync_hidden_files
+            );
+            assert!(
+                !store
+                    .account(&id_b)
+                    .unwrap()
+                    .unwrap()
+                    .sync
+                    .sync_hidden_files
+            );
             reset_locale();
         });
     }

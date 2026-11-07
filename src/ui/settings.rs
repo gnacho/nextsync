@@ -295,6 +295,7 @@ fn build_account_page(
     selector_group.add(&selector_row);
     page.add(&selector_group);
     page.add(&folder_group(callbacks));
+    page.add(&hidden_files_group(store, account_id, account, callbacks));
     page.add(&account_connection_group(
         store, account_id, account, callbacks,
     ));
@@ -325,6 +326,36 @@ fn folder_group(callbacks: &SettingsCallbacks) -> libadwaita::PreferencesGroup {
     }
     folders.add(&add_folder);
     folders
+}
+
+fn hidden_files_group(
+    store: &ConfigStore,
+    account_id: &str,
+    account: &AccountConfig,
+    callbacks: &SettingsCallbacks,
+) -> libadwaita::PreferencesGroup {
+    let group = libadwaita::PreferencesGroup::new();
+    let hidden_files = libadwaita::SwitchRow::builder()
+        .title(t("Sync hidden files and folders"))
+        .subtitle(t(
+            "Dot-prefixed files and folders are skipped when off. Exclude patterns still apply.",
+        ))
+        .active(account.sync.sync_hidden_files)
+        .build();
+    let store = store.clone();
+    let account_id = account_id.to_string();
+    let callbacks = callbacks.clone();
+    hidden_files.connect_active_notify(move |row| {
+        if let Err(error) = persist_account(&store, &account_id, |account| {
+            account.sync.sync_hidden_files = row.is_active();
+        }) {
+            eprintln!("Settings: could not save hidden-file synchronization: {error}");
+            return;
+        }
+        invoke(&callbacks.on_reconfigure);
+    });
+    group.add(&hidden_files);
+    group
 }
 
 pub(crate) fn account_connection_group(
@@ -666,17 +697,6 @@ pub(crate) fn sync_option_groups(
     remote.add(&remote_minutes);
     groups.push(remote);
 
-    let hidden_files_group = libadwaita::PreferencesGroup::new();
-    let hidden_files = libadwaita::SwitchRow::builder()
-        .title(t("Sync hidden files and folders"))
-        .subtitle(t(
-            "Dot-prefixed files and folders are skipped when off. Exclude patterns still apply.",
-        ))
-        .active(sync.sync_hidden_files)
-        .build();
-    hidden_files_group.add(&hidden_files);
-    groups.push(hidden_files_group);
-
     let excluded = libadwaita::PreferencesGroup::builder()
         .title(t("Excluded Files"))
         .build();
@@ -729,7 +749,6 @@ pub(crate) fn sync_option_groups(
         push,
         remote_timer,
         remote_minutes,
-        hidden_files,
         exclusions_enabled,
         retries,
     };
@@ -785,15 +804,6 @@ pub(crate) fn sync_option_groups(
         let callbacks = callbacks.clone();
         let widgets_guard = widgets.clone();
         widgets.remote_minutes.connect_value_notify(move |_| {
-            save_sync(&store, &account_id, &callbacks, &widgets_guard);
-        });
-    }
-    {
-        let store = store.clone();
-        let account_id = account_id.to_string();
-        let callbacks = callbacks.clone();
-        let widgets_guard = widgets.clone();
-        widgets.hidden_files.connect_active_notify(move |_| {
             save_sync(&store, &account_id, &callbacks, &widgets_guard);
         });
     }
@@ -1393,7 +1403,6 @@ fn save_sync(
         account.sync.remote_push_enabled = widgets.push.is_active();
         account.sync.remote_interval_enabled = widgets.remote_timer.is_active();
         account.sync.remote_interval_minutes = remote_minutes;
-        account.sync.sync_hidden_files = widgets.hidden_files.is_active();
         account.sync.exclude_patterns_enabled = widgets.exclusions_enabled.is_active();
         account.sync.max_sync_retries = retries;
     }) {
@@ -2161,7 +2170,6 @@ struct SyncWidgets {
     push: libadwaita::SwitchRow,
     remote_timer: libadwaita::SwitchRow,
     remote_minutes: libadwaita::SpinRow,
-    hidden_files: libadwaita::SwitchRow,
     exclusions_enabled: libadwaita::SwitchRow,
     retries: libadwaita::SpinRow,
 }
@@ -2772,12 +2780,16 @@ mod tests {
                 })),
                 ..SettingsCallbacks::default()
             };
-            let (groups, _) =
-                sync_option_groups(&store, &account_id, &account, &callbacks, &test_host());
-            let row = groups
-                .iter()
-                .find_map(|group| find_switch(group.upcast_ref(), "Sync hidden files and folders"))
-                .expect("the synchronization page exposes the hidden-files switch");
+            let page = build_account_page(
+                &store,
+                std::slice::from_ref(&account),
+                &account_id,
+                &account,
+                &callbacks,
+                &test_host(),
+            );
+            let row = find_switch(page.upcast_ref(), "Sync hidden files and folders")
+                .expect("the Account page exposes the hidden-files switch");
 
             assert!(!row.is_active());
             assert_eq!(
