@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.4] - 2026-11-07
+
+### Changed
+
+- Account cards compact the connection status, storage used and synchronized file count into one line (#322).
+
 ## [0.44.2] - 2026-11-07
 
 ### Added

@@ -1,12 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.44.2",
+  "version": "0.44.4",
   "mandatory": false,
-  "summary": "Add Folder in the application menu and OpenCloud storage usage with synchronized file counts.",
+  "summary": "Account cards show connection, storage used and synchronized files on one line.",
   "changelog": [
-    "Add Folder moves to the application menu and the wizard names the target account (#318).",
-    "OpenCloud account cards show the storage used through LibreGraph (#320).",
-    "Account cards show the number of synchronized files in small print."
+    "Account status, storage used and synchronized file count share a single compact line (#322)."
   ],
   "released_at": "2026-11-07T00:00:00Z"
 }
