@@ -412,8 +412,10 @@ impl FolderRuntime {
         self.scheduler.user_paused()
     }
 
-    /// Reconfigure the interval timers from the account sync settings.
+    /// Reconfigure the scheduler, runner and interval timers from the account
+    /// sync settings.
     pub fn reconfigure(&mut self, account: &AccountConfig) {
+        self.scheduler.update_sync_config(&account.sync);
         self.timers
             .configure(&crate::core::triggers::TriggerSettings::from(&account.sync));
     }
@@ -925,6 +927,9 @@ impl AccountRuntime {
     fn apply_account(&mut self, account: &AccountConfig) {
         let push_was_enabled = self.account.sync.remote_push_enabled;
         self.account = account.clone();
+        for runtime in self.folders.values_mut() {
+            runtime.reconfigure(account);
+        }
         self.sync_folders();
         if push_was_enabled != account.sync.remote_push_enabled {
             if let Some(client) = &self.push {
@@ -1285,6 +1290,26 @@ mod tests {
         // regardless of the ambient locale (LANG=es_ES on the dev machine).
         crate::util::i18n::set_locale(crate::util::i18n::Locale::English);
         Rc::new(RefCell::new(FakeTimeoutSource::default()))
+    }
+
+    #[derive(Clone, Default)]
+    struct SyncConfigRecorder {
+        hidden_files_updates: Rc<RefCell<Vec<bool>>>,
+    }
+
+    impl SyncRunner for SyncConfigRecorder {
+        fn start(
+            &mut self,
+            _reasons: &[Trigger],
+            _on_finished: Box<dyn FnOnce(crate::core::scheduler::SyncOutcome, u64) + 'static>,
+        ) {
+        }
+
+        fn update_sync_config(&mut self, sync: &crate::storage::config::SyncConfig) {
+            self.hidden_files_updates
+                .borrow_mut()
+                .push(sync.sync_hidden_files);
+        }
     }
 
     fn sample_account(with_folders: bool) -> AccountConfig {
@@ -1899,6 +1924,38 @@ mod tests {
         suspend.fire_resume();
         // The resume trigger schedules a start through the shared backend.
         assert!(source.borrow().pending() >= 1);
+    }
+
+    #[test]
+    fn applying_an_account_updates_the_existing_folder_runner() {
+        let source = fake_source();
+        let account = sample_account(true);
+        let mut runtime = AccountRuntime::new(
+            account.clone(),
+            NetworkConfig::default(),
+            source.clone(),
+            None,
+            false,
+        );
+        runtime.start_without_watchers();
+        let recorder = SyncConfigRecorder::default();
+        let folder = account.folders[0].clone();
+        let folder_runtime = FolderRuntime::new(
+            &account,
+            folder.clone(),
+            &NetworkConfig::default(),
+            Box::new(recorder.clone()),
+            source,
+            None,
+            None,
+        );
+        runtime.folders.insert(folder.id.clone(), folder_runtime);
+        let mut updated = account;
+        updated.sync.sync_hidden_files = true;
+
+        runtime.apply_account(&updated);
+
+        assert_eq!(recorder.hidden_files_updates.borrow().as_slice(), &[true]);
     }
 
     // ---- push wiring ------------------------------------------------------

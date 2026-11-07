@@ -1259,6 +1259,18 @@ msgstr ""
 msgid "Remote interval (minutes)"
 msgstr "Intervalo remoto (minutos)"
 
+#: src/ui/settings.rs
+msgid "Sync hidden files and folders"
+msgstr "Sincronizar archivos y carpetas ocultos"
+
+#: src/ui/settings.rs
+msgid ""
+"Dot-prefixed files and folders are skipped when off. Exclude patterns still "
+"apply."
+msgstr ""
+"Cuando está desactivado, se omiten los archivos y carpetas que empiezan por "
+"punto. Los patrones de exclusión se siguen aplicando."
+
 #: src/nextsync/ui/settings.py:471
 msgid "Push connection"
 msgstr "Conexión push"

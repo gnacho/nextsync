@@ -111,6 +111,9 @@ pub trait SyncRunner {
         on_finished: Box<dyn FnOnce(SyncOutcome, u64) + 'static>,
     );
 
+    /// Apply fresh synchronization settings to runs started after this call.
+    fn update_sync_config(&mut self, _sync: &SyncConfig) {}
+
     /// Cancel a running reconciliation (best effort).
     fn cancel(&mut self) {}
 }
@@ -363,6 +366,13 @@ impl Scheduler {
     /// external-engine scan before every run.
     pub fn set_local_root(&self, local_root: Option<std::path::PathBuf>) {
         self.inner.borrow_mut().local_root = local_root;
+    }
+
+    /// Apply fresh synchronization settings to the scheduler and its runner.
+    pub fn update_sync_config(&self, sync: &SyncConfig) {
+        let mut inner = self.inner.borrow_mut();
+        inner.settings = TriggerSettings::from(sync);
+        inner.runner.update_sync_config(sync);
     }
 
     /// Tell the scheduler whether the account's notify_push channel is ready
