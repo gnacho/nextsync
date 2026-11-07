@@ -114,8 +114,6 @@ pub struct AccountCallbacks {
     pub on_open_folder: Option<OpenFolderCallback>,
     pub on_remove_folder: Option<RemoveFolderCallback>,
     pub on_edit_ignored: Option<EditIgnoredCallback>,
-    /// Invoked when the user clicks the in-view "Add Folder" row.
-    pub on_add_folder: Option<Rc<dyn Fn()>>,
     /// Invoked when the user opens the per-folder pending-changes view.
     pub on_pending_changes: Option<PendingChangesCallback>,
     /// Invoked when the user opens the deletion review for a folder (issue
@@ -180,8 +178,7 @@ impl AccountView {
         // Account summary (issues #81 and #93): one line with the
         // connection status - a green Lucide globe when reachable, a red
         // globe-off when not - plus the used space below (no capacity, no
-        // server or user: those live in the sidebar). Add Folder on the
-        // right in the theme accent.
+        // server or user: those live in the sidebar).
         let summary_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(10)
@@ -220,21 +217,6 @@ impl AccountView {
         summary_lines.append(&line_one);
         summary_lines.append(&usage_label);
         summary_box.append(&summary_lines);
-        // Add Folder as a real button next to the summary (issue #66),
-        // accented so it reads as the obvious action (issue #81).
-        if let Some(on_add_folder) = &callbacks.on_add_folder {
-            let add_button = gtk4::Button::builder()
-                .label(t("Add Folder"))
-                .tooltip_text(t("Add a local folder to synchronize with this account"))
-                .css_classes(["pill", "suggested-action"])
-                .valign(gtk4::Align::Center)
-                .build();
-            let on_add_folder = on_add_folder.clone();
-            add_button.connect_clicked(move |_| {
-                on_add_folder();
-            });
-            summary_box.append(&add_button);
-        }
         {
             // Quota fetch: only plain data crosses to the blocking thread;
             // widget clones are captured in the main-loop continuation.
@@ -578,10 +560,10 @@ impl MainWindow {
     /// Build the window. `account_manager` must already be started.
     ///
     /// `self_weak` must be the `Weak` pointing back to the `Rc<RefCell<MainWindow>>`
-    /// that owns this window. It is captured eagerly by the per-account view
-    /// (Add Folder row) constructed during `present_account`, so it has to be
-    /// valid from the start; passing `Weak::new()` here would leave the Add
-    /// Folder handler dead on first show.
+    /// that owns this window. It is captured eagerly by the per-account
+    /// callbacks constructed during `present_account`, so it has to be valid
+    /// from the start; passing `Weak::new()` here would leave those account
+    /// actions dead on first show.
     pub fn new(
         application: &libadwaita::Application,
         config: Config,
@@ -1210,9 +1192,8 @@ impl MainWindow {
         }
     }
 
-    /// Open the Add Folder dialog for the active account from the main window.
-    /// Shares the same dialog the Settings Synchronization page uses; on
-    /// success it refreshes the account view, and validation errors surface as
+    /// Open the Add Folder dialog for the active account from Settings.
+    /// On success it refreshes the account view, and validation errors surface as
     /// a toast on the main window's overlay (in addition to the dialog's own
     /// inline re-present).
     pub fn show_add_folder_dialog(&mut self) {
@@ -1631,6 +1612,14 @@ impl MainWindow {
                     }
                 }))
             },
+            on_add_folder: {
+                let weak = weak.clone();
+                Some(Rc::new(move || {
+                    if let Some(main) = weak.upgrade() {
+                        main.borrow_mut().show_add_folder_dialog();
+                    }
+                }))
+            },
             on_reconfigure: {
                 let weak = weak.clone();
                 Some(Rc::new(move || {
@@ -2039,14 +2028,6 @@ impl MainWindow {
                     dialog.present(Some(window.upcast_ref::<gtk4::Widget>()));
                 }))
             },
-            on_add_folder: {
-                let weak = self.self_weak.clone();
-                Some(Rc::new(move || {
-                    if let Some(main) = weak.upgrade() {
-                        main.borrow_mut().show_add_folder_dialog();
-                    }
-                }))
-            },
             on_pending_changes: {
                 let store = self.config_store.clone();
                 let window = self.window.clone();
@@ -2280,6 +2261,22 @@ mod tests {
     use super::*;
     use crate::util::i18n::{reset_locale, set_locale, Locale};
     use crate::util::url::server_host;
+
+    fn contains_button_label(widget: &gtk4::Widget, label: &str) -> bool {
+        if let Ok(button) = widget.clone().downcast::<gtk4::Button>() {
+            if button.label().as_deref() == Some(label) {
+                return true;
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if contains_button_label(&widget, label) {
+                return true;
+            }
+            child = widget.next_sibling();
+        }
+        false
+    }
 
     #[test]
     fn window_constants_are_stable() {
@@ -2896,6 +2893,41 @@ mod tests {
         });
     }
 
+    #[test]
+    fn account_view_has_no_detached_add_folder_button() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            set_locale(Locale::English);
+            let mut account = window_account();
+            account.folders.clear();
+            let mut runtime = AccountRuntime::new(
+                account,
+                crate::storage::config::NetworkConfig::default(),
+                std::rc::Rc::new(std::cell::RefCell::new(
+                    crate::core::debounce::FakeTimeoutSource::default(),
+                )),
+                None,
+                false,
+            );
+            runtime.start_without_watchers();
+            let callbacks = AccountCallbacks {
+                on_open_folder: None,
+                on_remove_folder: None,
+                on_edit_ignored: None,
+                on_pending_changes: None,
+                on_review_deletions: None,
+                on_resolve_conflicts: None,
+                on_avatar_cached: None,
+            };
+            let view = AccountView::new(runtime, callbacks, crate::core::log::LogBuffer::new());
+
+            assert!(!contains_button_label(
+                view.root.upcast_ref::<gtk4::Widget>(),
+                "Add Folder"
+            ));
+            reset_locale();
+        });
+    }
+
     /// Regression test for issue #151: the view must own its FolderStatusRow
     /// objects for as long as they are on screen. Dropping a row unsubscribes
     /// its live state/progress callbacks (the Drop impl from issue #121), so
@@ -2929,7 +2961,6 @@ mod tests {
                 on_open_folder: None,
                 on_remove_folder: None,
                 on_edit_ignored: None,
-                on_add_folder: None,
                 on_pending_changes: None,
                 on_review_deletions: None,
                 on_resolve_conflicts: None,
