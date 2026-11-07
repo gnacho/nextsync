@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.43.26",
+  "version": "0.43.28",
   "mandatory": false,
-  "summary": "Hidden files toggle in Settings, folder queue fairness and a fix for the Preferences crash.",
+  "summary": "All per-account options grouped in Preferences behind an account selector.",
   "changelog": [
-    "Per account hidden files toggle in Settings, so folders like .private can be synchronized from the interface (#306).",
-    "Folders of the same account take turns fairly: continuous changes in one folder no longer starve the rest (#309).",
-    "Add Folder lives in Settings > Synchronization instead of a detached button in the account summary (#311).",
-    "Opening Preferences no longer aborts the application with a RefCell panic (#307)."
+    "Preferences opens an Account page with a selector: hidden files, Add Folder, proxy and TLS, authentication and account removal all apply to the chosen account (#314).",
+    "The account settings panel leaves the main window, which keeps only folders, status and Sync Now.",
+    "Switching accounts in the selector is instant, without the sliding transition."
   ],
   "released_at": "2026-11-07T00:00:00Z"
 }

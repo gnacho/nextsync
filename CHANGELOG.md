@@ -2,6 +2,17 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.43.28] - 2026-11-07
+
+### Added
+
+- Preferences opens an Account page with a selector: hidden files, Add Folder, proxy and TLS certificates, authentication and account removal all apply to the account chosen in the dropdown (#314).
+
+### Changed
+
+- The account settings panel leaves the main window, which keeps only folders, status and Sync Now.
+- Switching accounts in the selector is instant, without the sliding transition.
+
 ## [0.43.26] - 2026-11-07
 
 ### Added
