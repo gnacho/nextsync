@@ -111,7 +111,6 @@ pub type AddAccountHandler = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
 
 /// Folder row callbacks as plain functions the view can invoke.
 pub struct AccountCallbacks {
-    pub on_add_folder: Option<Rc<dyn Fn()>>,
     pub on_open_folder: Option<OpenFolderCallback>,
     pub on_remove_folder: Option<RemoveFolderCallback>,
     pub on_edit_ignored: Option<EditIgnoredCallback>,
@@ -423,7 +422,6 @@ impl AccountView {
         if account.folders.is_empty() {
             let row = libadwaita::ActionRow::builder()
                 .title(t("No Synchronization Folders"))
-                .subtitle(t("Add folders from Settings"))
                 .build();
             let icon = gtk4::Image::builder()
                 .icon_name("folder-symbolic")
@@ -431,15 +429,6 @@ impl AccountView {
                 .build();
             row.add_prefix(&icon);
             account_list.append(&row);
-        }
-
-        if let Some(on_add_folder) = callbacks.on_add_folder {
-            let add_folder = gtk4::Button::builder()
-                .label(t("Add Folder"))
-                .halign(gtk4::Align::End)
-                .build();
-            add_folder.connect_clicked(move |_| on_add_folder());
-            root.append(&add_folder);
         }
 
         root.append(&account_list);
@@ -514,6 +503,7 @@ pub struct MainWindow {
     config_store: ConfigStore,
     logger: crate::core::log::LogBuffer,
     active_account_id: Option<String>,
+    add_folder_action: gio::SimpleAction,
     /// The in-app settings view (official-client style); `None` until opened.
     settings_view: Option<SettingsView>,
     /// Outer stack that slides the settings view over the sync view.
@@ -620,6 +610,17 @@ impl MainWindow {
             });
             action
         });
+        let add_folder_action = gio::SimpleAction::new("add-folder", None);
+        add_folder_action.set_enabled(false);
+        add_folder_action.connect_activate({
+            let weak = self_weak.clone();
+            move |_action, _param| {
+                if let Some(main) = weak.upgrade() {
+                    main.borrow_mut().show_add_folder_dialog();
+                }
+            }
+        });
+        actions.add_action(&add_folder_action);
         actions.add_action(&{
             let weak = self_weak.clone();
             let action = gio::SimpleAction::new("preferences", None);
@@ -745,6 +746,7 @@ impl MainWindow {
             config_store,
             logger,
             active_account_id: None,
+            add_folder_action,
             settings_view: None,
             root_stack,
             setup_window: None,
@@ -1858,6 +1860,7 @@ impl MainWindow {
                 .map(|account| account.id.clone()),
         };
         self.active_account_id = account_id.clone();
+        self.add_folder_action.set_enabled(account_id.is_some());
         self.select_active_sidebar_row();
         self.reset_settings_view();
         self.show_account(account_id.as_deref());
@@ -1897,14 +1900,6 @@ impl MainWindow {
             return;
         };
         let callbacks = AccountCallbacks {
-            on_add_folder: {
-                let weak = self.self_weak.clone();
-                Some(Rc::new(move || {
-                    if let Some(main) = weak.upgrade() {
-                        main.borrow_mut().show_add_folder_dialog();
-                    }
-                }))
-            },
             on_open_folder: Some(Rc::new(|local_root| {
                 let _ = gio::AppInfo::launch_default_for_uri(
                     &format!("file://{local_root}"),
@@ -2109,6 +2104,9 @@ fn hamburger_menu_model() -> gio::Menu {
     let add_account_item = gio::MenuItem::new(Some(t("Add Account")), Some("app.add-account"));
     add_account_item.set_icon(&gio::ThemedIcon::new("list-add-symbolic"));
     items.append_item(&add_account_item);
+    let add_folder_item = gio::MenuItem::new(Some(t("Add Folder")), Some("app.add-folder"));
+    add_folder_item.set_icon(&gio::ThemedIcon::new("folder-new-symbolic"));
+    items.append_item(&add_folder_item);
     let preferences_item = gio::MenuItem::new(Some(t("Preferences")), Some("app.preferences"));
     preferences_item.set_icon(&gio::ThemedIcon::new("preferences-system-symbolic"));
     items.append_item(&preferences_item);
@@ -2684,9 +2682,29 @@ mod tests {
         // Preferences + About — About last (the theme selector is gone,
         // the app always follows the system; issue #53).
         assert_eq!(menu.n_items(), 1);
-        let expected: [(&str, &str); 2] =
-            [("Preferences", "app.preferences"), ("About", "app.about")];
-        let _ = &expected;
+        let expected: [(&str, &str); 4] = [
+            ("Add Account", "app.add-account"),
+            ("Add Folder", "app.add-folder"),
+            ("Preferences", "app.preferences"),
+            ("About", "app.about"),
+        ];
+        let items_section = menu
+            .item_link(0, gio::MENU_LINK_SECTION)
+            .expect("items section");
+        for (index, (expected_label, expected_action)) in expected.iter().enumerate() {
+            let mut label = None;
+            let mut action = None;
+            let iter = items_section.iterate_item_attributes(i32::try_from(index).unwrap());
+            while let Some((key, value)) = iter.next() {
+                match key.as_str() {
+                    "label" => label = value.str().map(str::to_string),
+                    "action" => action = value.str().map(str::to_string),
+                    _ => {}
+                }
+            }
+            assert_eq!(label.as_deref(), Some(*expected_label));
+            assert_eq!(action.as_deref(), Some(*expected_action));
+        }
         // The Spanish catalog covers every menu entry (the menu is
         // user-visible on every launch).
         set_locale(Locale::Spanish);
@@ -2694,7 +2712,7 @@ mod tests {
         let items_section = menu
             .item_link(0, gio::MENU_LINK_SECTION)
             .expect("items section");
-        let labels: Vec<String> = (0..3)
+        let labels: Vec<String> = (0..4)
             .map(|index| {
                 let mut label = None;
                 let iter = items_section.iterate_item_attributes(index);
@@ -2710,6 +2728,7 @@ mod tests {
             labels,
             vec![
                 "Añadir cuenta".to_string(),
+                "Añadir carpeta".to_string(),
                 "Preferencias".to_string(),
                 "Acerca de".to_string(),
             ]
@@ -3173,7 +3192,7 @@ mod tests {
     }
 
     #[test]
-    fn account_view_add_folder_button_invokes_callback() {
+    fn account_view_has_no_add_folder_button() {
         crate::ui::test_helpers::gtk_smoke(|| {
             set_locale(Locale::English);
             let mut account = window_account();
@@ -3188,12 +3207,7 @@ mod tests {
                 false,
             );
             runtime.start_without_watchers();
-            let clicks = Rc::new(Cell::new(0));
             let callbacks = AccountCallbacks {
-                on_add_folder: Some({
-                    let clicks = clicks.clone();
-                    Rc::new(move || clicks.set(clicks.get() + 1))
-                }),
                 on_open_folder: None,
                 on_remove_folder: None,
                 on_edit_ignored: None,
@@ -3204,10 +3218,9 @@ mod tests {
             };
             let view = AccountView::new(runtime, callbacks, crate::core::log::LogBuffer::new());
 
-            let button = find_button_label(view.root.upcast_ref::<gtk4::Widget>(), "Add Folder")
-                .expect("the main account view exposes Add Folder");
-            button.emit_clicked();
-            assert_eq!(clicks.get(), 1);
+            assert!(
+                find_button_label(view.root.upcast_ref::<gtk4::Widget>(), "Add Folder").is_none()
+            );
             reset_locale();
         });
     }
@@ -3245,7 +3258,9 @@ mod tests {
                 None,
                 Weak::new(),
             );
+            assert!(window.add_folder_action.is_enabled());
             window.present_account(Some("acct-window-2"));
+            assert!(window.add_folder_action.is_enabled());
 
             let presented = Rc::new(RefCell::new(Vec::new()));
             present_active_add_folder_dialog(window.active_account_id.as_deref(), {
@@ -3259,6 +3274,30 @@ mod tests {
                 move |account_id| presented.borrow_mut().push(account_id)
             });
             assert_eq!(presented.borrow().len(), 1, "no account means no dialog");
+        });
+    }
+
+    #[test]
+    fn add_folder_menu_action_is_disabled_without_an_account() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let app = libadwaita::Application::builder()
+                .application_id("io.github.gnacho.nextsync")
+                .build();
+            let dir = tempfile::tempdir().unwrap();
+            let store = ConfigStore::with_path(dir.path().join("settings.json"));
+            let manager = AccountManager::new(std::rc::Rc::new(std::cell::RefCell::new(
+                crate::core::debounce::FakeTimeoutSource::default(),
+            )));
+            let window = MainWindow::new(
+                &app,
+                Config::default(),
+                store,
+                manager,
+                crate::core::log::LogBuffer::new(),
+                None,
+                Weak::new(),
+            );
+            assert!(!window.add_folder_action.is_enabled());
         });
     }
 
@@ -3292,7 +3331,6 @@ mod tests {
             );
             runtime.start_without_watchers();
             let callbacks = AccountCallbacks {
-                on_add_folder: None,
                 on_open_folder: None,
                 on_remove_folder: None,
                 on_edit_ignored: None,
