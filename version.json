@@ -1,10 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.44.10",
+  "version": "0.44.12",
   "mandatory": false,
-  "summary": "The remote folder list no longer offers the space id as a folder.",
+  "summary": "OpenCloud accounts start from the documents folder when adding one.",
   "changelog": [
-    "OpenCloud echoes the href of a requested space unescaped while the request escapes the id, so the space root was listed as a folder named after the id (#329)."
+    "The Local folder field defaults to ~/Documentos (or ~/Documents) for OpenCloud accounts and keeps ~/NextCloud for Nextcloud (#331).",
+    "The folder chooser title follows the account provider."
   ],
   "released_at": "2026-11-09T00:00:00Z"
 }
