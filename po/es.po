@@ -2496,8 +2496,8 @@ msgid "Space"
 msgstr "Espacio"
 
 #: src/ui/setup.rs
-msgid "Space: {id}"
-msgstr "Espacio: {id}"
+msgid "Default space: {name}"
+msgstr "Espacio predeterminado: {name}"
 
 #: src/ui/setup.rs
 msgid "Sync provider"
@@ -2645,6 +2645,9 @@ msgstr "El guard de borrado no ha marcado ningún archivo en esta carpeta."
 
 msgid "Could not list the remote folders."
 msgstr "No se pudieron listar las carpetas remotas."
+
+msgid "Could not list the spaces."
+msgstr "No se pudieron listar los espacios."
 
 msgid "Keep Local for All"
 msgstr "Conservar la local en todo"

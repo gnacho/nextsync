@@ -57,7 +57,9 @@ use glib::ControlFlow;
 use libadwaita::prelude::*;
 
 use crate::core::sync_safety::local_folder_is_empty;
-use crate::nextcloud::api::{ApiError, NextcloudApi};
+use crate::nextcloud::api::{
+    default_opencloud_space_index, ApiError, NextcloudApi, OpenCloudSpace,
+};
 use crate::nextcloud::credentials::{CredentialError, CredentialsStore};
 use crate::nextcloud::login_flow::{
     LoginFlowError, LoginFlowResult, LoginFlowStart, LoginFlowV2, PollOutcome, MAX_POLLS,
@@ -92,13 +94,6 @@ struct WizardFolder {
     space_id: Option<String>,
 }
 
-/// One space discovered from an OpenCloud server.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SpaceInfo {
-    id: String,
-    display_name: String,
-}
-
 /// Mutable flow state of the wizard, shared between the page handlers.
 #[derive(Debug, Default)]
 struct WizardState {
@@ -108,7 +103,10 @@ struct WizardState {
     authentication_type: String,
     trust_invalid: bool,
     folders: Vec<WizardFolder>,
-    /// Discovered OpenCloud space id (assigned to every folder).
+    /// Spaces discovered for an OpenCloud account: personal space, project
+    /// spaces and received shares (issue #327).
+    spaces: Vec<OpenCloudSpace>,
+    /// Discovered OpenCloud space id used as the default for new folders.
     space_id: Option<String>,
     /// Whether the user accepted a download over the size threshold
     /// (issue #36); recorded on the persisted folders.
@@ -966,25 +964,28 @@ fn start_space_discovery(ctx: &SetupContext, server: &str, username: &str, passw
     let server = server.to_string();
     let username = username.to_string();
     let password = password.to_string();
-    let discovery = gio::spawn_blocking(move || -> Vec<SpaceInfo> {
-        let native = NextcloudApi::new().list_opencloud_spaces(&server, &username, &password);
-        match native {
-            Ok(spaces) => spaces
-                .into_iter()
-                .map(|space| SpaceInfo {
-                    display_name: space.display_name.unwrap_or_else(|| space.id.clone()),
-                    id: space.id,
-                })
-                .collect(),
-            Err(_) => Vec::new(),
-        }
+    let discovery = gio::spawn_blocking(move || -> Vec<OpenCloudSpace> {
+        NextcloudApi::new()
+            .list_opencloud_spaces(&server, &username, &password)
+            .unwrap_or_default()
     });
     let ctx = ctx.clone();
     glib::spawn_future_local(async move {
         let spaces = discovery.await.unwrap_or_else(|_| Vec::new());
-        let space_id = spaces.first().map(|space| space.id.clone());
-        ctx.state.borrow_mut().space_id = space_id.clone();
-        update_space_label(&ctx, space_id.as_deref());
+        // The personal space is the sane default; a received share is only
+        // used when the account has nothing else (issue #327).
+        let default_index = default_opencloud_space_index(&spaces, None);
+        let space_id = spaces.get(default_index).map(|space| space.id.clone());
+        let default_name = spaces
+            .iter()
+            .find(|space| Some(&space.id) == space_id.as_ref())
+            .map(|space| space.label());
+        {
+            let mut state = ctx.state.borrow_mut();
+            state.spaces = spaces;
+            state.space_id = space_id;
+        }
+        update_space_label(&ctx, default_name.as_deref());
     });
 }
 
@@ -994,12 +995,12 @@ fn present_folder_error(ctx: &SetupContext, message: &str) {
     ctx.widgets.folder_error.set_text(message);
 }
 
-fn update_space_label(ctx: &SetupContext, space_id: Option<&str>) {
-    match space_id {
-        Some(id) => {
+fn update_space_label(ctx: &SetupContext, default_space_name: Option<&str>) {
+    match default_space_name {
+        Some(name) => {
             ctx.widgets
                 .space_label
-                .set_text(&t("Space: {id}").replace("{id}", id));
+                .set_text(&t("Default space: {name}").replace("{name}", name));
             ctx.widgets.space_label.set_visible(true);
         }
         None => {
@@ -1020,8 +1021,9 @@ fn present_add_folder_dialog(
     error: Option<String>,
 ) {
     let opencloud = ctx.state.borrow().provider == Provider::OpenCloud;
+    let spaces = ctx.state.borrow().spaces.clone();
     let discovered_space = ctx.state.borrow().space_id.clone();
-    if opencloud && discovered_space.is_none() {
+    if opencloud && spaces.is_empty() {
         // The engine requires a space id; without one the folder cannot
         // sync, so block the dialog instead of accepting a doomed folder.
         present_folder_error(
@@ -1044,6 +1046,25 @@ fn present_add_folder_dialog(
         )),
     );
     let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    // OpenCloud folders mirror one space. Received shares are spaces of their
+    // own, named after the original resource (issue #327), so the dialog lets
+    // the user pick which one the folder mirrors.
+    let space_combo = if opencloud {
+        let combo = libadwaita::ComboRow::new();
+        combo.set_title(t("Space"));
+        let model = gtk4::StringList::new(&[]);
+        for space in &spaces {
+            model.append(&space.label());
+        }
+        combo.set_model(Some(&model));
+        let default_index = default_opencloud_space_index(&spaces, discovered_space.as_deref());
+        combo.set_selected(default_index as u32);
+        entry_box.append(&combo);
+        Some(combo)
+    } else {
+        None
+    };
 
     let local_entry = libadwaita::EntryRow::new();
     local_entry.set_title(t("Local folder"));
@@ -1093,8 +1114,41 @@ fn present_add_folder_dialog(
         .build();
     entry_box.append(&picker_status);
 
-    if !opencloud {
-        populate_wizard_remote_picker(ctx, &remote_list, &picker_status);
+    match space_combo.as_ref() {
+        Some(combo) => {
+            let (server, username) = {
+                let state = ctx.state.borrow();
+                (state.server.clone(), state.username.clone())
+            };
+            let spaces_for_change = spaces.clone();
+            let picker_for_change = picker.clone();
+            let status_for_change = picker_status.clone();
+            let server_for_change = server.clone();
+            let username_for_change = username.clone();
+            combo.connect_selected_notify(move |combo| {
+                let space = spaces_for_change
+                    .get(combo.selected() as usize)
+                    .map(|space| space.id.clone());
+                populate_wizard_space_picker(
+                    &server_for_change,
+                    &username_for_change,
+                    space.as_deref(),
+                    &picker_for_change,
+                    &status_for_change,
+                );
+            });
+            let default_space = spaces
+                .get(combo.selected() as usize)
+                .map(|space| space.id.clone());
+            populate_wizard_space_picker(
+                &server,
+                &username,
+                default_space.as_deref(),
+                &picker,
+                &picker_status,
+            );
+        }
+        None => populate_wizard_remote_picker(ctx, &remote_list, &picker_status),
     }
 
     if let Some(message) = error {
@@ -1115,13 +1169,17 @@ fn present_add_folder_dialog(
         let local_root = local_entry.text().to_string();
         let remote_text = remote_entry.text().to_string();
         let provider = ctx.state.borrow().provider;
-        let discovered_space = ctx.state.borrow().space_id.clone();
-        match validate_add_folder(
-            provider,
-            &local_root,
-            &remote_text,
-            discovered_space.as_deref(),
-        ) {
+        let chosen_space = space_combo
+            .as_ref()
+            .and_then(|combo| {
+                let index = combo.selected();
+                if index == u32::MAX {
+                    return None;
+                }
+                spaces.get(index as usize).map(|space| space.id.clone())
+            })
+            .or_else(|| ctx.state.borrow().space_id.clone());
+        match validate_add_folder(provider, &local_root, &remote_text, chosen_space.as_deref()) {
             Ok(folder) => {
                 if ctx
                     .state
@@ -1727,6 +1785,50 @@ fn fetch_wizard_remote_folders(
         .ok()
         .flatten()?;
     api.list_remote_folders(server, username, &password).ok()
+}
+
+/// Fill the wizard's remote-folder dropdown with the top-level folders of one
+/// OpenCloud space.
+///
+/// The password is read back from the credential store, exactly like the
+/// Nextcloud listing, and the WebDAV work runs off the main loop.
+fn populate_wizard_space_picker(
+    server: &str,
+    username: &str,
+    space_id: Option<&str>,
+    picker: &gtk4::DropDown,
+    status: &gtk4::Label,
+) {
+    let server = server.to_string();
+    let username = username.to_string();
+    let space = space_id.map(str::to_string);
+    let picker = picker.clone();
+    let status = status.clone();
+    let handle = gio::spawn_blocking(move || -> Option<Vec<String>> {
+        let space = space?;
+        let password = wizard_remote_picker_password(&server, &username)
+            .ok()
+            .flatten()?;
+        NextcloudApi::new()
+            .list_opencloud_space_folders(&server, &username, &password, &space)
+            .ok()
+    });
+    glib::spawn_future_local(async move {
+        match handle.await {
+            Ok(Some(folders)) => {
+                let names: Vec<&str> = folders
+                    .iter()
+                    .map(|folder| folder.trim_start_matches('/'))
+                    .collect();
+                let model = gtk4::StringList::new(&names);
+                picker.set_model(Some(&model));
+                status.set_text("");
+            }
+            // The dialog stays usable: the manual entry is the source of
+            // truth, an empty dropdown just offers no shortcuts.
+            _ => status.set_text(t("Could not list the remote folders.")),
+        }
+    });
 }
 
 /// Fill the wizard's remote-folder dropdown with the server's existing

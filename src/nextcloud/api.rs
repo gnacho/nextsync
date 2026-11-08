@@ -166,6 +166,34 @@ fn quota_values(payload: &serde_json::Value) -> (Option<u64>, Option<u64>) {
     (used, total)
 }
 
+/// What kind of LibreGraph drive an OpenCloud space comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OpenCloudSpaceKind {
+    /// The account's own personal space.
+    Personal,
+    /// A project space.
+    Project,
+    /// A resource somebody shared with the account (`driveType` `mountpoint`).
+    /// The drive name is the original resource name (issue #327).
+    Share,
+}
+
+/// Index of the space a picker should select first.
+///
+/// `configured` wins when it matches a listed space (adding a sibling folder
+/// keeps the previous choice); otherwise the account's own personal space is
+/// preferred over projects and received shares.
+pub fn default_opencloud_space_index(spaces: &[OpenCloudSpace], configured: Option<&str>) -> usize {
+    configured
+        .and_then(|id| spaces.iter().position(|space| space.id == id))
+        .or_else(|| {
+            spaces
+                .iter()
+                .position(|space| space.kind == OpenCloudSpaceKind::Personal)
+        })
+        .unwrap_or(0)
+}
+
 /// One OpenCloud space discovered over WebDAV.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenCloudSpace {
@@ -173,6 +201,16 @@ pub struct OpenCloudSpace {
     pub id: String,
     /// The space display name (`<d:displayname>`), when the server sends it.
     pub display_name: Option<String>,
+    /// Where the drive comes from. Received shares are sync targets too.
+    pub kind: OpenCloudSpaceKind,
+}
+
+impl OpenCloudSpace {
+    /// Display label for pickers: the drive name, or the id when the server
+    /// sends no name at all.
+    pub fn label(&self) -> String {
+        self.display_name.clone().unwrap_or_else(|| self.id.clone())
+    }
 }
 
 /// One server notification (shares, comments, mentions) from the OCS
@@ -718,33 +756,30 @@ impl NextcloudApi {
         let url = format!("{base}/");
         let root_path = href_path_of(&url).to_owned();
         let entries = self.propfind(&url, username, password)?;
-        let mut folders = Vec::new();
-        for entry in entries {
-            if entry.href_path == root_path {
-                continue;
-            }
-            if !entry.is_collection {
-                continue;
-            }
-            // Filter only the folder name (the last path segment): earlier
-            // segments include the username and the fixed dav root, whose
-            // substrings must not hide every folder (issue #128).
-            let name = entry.href_path.rsplit('/').next().unwrap_or_default();
-            if name.starts_with('.')
-                || name.contains("trashbin")
-                || name.contains("trash")
-                || name.contains("versions")
-            {
-                continue;
-            }
-            // WebDAV hrefs arrive percent-encoded; decode so pickers show
-            // and store the real name (issue #88). The engine re-encodes
-            // when building URLs.
-            let name = percent_decode_path(name);
-            folders.push(format!("/{name}"));
+        Ok(folder_paths(&entries, &root_path))
+    }
+
+    /// List the top-level folders of one OpenCloud space: the account's own
+    /// personal space, a project space or a received share (issue #327).
+    ///
+    /// Each space is its own WebDAV root (`/remote.php/dav/spaces/<id>/`), so
+    /// the Nextcloud `files/<user>` tree is never used here. The
+    /// [`OpenCloudSpace`] listing carries the id.
+    pub fn list_opencloud_space_folders(
+        &self,
+        server: &str,
+        username: &str,
+        token: &str,
+        space_id: &str,
+    ) -> Result<Vec<String>, ApiError> {
+        let space = space_id.trim().trim_matches('/');
+        if space.is_empty() {
+            return Ok(Vec::new());
         }
-        folders.sort();
-        Ok(folders)
+        let url = format!("{}/", opencloud_dav_root(server, space));
+        let root_path = href_path_of(&url).to_owned();
+        let entries = self.propfind(&url, username, token)?;
+        Ok(folder_paths(&entries, &root_path))
     }
 
     /// Validate OpenCloud credentials (username + app token) against the
@@ -782,11 +817,13 @@ impl NextcloudApi {
     /// List the spaces the account can synchronize (LibreGraph drives).
     ///
     /// `GET /graph/v1.0/drives` returns every drive visible to the account.
-    /// Only the user's own personal space and project spaces are sync
-    /// targets: other users' personal spaces (visible to admins) and the
-    /// virtual `shares` aggregate are excluded, so the wizard also fetches
-    /// `/graph/v1.0/me` to compare owners. Verified against a real OpenCloud
-    /// deployment.
+    /// The user's own personal space, project spaces and received shares
+    /// (`driveType` `mountpoint`, whose name is the original resource name)
+    /// are sync targets. Other users' personal spaces (visible to admins)
+    /// and the virtual `shares` aggregate are excluded, so the listing also
+    /// fetches `/graph/v1.0/me` to compare owners. Verified against a real
+    /// OpenCloud deployment, including a share between two users (issue
+    /// #327).
     pub fn list_opencloud_spaces(
         &self,
         server: &str,
@@ -834,9 +871,18 @@ impl NextcloudApi {
             let own_personal =
                 drive_type == Some("personal") && Some(owner.unwrap_or("")) == user_id;
             let project = drive_type == Some("project");
-            if !own_personal && !project {
+            // A received share is its own drive whose id addresses the
+            // resource through the share jail (`/dav/spaces/<id>/` works).
+            let share = drive_type == Some("mountpoint");
+            let kind = if own_personal {
+                OpenCloudSpaceKind::Personal
+            } else if project {
+                OpenCloudSpaceKind::Project
+            } else if share {
+                OpenCloudSpaceKind::Share
+            } else {
                 continue;
-            }
+            };
             let id = item
                 .get("id")
                 .and_then(serde_json::Value::as_str)
@@ -850,9 +896,17 @@ impl NextcloudApi {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
                 .filter(|name| !name.is_empty());
-            spaces.push(OpenCloudSpace { id, display_name });
+            spaces.push(OpenCloudSpace {
+                id,
+                display_name,
+                kind,
+            });
         }
-        spaces.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+        // Personal space first, then projects and shares, each by name, so
+        // pickers and the wizard default to the account's own space.
+        spaces.sort_by(|a, b| {
+            (a.kind, a.display_name.as_deref()).cmp(&(b.kind, b.display_name.as_deref()))
+        });
         Ok(spaces)
     }
 
@@ -1234,6 +1288,38 @@ fn dav_base(server: &str, username: &str) -> String {
     )
 }
 
+/// Top-level folder paths of a Depth-1 listing of one WebDAV root.
+///
+/// Files and special collections (hidden, trash, versions) are excluded; a
+/// root without subfolders yields an empty list. Paths are normalized
+/// (`/Documents`, `/Photos`) and sorted.
+fn folder_paths(entries: &[PropfindEntry], root_path: &str) -> Vec<String> {
+    let mut folders = Vec::new();
+    for entry in entries {
+        if entry.href_path == root_path || !entry.is_collection {
+            continue;
+        }
+        // Filter only the folder name (the last path segment): earlier
+        // segments include the username and the fixed dav root, whose
+        // substrings must not hide every folder (issue #128).
+        let name = entry.href_path.rsplit('/').next().unwrap_or_default();
+        if name.starts_with('.')
+            || name.contains("trashbin")
+            || name.contains("trash")
+            || name.contains("versions")
+        {
+            continue;
+        }
+        // WebDAV hrefs arrive percent-encoded; decode so pickers show and
+        // store the real name (issue #88). The engine re-encodes when
+        // building URLs.
+        let name = percent_decode_path(name);
+        folders.push(format!("/{name}"));
+    }
+    folders.sort();
+    folders
+}
+
 /// Root of the WebDAV tree of one OpenCloud space.
 fn opencloud_dav_root(server: &str, space_id: &str) -> String {
     format!(
@@ -1562,6 +1648,7 @@ mod tests {
  {"driveType":"personal","id":"7d443b01-21d3-484d-bf73-a2681d670fa1$72f47f61-c9f1-4114-b059-8b5f6a71757b","name":"Admin","owner":{"user":{"id":"3b9b8ce1-f1e3-4013-864c-eeb821bdd6f1"}}},
  {"driveType":"virtual","id":"a0ca6a90-a365-4782-871e-d44447bbc668$a0ca6a90-a365-4782-871e-d44447bbc668","name":"Shares"},
  {"driveType":"project","id":"bd2c9d0b-4e8f-4c3a-9f6e-2b1a5d8c7e3f$bd2c9d0b-4e8f-4c3a-9f6e-2b1a5d8c7e3f","name":"Team files"}
+ ,{"driveType":"mountpoint","id":"a0ca6a90-a365-4782-871e-d44447bbc668$a0ca6a90-a365-4782-871e-d44447bbc668!7d443b01-21d3-484d-bf73-a2681d670fa1:9bc084a7-9bb4-47d5-84da-dd7857ab189c:40ded6ca-eed5-4b28-b1dc-11d05dbbec7e","name":"publico","owner":{"user":{"id":"9544a8dc-b70b-41a1-a8bc-676d972d898d"}}}
 ]}"#;
 
     const SPACE_ROOT_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
@@ -2387,27 +2474,66 @@ mod tests {
     }
 
     #[test]
-    fn list_opencloud_spaces_keeps_own_personal_and_project_only() {
+    fn list_opencloud_spaces_keeps_own_personal_project_and_received_shares() {
         let http = GraphHttp::new(OPENCLOUD_ME_JSON, OPENCLOUD_DRIVES_JSON);
         let api = NextcloudApi::with_http(Box::new(http));
         let spaces = api
             .list_opencloud_spaces("https://cloud.example.com", "alice", "token")
             .unwrap();
+        // Personal first, then projects, then received shares, each by name.
         assert_eq!(
             spaces,
             [
                 OpenCloudSpace {
-                    id: "bd2c9d0b-4e8f-4c3a-9f6e-2b1a5d8c7e3f$bd2c9d0b-4e8f-4c3a-9f6e-2b1a5d8c7e3f"
-                        .to_owned(),
-                    display_name: Some("Team files".to_owned()),
-                },
-                OpenCloudSpace {
                     id: "7d443b01-21d3-484d-bf73-a2681d670fa1$9bc084a7-9bb4-47d5-84da-dd7857ab189c"
                         .to_owned(),
                     display_name: Some("nacho".to_owned()),
+                    kind: OpenCloudSpaceKind::Personal,
+                },
+                OpenCloudSpace {
+                    id: "bd2c9d0b-4e8f-4c3a-9f6e-2b1a5d8c7e3f$bd2c9d0b-4e8f-4c3a-9f6e-2b1a5d8c7e3f"
+                        .to_owned(),
+                    display_name: Some("Team files".to_owned()),
+                    kind: OpenCloudSpaceKind::Project,
+                },
+                OpenCloudSpace {
+                    id: "a0ca6a90-a365-4782-871e-d44447bbc668$a0ca6a90-a365-4782-871e-d44447bbc668!7d443b01-21d3-484d-bf73-a2681d670fa1:9bc084a7-9bb4-47d5-84da-dd7857ab189c:40ded6ca-eed5-4b28-b1dc-11d05dbbec7e"
+                        .to_owned(),
+                    display_name: Some("publico".to_owned()),
+                    kind: OpenCloudSpaceKind::Share,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn default_opencloud_space_prefers_the_configured_space() {
+        let spaces = [
+            OpenCloudSpace {
+                id: "share-1".to_owned(),
+                display_name: Some("publico".to_owned()),
+                kind: OpenCloudSpaceKind::Share,
+            },
+            OpenCloudSpace {
+                id: "personal-1".to_owned(),
+                display_name: Some("alice".to_owned()),
+                kind: OpenCloudSpaceKind::Personal,
+            },
+        ];
+        assert_eq!(
+            default_opencloud_space_index(&spaces, Some("share-1")),
+            0,
+            "a configured space wins so siblings keep the same target"
+        );
+        assert_eq!(default_opencloud_space_index(&spaces, Some("gone")), 1);
+        assert_eq!(default_opencloud_space_index(&spaces, None), 1);
+        assert_eq!(default_opencloud_space_index(&[], None), 0);
+        let shares_only = [OpenCloudSpace {
+            id: "share-1".to_owned(),
+            display_name: Some("publico".to_owned()),
+            kind: OpenCloudSpaceKind::Share,
+        }];
+        assert_eq!(default_opencloud_space_index(&shares_only, None), 0);
     }
 
     #[test]
@@ -2418,6 +2544,32 @@ mod tests {
             api.list_opencloud_spaces("https://cloud.example.com", "alice", "token"),
             Err(ApiError::InvalidResponse)
         );
+    }
+
+    #[test]
+    fn list_opencloud_space_folders_reads_the_space_root() {
+        let http = FakeHttp::new(207, SPACE_ROOT_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert_eq!(
+            api.list_opencloud_space_folders(
+                "https://cloud.example.com",
+                "alice",
+                "token",
+                "1284d238-aa92-42ce-bdc4-426446b3c735"
+            )
+            .unwrap(),
+            ["/Documents"]
+        );
+    }
+
+    #[test]
+    fn list_opencloud_space_folders_without_a_space_is_empty() {
+        let http = FakeHttp::new(207, SPACE_ROOT_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        assert!(api
+            .list_opencloud_space_folders("https://cloud.example.com", "alice", "token", " / ")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
