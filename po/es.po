@@ -1205,6 +1205,9 @@ msgstr "Elige una carpeta local absoluta."
 msgid "Choose NextCloud Folder"
 msgstr "Elegir carpeta de NextCloud"
 
+msgid "Choose OpenCloud Folder"
+msgstr "Elegir carpeta de OpenCloud"
+
 #: src/nextsync/ui/settings.py:419
 msgid "Synchronization"
 msgstr "Sincronización"

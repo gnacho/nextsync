@@ -53,7 +53,7 @@ use crate::nextcloud::api::{
 use crate::nextcloud::credentials::CredentialsStore;
 use crate::nextcloud::provider::Provider;
 use crate::storage::config::{
-    default_sync_root, expanduser, remote_path_for, validate_pattern, AccountConfig, Config,
+    default_sync_root_for, expanduser, remote_path_for, validate_pattern, AccountConfig, Config,
     ConfigError, ConfigStore, FolderConfig, GeneralConfig, LoggingConfig, DEFAULT_PATTERNS,
 };
 use crate::util::i18n::t;
@@ -1518,8 +1518,14 @@ pub fn present_add_folder_dialog(
 ) {
     let account = store.account(&account_id).ok().flatten();
     let (previous_local, previous_remote) = previous.unwrap_or_default();
+    let provider = account
+        .as_ref()
+        .map(|account| account.provider)
+        .unwrap_or_default();
     let local_default = if previous_local.is_empty() {
-        default_sync_root().to_string_lossy().into_owned()
+        default_sync_root_for(provider)
+            .to_string_lossy()
+            .into_owned()
     } else {
         previous_local
     };
@@ -1565,7 +1571,7 @@ pub fn present_add_folder_dialog(
         .build();
     let entry_for_picker = local_entry.clone();
     choose.connect_clicked(move |_| {
-        choose_local_folder(entry_for_picker.clone());
+        choose_local_folder(entry_for_picker.clone(), provider);
     });
     local_entry.add_suffix(&choose);
     entry_box.append(&local_entry);
@@ -1861,9 +1867,12 @@ fn size_threshold_bytes(store: &ConfigStore) -> Option<u64> {
 }
 
 /// Present a folder chooser and write the selection into the entry row.
-fn choose_local_folder(entry: libadwaita::EntryRow) {
+fn choose_local_folder(entry: libadwaita::EntryRow, provider: Provider) {
     let dialog = gtk4::FileDialog::builder()
-        .title(t("Choose NextCloud Folder"))
+        .title(match provider {
+            Provider::OpenCloud => t("Choose OpenCloud Folder"),
+            Provider::Nextcloud => t("Choose NextCloud Folder"),
+        })
         .modal(true)
         .build();
     dialog.select_folder(
