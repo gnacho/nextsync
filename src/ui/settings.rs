@@ -47,7 +47,9 @@ use crate::core::sync_safety::{
     local_folder_is_empty, review_required, stale_artifact_names, FirstSyncFacts,
 };
 use crate::core::triggers::TriggerSettings;
-use crate::nextcloud::api::{ApiError, NextcloudApi};
+use crate::nextcloud::api::{
+    default_opencloud_space_index, ApiError, NextcloudApi, OpenCloudSpace,
+};
 use crate::nextcloud::credentials::CredentialsStore;
 use crate::nextcloud::provider::Provider;
 use crate::storage::config::{
@@ -1458,6 +1460,41 @@ fn add_folder_account_label(account: &AccountConfig) -> gtk4::Label {
         .build()
 }
 
+/// A folder the Add Folder dialog is about to create (issue #327 added the
+/// space, because an OpenCloud folder mirrors one space and a received share
+/// is a space of its own).
+struct NewFolder {
+    local_root: String,
+    remote_path: String,
+    space_id: Option<String>,
+}
+
+/// The OpenCloud space controls of the Add Folder dialog.
+///
+/// The combo's model and `spaces` share one order, so the selected index maps
+/// straight back to the space id the new folder must store (issue #327).
+#[derive(Clone)]
+struct AddFolderSpaceControls {
+    combo: libadwaita::ComboRow,
+    picker: gtk4::DropDown,
+    status: gtk4::Label,
+    spaces: Rc<RefCell<Vec<OpenCloudSpace>>>,
+}
+
+impl AddFolderSpaceControls {
+    /// The space currently selected in the combo, if any.
+    fn selected_space_id(&self) -> Option<String> {
+        let index = self.combo.selected();
+        if index == u32::MAX {
+            return None;
+        }
+        self.spaces
+            .borrow()
+            .get(index as usize)
+            .map(|space| space.id.clone())
+    }
+}
+
 /// Present the Add Folder dialog for an account against a config store.
 ///
 /// This is the single construction site for the dialog opened from the main
@@ -1500,6 +1537,19 @@ pub fn present_add_folder_dialog(
     // A floor on the dialog width (issue #75): with narrow defaults the
     // entries clip the paths they display.
     entry_box.set_width_request(560);
+
+    // OpenCloud folders mirror one space, and a received share is a space of
+    // its own (issue #327), so the dialog has to let the user choose it.
+    let space_combo = account
+        .as_ref()
+        .filter(|account| account.provider == Provider::OpenCloud)
+        .map(|_| {
+            let combo = libadwaita::ComboRow::new();
+            combo.set_title(t("Space"));
+            combo.set_model(Some(&gtk4::StringList::new(&[])));
+            entry_box.append(&combo);
+            combo
+        });
 
     let local_entry = libadwaita::EntryRow::new();
     local_entry.set_title(t("Local folder"));
@@ -1564,18 +1614,36 @@ pub fn present_add_folder_dialog(
     dialog.add_response("add", t("Add"));
     dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
 
-    if let Some(account) = account {
-        populate_remote_picker(
-            &account_id,
-            &account.server_url,
-            &account.login_name,
-            &remote_list,
-            &picker_status,
-        );
+    // The OpenCloud space choices, in the same order as the combo's model:
+    // the "add" handler maps the selected index back to an id.
+    let space_controls = space_combo.clone().map(|combo| AddFolderSpaceControls {
+        combo,
+        picker: picker.clone(),
+        status: picker_status.clone(),
+        spaces: Rc::new(RefCell::new(Vec::new())),
+    });
+    if let Some(account) = account.as_ref() {
+        match (account.provider, space_controls.as_ref()) {
+            (Provider::OpenCloud, Some(controls)) => populate_opencloud_space_combo(
+                &account_id,
+                &account.server_url,
+                &account.login_name,
+                account,
+                controls,
+            ),
+            _ => populate_remote_picker(
+                &account_id,
+                &account.server_url,
+                &account.login_name,
+                &remote_list,
+                &picker_status,
+            ),
+        }
     }
 
     let store_for_response = store;
     let account_id_for_response = account_id;
+    let space_controls_for_response = space_controls.clone();
     let on_folder_added_for_response = on_folder_added.clone();
     let on_error_for_response = on_error.clone();
     let parent_for_response = parent.clone();
@@ -1585,6 +1653,9 @@ pub fn present_add_folder_dialog(
         }
         let local_root = local_entry.text().to_string();
         let remote_text = remote_entry.text().to_string();
+        let space_id = space_controls_for_response
+            .as_ref()
+            .and_then(|controls| controls.selected_space_id());
         let root = expanduser(&local_root);
         let outcome = if !root.is_absolute() {
             Err(ConfigError::new(t("Choose an absolute local folder.")))
@@ -1598,8 +1669,11 @@ pub fn present_add_folder_dialog(
                 review_then_add_folder(
                     store_for_response.clone(),
                     account_id_for_response.clone(),
-                    root.to_string_lossy().into_owned(),
-                    remote,
+                    NewFolder {
+                        local_root: root.to_string_lossy().into_owned(),
+                        remote_path: remote,
+                        space_id,
+                    },
                     &parent_for_response,
                     on_folder_added_for_response.clone(),
                     on_error_for_response.clone(),
@@ -1630,15 +1704,14 @@ pub fn present_add_folder_dialog(
 /// before committing a new folder added through the Add Folder dialog.
 ///
 /// The probe mirrors the wizard's: remote emptiness over a shallow WebDAV
-/// PROPFIND (or the OpenCloud space probe, reusing the space of the
-/// account's existing folders when the dialog carried none). Unknown
-/// remote state or missing credentials degrade to a direct add, exactly
-/// like the wizard falls through to `finish_setup`.
+/// PROPFIND (or the OpenCloud space probe on the space the dialog selected,
+/// falling back to the space of the account's existing folders when the
+/// dialog carried none). Unknown remote state or missing credentials degrade
+/// to a direct add, exactly like the wizard falls through to `finish_setup`.
 fn review_then_add_folder(
     store: ConfigStore,
     account_id: String,
-    local_root: String,
-    remote_path: String,
+    folder: NewFolder,
     parent: &gtk4::Widget,
     on_folder_added: Rc<dyn Fn()>,
     on_error: Rc<dyn Fn(String)>,
@@ -1649,10 +1722,16 @@ fn review_then_add_folder(
     let server = account.server_url.clone();
     let login = account.login_name.clone();
     let provider = account.provider;
-    // The Add Folder dialog does not edit spaces; an OpenCloud folder can
-    // only reuse the space already configured for the account.
+    let NewFolder {
+        local_root,
+        remote_path,
+        space_id,
+    } = folder;
+    // The dialog chooses the space for OpenCloud accounts (the personal
+    // space, a project space or a received share). Older call paths keep
+    // reusing the space already configured for the account.
     let space_id = if provider == Provider::OpenCloud {
-        account.folders.iter().find_map(|f| f.space_id.clone())
+        space_id.or_else(|| account.folders.iter().find_map(|f| f.space_id.clone()))
     } else {
         None
     };
@@ -1835,6 +1914,136 @@ fn classify_remote_lookup(
             Err(_) => RemoteFolderLookup::Network,
         },
     }
+}
+
+/// Fill the Add Folder space combo for an OpenCloud account.
+///
+/// The choices are the account's personal space, its project spaces and the
+/// shares other people sent it (named after the original folder, issue #327).
+/// Selecting one re-reads that space's top-level folders for the remote
+/// picker, so a received share is offered by its own name instead of the
+/// aggregate `Shares` node of the Nextcloud tree.
+fn populate_opencloud_space_combo(
+    account_id: &str,
+    server: &str,
+    username: &str,
+    account: &AccountConfig,
+    controls: &AddFolderSpaceControls,
+) {
+    let account_id = account_id.to_string();
+    let server = server.to_string();
+    let username = username.to_string();
+    let configured = account
+        .folders
+        .iter()
+        .find_map(|folder| folder.space_id.clone());
+    let account_id_for_lookup = account_id.clone();
+    let server_for_lookup = server.clone();
+    let username_for_lookup = username.clone();
+    let handle = gio::spawn_blocking(move || -> Option<Vec<OpenCloudSpace>> {
+        let password = CredentialsStore::get_for_account(
+            &account_id_for_lookup,
+            &server_for_lookup,
+            &username_for_lookup,
+        )
+        .ok()
+        .flatten()?;
+        NextcloudApi::new()
+            .list_opencloud_spaces(&server_for_lookup, &username_for_lookup, &password)
+            .ok()
+    });
+    let controls = controls.clone();
+    glib::spawn_future_local(async move {
+        let AddFolderSpaceControls {
+            combo,
+            picker: _,
+            status,
+            spaces: spaces_for_fill,
+        } = controls.clone();
+        let Some(list) = handle.await.ok().flatten() else {
+            status.set_text(t("Could not list the spaces."));
+            return;
+        };
+        let model = gtk4::StringList::new(&[]);
+        for space in &list {
+            model.append(&space.label());
+        }
+        let index = default_opencloud_space_index(&list, configured.as_deref());
+        *spaces_for_fill.borrow_mut() = list;
+        combo.set_model(Some(&model));
+        let controls_for_change = controls.clone();
+        let spaces_for_change = spaces_for_fill.clone();
+        let account_id_for_change = account_id.clone();
+        let server_for_change = server.clone();
+        let username_for_change = username.clone();
+        combo.connect_selected_notify(move |combo| {
+            let space_id = spaces_for_change
+                .borrow()
+                .get(combo.selected() as usize)
+                .map(|space| space.id.clone());
+            populate_opencloud_remote_picker(
+                &account_id_for_change,
+                &server_for_change,
+                &username_for_change,
+                space_id,
+                &controls_for_change,
+            );
+        });
+        let current = combo.selected();
+        combo.set_selected(index as u32);
+        if current == index as u32 {
+            // `set_model` kept the selection: no notify arrives, so fetch the
+            // folders of the chosen space here.
+            let space_id = spaces_for_fill
+                .borrow()
+                .get(index)
+                .map(|space| space.id.clone());
+            populate_opencloud_remote_picker(&account_id, &server, &username, space_id, &controls);
+        }
+    });
+}
+
+/// Fill the remote picker with the top-level folders of one OpenCloud space.
+///
+/// Runs the keyring lookup and the PROPFIND off the UI thread and replaces
+/// the picker's model back on the main loop. A missing space or a failed
+/// lookup leaves the model empty and explains itself in the caption; the
+/// adjacent entry stays the source of truth.
+fn populate_opencloud_remote_picker(
+    account_id: &str,
+    server: &str,
+    username: &str,
+    space_id: Option<String>,
+    controls: &AddFolderSpaceControls,
+) {
+    let account_id = account_id.to_string();
+    let server = server.to_string();
+    let username = username.to_string();
+    let picker = controls.picker.clone();
+    let status = controls.status.clone();
+    let handle = gio::spawn_blocking(move || -> Option<Vec<String>> {
+        let space = space_id?;
+        let password = CredentialsStore::get_for_account(&account_id, &server, &username)
+            .ok()
+            .flatten()?;
+        NextcloudApi::new()
+            .list_opencloud_space_folders(&server, &username, &password, &space)
+            .ok()
+    });
+    glib::spawn_future_local(async move {
+        let model = gtk4::StringList::new(&[]);
+        match handle.await {
+            Ok(Some(folders)) => {
+                for folder in folders {
+                    // Display without the leading slash (issue #91).
+                    model.append(folder.trim_start_matches('/'));
+                }
+                status.set_text("");
+            }
+            _ => status.set_text(t("Could not list the remote folders.")),
+        }
+        picker.set_model(Some(&model));
+    });
 }
 
 /// Fill the remote picker with folders that already exist on the server, and
@@ -2466,6 +2675,36 @@ mod tests {
             }],
             ..AccountConfig::default()
         }
+    }
+
+    #[test]
+    fn add_folder_space_controls_map_the_selected_index_to_a_space_id() {
+        crate::ui::test_helpers::gtk_smoke(|| {
+            let combo = libadwaita::ComboRow::new();
+            let model = gtk4::StringList::new(&["alice", "publico"]);
+            combo.set_model(Some(&model));
+            let controls = AddFolderSpaceControls {
+                combo: combo.clone(),
+                picker: gtk4::DropDown::from_strings(&[]),
+                status: gtk4::Label::new(None),
+                spaces: Rc::new(RefCell::new(vec![
+                    OpenCloudSpace {
+                        id: "personal-1".to_owned(),
+                        display_name: Some("alice".to_owned()),
+                        kind: crate::nextcloud::api::OpenCloudSpaceKind::Personal,
+                    },
+                    OpenCloudSpace {
+                        id: "share-1".to_owned(),
+                        display_name: Some("publico".to_owned()),
+                        kind: crate::nextcloud::api::OpenCloudSpaceKind::Share,
+                    },
+                ])),
+            };
+            combo.set_selected(1);
+            assert_eq!(controls.selected_space_id().as_deref(), Some("share-1"));
+            combo.set_selected(0);
+            assert_eq!(controls.selected_space_id().as_deref(), Some("personal-1"));
+        });
     }
 
     // ---- pure helpers ------------------------------------------------------
