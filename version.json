@@ -1,11 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.44.8",
+  "version": "0.44.10",
   "mandatory": false,
-  "summary": "OpenCloud: shared folders now appear by their original name and synchronize against their own space.",
+  "summary": "The remote folder list no longer offers the space id as a folder.",
   "changelog": [
-    "Received shares are LibreGraph drives of type mountpoint; the space listing keeps them, so a folder shared with you is offered by its original name and synchronizes against its own space (#327).",
-    "The Add Folder dialog and the setup wizard choose the OpenCloud space per folder, and the remote folder list reads the chosen space."
+    "OpenCloud echoes the href of a requested space unescaped while the request escapes the id, so the space root was listed as a folder named after the id (#329)."
   ],
-  "released_at": "2026-11-08T00:00:00Z"
+  "released_at": "2026-11-09T00:00:00Z"
 }
