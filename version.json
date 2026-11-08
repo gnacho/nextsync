@@ -1,10 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.44.6",
+  "version": "0.44.8",
   "mandatory": false,
-  "summary": "The file watcher now ignores events inside excluded directories.",
+  "summary": "OpenCloud: shared folders now appear by their original name and synchronize against their own space.",
   "changelog": [
-    "The watcher filters every path component, so writes inside .nextsync no longer re-trigger the scheduler in a loop (#324)."
+    "Received shares are LibreGraph drives of type mountpoint; the space listing keeps them, so a folder shared with you is offered by its original name and synchronizes against its own space (#327).",
+    "The Add Folder dialog and the setup wizard choose the OpenCloud space per folder, and the remote folder list reads the chosen space."
   ],
-  "released_at": "2026-11-07T00:00:00Z"
+  "released_at": "2026-11-08T00:00:00Z"
 }

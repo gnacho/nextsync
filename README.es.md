@@ -17,7 +17,7 @@
   </p>
   <p>
     <a href="https://github.com/gnacho/nextsync/actions/workflows/ci.yml"><img src="https://github.com/gnacho/nextsync/actions/workflows/ci.yml/badge.svg" alt="Estado de CI"></a>
-    <img src="https://img.shields.io/badge/version-0.42.0-blue?style=flat-square" alt="Versión 0.2.32">
+    <img src="https://img.shields.io/badge/version-0.44.8-blue?style=flat-square" alt="Versión 0.44.8">
     <img src="https://img.shields.io/badge/license-GPL--3.0%2B-informational?style=flat-square" alt="GNU GPL v3 o posterior">
   </p>
 </div>

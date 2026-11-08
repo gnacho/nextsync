@@ -2,6 +2,16 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.8] - 2026-11-08
+
+### Fixed
+
+- OpenCloud received shares are offered by their original name and synchronize against their own space. The Add Folder list used to read the Nextcloud tree, which on OpenCloud exposes the aggregate `Shares` jail, so a shared folder showed up as "shares" and could not be synchronized (#327).
+
+### Changed
+
+- The Add Folder dialog and the setup wizard choose the OpenCloud space per folder (personal space, project spaces and received shares), and the remote folder picker reads the chosen space.
+
 ## [0.44.6] - 2026-11-07
 
 ### Fixed
