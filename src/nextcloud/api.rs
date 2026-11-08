@@ -1288,15 +1288,29 @@ fn dav_base(server: &str, username: &str) -> String {
     )
 }
 
+/// An href reduced to a form that can be compared with another href.
+///
+/// WebDAV servers echo the href of the requested collection unescaped even
+/// when the request URL escaped it: an OpenCloud space id arrives as
+/// `...$...!...` while the request carried `%24`/`%21`, and a Nextcloud login
+/// with `@` produces `%40` in the URL but `@` in the response. Comparing the
+/// raw strings then fails, the root is taken for a child and the listing
+/// reports a folder named after the space id (issue #329). Decoding both
+/// sides and dropping the trailing slash compares what the server meant.
+fn comparable_href(path: &str) -> String {
+    percent_decode_path(path.trim_end_matches('/'))
+}
+
 /// Top-level folder paths of a Depth-1 listing of one WebDAV root.
 ///
 /// Files and special collections (hidden, trash, versions) are excluded; a
 /// root without subfolders yields an empty list. Paths are normalized
 /// (`/Documents`, `/Photos`) and sorted.
 fn folder_paths(entries: &[PropfindEntry], root_path: &str) -> Vec<String> {
+    let root = comparable_href(root_path);
     let mut folders = Vec::new();
     for entry in entries {
-        if entry.href_path == root_path || !entry.is_collection {
+        if comparable_href(&entry.href_path) == root || !entry.is_collection {
             continue;
         }
         // Filter only the folder name (the last path segment): earlier
@@ -1662,6 +1676,27 @@ mod tests {
   </d:response>
   <d:response>
     <d:href>/remote.php/dav/spaces/1284d238-aa92-42ce-bdc4-426446b3c735/Documents/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#;
+
+    /// A real OpenCloud 8.1 answer: the requested space id was escaped in the
+    /// URL (`$` -> `%24`, `!` -> `%21`) and the server echoes the href
+    /// unescaped, root included (issue #329).
+    const SPACE_ROOT_UNESCAPED_HREF_PROPFIND: &[u8] = br#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/spaces/7d443b01-21d3-484d-bf73-a2681d670fa1$4767cb24-fd94-4a84-b005-269bf1f7887f/</d:href>
+    <d:propstat>
+      <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/spaces/7d443b01-21d3-484d-bf73-a2681d670fa1$4767cb24-fd94-4a84-b005-269bf1f7887f/Documentos/</d:href>
     <d:propstat>
       <d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>
       <d:status>HTTP/1.1 200 OK</d:status>
@@ -2559,6 +2594,19 @@ mod tests {
             )
             .unwrap(),
             ["/Documents"]
+        );
+    }
+
+    #[test]
+    fn space_folders_skip_the_root_although_the_server_unescapes_the_href() {
+        let http = FakeHttp::new(207, SPACE_ROOT_UNESCAPED_HREF_PROPFIND);
+        let api = NextcloudApi::with_http(Box::new(http));
+        let space = "7d443b01-21d3-484d-bf73-a2681d670fa1$4767cb24-fd94-4a84-b005-269bf1f7887f";
+        assert_eq!(
+            api.list_opencloud_space_folders("https://cloud.example.com", "anaxu", "token", space)
+                .unwrap(),
+            ["/Documentos"],
+            "the space root must never be listed as a folder named after the id"
         );
     }
 
