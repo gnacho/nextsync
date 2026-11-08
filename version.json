@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.44.12",
+  "version": "0.44.14",
   "mandatory": false,
-  "summary": "OpenCloud accounts start from the documents folder when adding one.",
+  "summary": "Received shares are labelled in the space selector and an empty folder list says so.",
   "changelog": [
-    "The Local folder field defaults to ~/Documentos (or ~/Documents) for OpenCloud accounts and keeps ~/NextCloud for Nextcloud (#331).",
-    "The folder chooser title follows the account provider."
+    "Received OpenCloud shares read '(shared)' in the space selector, which now sits right above the remote folder field (#333).",
+    "A space without subfolders explains its empty folder list instead of showing an unexplained (None)."
   ],
   "released_at": "2026-11-09T00:00:00Z"
 }

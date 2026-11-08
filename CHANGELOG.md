@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.14] - 2026-11-09
+
+### Changed
+
+- The OpenCloud space selector labels received shares (`2026 (shared)`) and sits right above the remote folder field it narrows (#333).
+- A space without subfolders says so in the caption instead of leaving the drop-down on GTK's "(None)".
+
 ## [0.44.12] - 2026-11-09
 
 ### Changed
