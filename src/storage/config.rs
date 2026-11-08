@@ -563,6 +563,30 @@ pub fn default_sync_root() -> PathBuf {
     home_dir().join("NextCloud")
 }
 
+/// Default local sync root for an account of `provider` (issue #331).
+///
+/// Nextcloud keeps `$HOME/NextCloud`, the name of its own desktop client.
+/// OpenCloud accounts start from the user's documents folder instead, whose
+/// name follows the localized XDG layout (`Documentos` on a Spanish system,
+/// `Documents` otherwise).
+pub fn default_sync_root_for(provider: Provider) -> PathBuf {
+    match provider {
+        Provider::Nextcloud => default_sync_root(),
+        Provider::OpenCloud => home_dir().join(documents_dir_name()),
+    }
+}
+
+/// Name of the documents folder under `$HOME`, preferring the one that
+/// exists so the default points at a real directory.
+fn documents_dir_name() -> &'static str {
+    let home = home_dir();
+    if home.join("Documentos").is_dir() {
+        "Documentos"
+    } else {
+        "Documents"
+    }
+}
+
 /// Resolve `~`-prefixed paths against `$HOME` (no `~user` support).
 pub fn expanduser(path: &str) -> PathBuf {
     if path == "~" {
@@ -1376,6 +1400,16 @@ fn default_runtime_value() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn default_sync_root_follows_the_provider() {
+        assert!(super::default_sync_root_for(super::Provider::Nextcloud).ends_with("NextCloud"));
+        let opencloud = super::default_sync_root_for(super::Provider::OpenCloud);
+        assert!(
+            opencloud.ends_with("Documentos") || opencloud.ends_with("Documents"),
+            "unexpected OpenCloud default: {opencloud:?}"
+        );
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;

@@ -67,7 +67,7 @@ use crate::nextcloud::login_flow::{
 };
 use crate::nextcloud::provider::Provider;
 use crate::storage::config::{
-    account_id, default_sync_root, expanduser, normalize_remote_path, normalize_server_url,
+    account_id, default_sync_root_for, expanduser, normalize_remote_path, normalize_server_url,
     AccountConfig, Config, ConfigError, ConfigStore, FolderConfig,
 };
 use crate::util::i18n::t;
@@ -656,7 +656,8 @@ fn build_folders_page(ctx: &SetupContext) {
 
 /// Re-label the authentication page widgets for the selected provider.
 fn configure_authentication(ctx: &SetupContext) {
-    let opencloud = ctx.state.borrow().provider == Provider::OpenCloud;
+    let provider = ctx.state.borrow().provider;
+    let opencloud = provider == Provider::OpenCloud;
     ctx.widgets.server_title.set_text(if opencloud {
         t("Connect to OpenCloud")
     } else {
@@ -1020,7 +1021,8 @@ fn present_add_folder_dialog(
     previous: Option<(String, String)>,
     error: Option<String>,
 ) {
-    let opencloud = ctx.state.borrow().provider == Provider::OpenCloud;
+    let provider = ctx.state.borrow().provider;
+    let opencloud = provider == Provider::OpenCloud;
     let spaces = ctx.state.borrow().spaces.clone();
     let discovered_space = ctx.state.borrow().space_id.clone();
     if opencloud && spaces.is_empty() {
@@ -1034,7 +1036,9 @@ fn present_add_folder_dialog(
     }
     let (previous_local, previous_remote) = previous.unwrap_or_default();
     let local_default = if previous_local.is_empty() {
-        default_sync_root().to_string_lossy().into_owned()
+        default_sync_root_for(ctx.state.borrow().provider)
+            .to_string_lossy()
+            .into_owned()
     } else {
         previous_local
     };
@@ -1076,7 +1080,7 @@ fn present_add_folder_dialog(
         .build();
     let entry_for_picker = local_entry.clone();
     choose.connect_clicked(move |_| {
-        choose_local_folder(entry_for_picker.clone());
+        choose_local_folder(entry_for_picker.clone(), provider);
     });
     local_entry.add_suffix(&choose);
     entry_box.append(&local_entry);
@@ -1871,9 +1875,12 @@ fn populate_wizard_remote_picker(
 }
 
 /// Present a folder chooser and write the selection into the entry row.
-fn choose_local_folder(entry: libadwaita::EntryRow) {
+fn choose_local_folder(entry: libadwaita::EntryRow, provider: Provider) {
     let dialog = gtk4::FileDialog::builder()
-        .title(t("Choose NextCloud Folder"))
+        .title(match provider {
+            Provider::OpenCloud => t("Choose OpenCloud Folder"),
+            Provider::Nextcloud => t("Choose NextCloud Folder"),
+        })
         .modal(true)
         .build();
     dialog.select_folder(

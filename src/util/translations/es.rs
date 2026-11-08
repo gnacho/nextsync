@@ -73,6 +73,7 @@ pub static CATALOG: &[(&str, &str)] = &[
     ("Checking credentials…", "Comprobando credenciales…"),
     ("Checking for Updates", "Buscando actualizaciones"),
     ("Choose NextCloud Folder", "Elegir carpeta de NextCloud"),
+    ("Choose OpenCloud Folder", "Elegir carpeta de OpenCloud"),
     ("Choose a local folder and an optional remote folder to mirror from this account.", "Elige una carpeta local y una carpeta remota opcional para sincronizarla desde esta cuenta."),
     ("Choose a local folder to synchronize", "Elige una carpeta local para sincronizar"),
     ("Choose an absolute local folder.", "Elige una carpeta local absoluta."),
