@@ -1051,25 +1051,6 @@ fn present_add_folder_dialog(
     );
     let entry_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-    // OpenCloud folders mirror one space. Received shares are spaces of their
-    // own, named after the original resource (issue #327), so the dialog lets
-    // the user pick which one the folder mirrors.
-    let space_combo = if opencloud {
-        let combo = libadwaita::ComboRow::new();
-        combo.set_title(t("Space"));
-        let model = gtk4::StringList::new(&[]);
-        for space in &spaces {
-            model.append(&space.label());
-        }
-        combo.set_model(Some(&model));
-        let default_index = default_opencloud_space_index(&spaces, discovered_space.as_deref());
-        combo.set_selected(default_index as u32);
-        entry_box.append(&combo);
-        Some(combo)
-    } else {
-        None
-    };
-
     let local_entry = libadwaita::EntryRow::new();
     local_entry.set_title(t("Local folder"));
     local_entry.set_text(&local_default);
@@ -1084,6 +1065,25 @@ fn present_add_folder_dialog(
     });
     local_entry.add_suffix(&choose);
     entry_box.append(&local_entry);
+
+    // OpenCloud folders mirror one space. Received shares are spaces of their
+    // own, named after the original resource (issue #327), and the row sits
+    // right above the remote folder it narrows (issue #333).
+    let space_combo = if opencloud {
+        let combo = libadwaita::ComboRow::new();
+        combo.set_title(t("Space"));
+        let model = gtk4::StringList::new(&[]);
+        for space in &spaces {
+            model.append(&crate::ui::opencloud_space_choice_label(space));
+        }
+        combo.set_model(Some(&model));
+        let default_index = default_opencloud_space_index(&spaces, discovered_space.as_deref());
+        combo.set_selected(default_index as u32);
+        entry_box.append(&combo);
+        Some(combo)
+    } else {
+        None
+    };
 
     let remote_entry = libadwaita::EntryRow::new();
     remote_entry.set_title(t("Remote folder (optional, default /)"));
@@ -1826,7 +1826,12 @@ fn populate_wizard_space_picker(
                     .collect();
                 let model = gtk4::StringList::new(&names);
                 picker.set_model(Some(&model));
-                status.set_text("");
+                // An empty drop-down alone reads as a failure; say why.
+                status.set_text(if names.is_empty() {
+                    t("This space has no folders.")
+                } else {
+                    ""
+                });
             }
             // The dialog stays usable: the manual entry is the source of
             // truth, an empty dropdown just offers no shortcuts.

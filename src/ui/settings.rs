@@ -1544,19 +1544,6 @@ pub fn present_add_folder_dialog(
     // entries clip the paths they display.
     entry_box.set_width_request(560);
 
-    // OpenCloud folders mirror one space, and a received share is a space of
-    // its own (issue #327), so the dialog has to let the user choose it.
-    let space_combo = account
-        .as_ref()
-        .filter(|account| account.provider == Provider::OpenCloud)
-        .map(|_| {
-            let combo = libadwaita::ComboRow::new();
-            combo.set_title(t("Space"));
-            combo.set_model(Some(&gtk4::StringList::new(&[])));
-            entry_box.append(&combo);
-            combo
-        });
-
     let local_entry = libadwaita::EntryRow::new();
     local_entry.set_title(t("Local folder"));
     // Fold the home directory for display; the handler runs the value
@@ -1575,6 +1562,20 @@ pub fn present_add_folder_dialog(
     });
     local_entry.add_suffix(&choose);
     entry_box.append(&local_entry);
+
+    // OpenCloud folders mirror one space, and a received share is a space of
+    // its own (issue #327), so the dialog has to let the user choose it. The
+    // row sits right above the remote folder it narrows (issue #333).
+    let space_combo = account
+        .as_ref()
+        .filter(|account| account.provider == Provider::OpenCloud)
+        .map(|_| {
+            let combo = libadwaita::ComboRow::new();
+            combo.set_title(t("Space"));
+            combo.set_model(Some(&gtk4::StringList::new(&[])));
+            entry_box.append(&combo);
+            combo
+        });
 
     let remote_entry = libadwaita::EntryRow::new();
     remote_entry.set_title(t("Remote folder (empty: use the local folder name)"));
@@ -1975,7 +1976,7 @@ fn populate_opencloud_space_combo(
         };
         let model = gtk4::StringList::new(&[]);
         for space in &list {
-            model.append(&space.label());
+            model.append(&crate::ui::opencloud_space_choice_label(space));
         }
         let index = default_opencloud_space_index(&list, configured.as_deref());
         *spaces_for_fill.borrow_mut() = list;
@@ -2043,11 +2044,17 @@ fn populate_opencloud_remote_picker(
         let model = gtk4::StringList::new(&[]);
         match handle.await {
             Ok(Some(folders)) => {
+                let empty = folders.is_empty();
                 for folder in folders {
                     // Display without the leading slash (issue #91).
                     model.append(folder.trim_start_matches('/'));
                 }
-                status.set_text("");
+                // An empty drop-down alone reads as a failure; say why.
+                status.set_text(if empty {
+                    t("This space has no folders.")
+                } else {
+                    ""
+                });
             }
             _ => status.set_text(t("Could not list the remote folders.")),
         }
@@ -2684,6 +2691,32 @@ mod tests {
             }],
             ..AccountConfig::default()
         }
+    }
+
+    #[test]
+    fn space_choices_mark_received_shares() {
+        set_locale(Locale::English);
+        let share = OpenCloudSpace {
+            id: "share-1".to_owned(),
+            display_name: Some("2026".to_owned()),
+            kind: crate::nextcloud::api::OpenCloudSpaceKind::Share,
+        };
+        let personal = OpenCloudSpace {
+            id: "personal-1".to_owned(),
+            display_name: Some("Ana Xu".to_owned()),
+            kind: crate::nextcloud::api::OpenCloudSpaceKind::Personal,
+        };
+        assert_eq!(
+            crate::ui::opencloud_space_choice_label(&share),
+            "2026 (shared)"
+        );
+        assert_eq!(crate::ui::opencloud_space_choice_label(&personal), "Ana Xu");
+        set_locale(Locale::Spanish);
+        assert_eq!(
+            crate::ui::opencloud_space_choice_label(&share),
+            "2026 (compartida)"
+        );
+        reset_locale();
     }
 
     #[test]

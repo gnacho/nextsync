@@ -1,5 +1,19 @@
 //! GTK4/libadwaita user interface. Fase 5.
 
+use crate::nextcloud::api::{OpenCloudSpace, OpenCloudSpaceKind};
+use crate::util::i18n::t;
+
+/// Label of an OpenCloud space in the Add Folder selector (issue #333).
+///
+/// Received shares say so: the option mirrors somebody else's folder, and the
+/// remote folder list below starts from it, which is otherwise easy to miss.
+pub(crate) fn opencloud_space_choice_label(space: &OpenCloudSpace) -> String {
+    match space.kind {
+        OpenCloudSpaceKind::Share => format!("{} ({})", space.label(), t("shared")),
+        _ => space.label(),
+    }
+}
+
 pub mod about;
 pub mod activity;
 pub mod conflict_resolver;
