@@ -15,7 +15,7 @@
 //!
 //! [`DeleteAlert`]: crate::core::scheduler::DeleteAlert
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -33,12 +33,24 @@ use crate::util::i18n::t;
 use crate::util::paths::state_dir;
 
 /// Version of the manifest layout. Manifests with another format are ignored.
-pub const GUARD_FORMAT: u32 = 1;
+pub const GUARD_FORMAT: u32 = 2;
 
 const MESSAGE_FOLDER_MISSING: &str = "The local synchronization folder is missing or unavailable.";
 const MESSAGE_FOLDER_EMPTIED: &str = "A previously populated synchronization folder is now empty.";
 const MESSAGE_MASS_DELETION: &str =
     "An unusual number of local files disappeared and could be deleted from Nextcloud.";
+
+/// One regular file in the deletion-guard manifest: its relative path plus the
+/// metadata the rename detector needs to tell a rename apart from a deletion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestFile {
+    /// Path relative to [`DeleteGuardManifestData::local_root`].
+    pub path: String,
+    /// File size in bytes.
+    pub size: u64,
+    /// Modification time in whole seconds since the Unix epoch.
+    pub mtime: u64,
+}
 
 /// Serialized content of one deletion-guard manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,8 +61,8 @@ pub struct DeleteGuardManifestData {
     pub account_fingerprint: String,
     /// Absolute local root the file list refers to.
     pub local_root: String,
-    /// Sorted relative paths of the last locally verified file set.
-    pub files: Vec<String>,
+    /// Sorted files of the last locally verified file set.
+    pub files: Vec<ManifestFile>,
 }
 
 /// Per-folder record of the last locally verified file set.
@@ -98,14 +110,19 @@ impl DeleteGuardManifest {
     }
 
     /// Atomically write the manifest (temp file + rename, mode 0600, fsync).
-    pub fn save(&self, fingerprint: &str, local_root: &Path, files: &[String]) -> io::Result<()> {
+    pub fn save(
+        &self,
+        fingerprint: &str,
+        local_root: &Path,
+        files: &[ManifestFile],
+    ) -> io::Result<()> {
         let payload = DeleteGuardManifestData {
             format: GUARD_FORMAT,
             account_fingerprint: fingerprint.to_string(),
             local_root: local_root.to_string_lossy().into_owned(),
             files: {
                 let mut sorted = files.to_vec();
-                sorted.sort();
+                sorted.sort_by(|a, b| a.path.cmp(&b.path));
                 sorted
             },
         };
@@ -172,12 +189,13 @@ pub fn find_sync_databases(root: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Walk a sync folder and return relative file paths.
+/// Walk a sync folder and return each regular file's relative path, size and
+/// modification time.
 ///
 /// Directories, symlinks and special files are skipped (the guard only cares
 /// about regular files disappearing); journal databases and excluded names are
 /// ignored, matching what `nextcloudcmd` sees.
-pub fn scan_local_files(root: &Path, matcher: &ExclusionMatcher) -> Vec<String> {
+pub fn scan_local_files_with_meta(root: &Path, matcher: &ExclusionMatcher) -> Vec<ManifestFile> {
     let root = PathBuf::from(root);
     let mut files = Vec::new();
     if !root.is_dir() {
@@ -206,11 +224,31 @@ pub fn scan_local_files(root: &Path, matcher: &ExclusionMatcher) -> Vec<String> 
             if kind.is_dir() {
                 stack.push((child.path(), relative));
             } else if kind.is_file() {
-                files.push(relative);
+                let metadata = child.metadata().ok();
+                let size = metadata.as_ref().map(|meta| meta.len()).unwrap_or(0);
+                let mtime = metadata
+                    .as_ref()
+                    .and_then(|meta| meta.modified().ok())
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_secs())
+                    .unwrap_or(0);
+                files.push(ManifestFile {
+                    path: relative,
+                    size,
+                    mtime,
+                });
             }
         }
     }
     files
+}
+
+/// Walk a sync folder and return relative file paths.
+pub fn scan_local_files(root: &Path, matcher: &ExclusionMatcher) -> Vec<String> {
+    scan_local_files_with_meta(root, matcher)
+        .into_iter()
+        .map(|file| file.path)
+        .collect()
 }
 
 /// Runs the deletion-guard policy before a reconciliation. Implemented by
@@ -308,10 +346,53 @@ impl DeleteGuard {
             });
         }
 
-        let current: HashSet<String> = scan_local_files(&root, &self.matcher).into_iter().collect();
-        let previous: HashSet<String> = manifest.files.iter().cloned().collect();
-        let mut missing: Vec<String> = previous.difference(&current).cloned().collect();
-        missing.sort();
+        let current: Vec<ManifestFile> = scan_local_files_with_meta(&root, &self.matcher);
+        let previous: Vec<ManifestFile> = manifest.files;
+
+        let current_by_path: HashMap<&str, &ManifestFile> = current
+            .iter()
+            .map(|file| (file.path.as_str(), file))
+            .collect();
+        let previous_by_path: HashMap<&str, &ManifestFile> = previous
+            .iter()
+            .map(|file| (file.path.as_str(), file))
+            .collect();
+
+        let missing: Vec<&ManifestFile> = previous
+            .iter()
+            .filter(|file| !current_by_path.contains_key(file.path.as_str()))
+            .collect();
+        let created: Vec<&ManifestFile> = current
+            .iter()
+            .filter(|file| !previous_by_path.contains_key(file.path.as_str()))
+            .collect();
+
+        // A disappeared file whose (size, mtime) matches a freshly created file
+        // is a rename, not a deletion: `mv` and metadata-preserving renames keep
+        // both. Matching on size alone would risk hiding a real deletion that
+        // coincides with an unrelated same-size creation.
+        let mut created_by_signature: HashMap<(u64, u64), Vec<&ManifestFile>> = HashMap::new();
+        for file in &created {
+            created_by_signature
+                .entry((file.size, file.mtime))
+                .or_default()
+                .push(file);
+        }
+        let mut truly_missing: Vec<String> = Vec::new();
+        for file in &missing {
+            let signature = (file.size, file.mtime);
+            let mut is_rename = false;
+            if let Some(bucket) = created_by_signature.get_mut(&signature) {
+                if bucket.pop().is_some() {
+                    is_rename = true;
+                }
+            }
+            if !is_rename {
+                truly_missing.push(file.path.clone());
+            }
+        }
+        truly_missing.sort();
+
         let previous_count = previous.len();
         let current_count = current.len();
 
@@ -319,7 +400,7 @@ impl DeleteGuard {
             return Some(DeleteAlert {
                 reason: "folder_emptied".to_string(),
                 message: t(MESSAGE_FOLDER_EMPTIED).to_string(),
-                missing_paths: missing,
+                missing_paths: truly_missing,
                 previous_count,
                 current_count,
                 can_approve_once: true,
@@ -329,16 +410,17 @@ impl DeleteGuard {
         let count_limit = self.config.count_threshold.max(1) as usize;
         let percent_limit = self.config.percent_threshold.clamp(1, 100) as f64;
         let missing_percent = if previous_count > 0 {
-            missing.len() as f64 * 100.0 / previous_count as f64
+            truly_missing.len() as f64 * 100.0 / previous_count as f64
         } else {
             0.0
         };
-        if !missing.is_empty() && (missing.len() >= count_limit || missing_percent >= percent_limit)
+        if !truly_missing.is_empty()
+            && (truly_missing.len() >= count_limit || missing_percent >= percent_limit)
         {
             return Some(DeleteAlert {
                 reason: "mass_local_deletion".to_string(),
                 message: MESSAGE_MASS_DELETION.to_string(),
-                missing_paths: missing,
+                missing_paths: truly_missing,
                 previous_count,
                 current_count,
                 can_approve_once: true,
@@ -350,7 +432,7 @@ impl DeleteGuard {
     /// Scan the current tree and store it as the new baseline. Returns whether
     /// the manifest could be written.
     pub fn record_current(&self) -> bool {
-        let files = scan_local_files(&self.local_root(), &self.matcher);
+        let files = scan_local_files_with_meta(&self.local_root(), &self.matcher);
         self.manifest
             .save(&self.fingerprint, &self.local_root, &files)
             .is_ok()
@@ -671,11 +753,23 @@ mod tests {
             .save(
                 "fp",
                 dir.path(),
-                &["b.txt".to_string(), "a.txt".to_string()],
+                &[
+                    ManifestFile {
+                        path: "b.txt".into(),
+                        size: 2,
+                        mtime: 200,
+                    },
+                    ManifestFile {
+                        path: "a.txt".into(),
+                        size: 1,
+                        mtime: 100,
+                    },
+                ],
             )
             .expect("save");
         let loaded = manifest.load().expect("load");
-        assert_eq!(loaded.files, ["a.txt", "b.txt"]);
+        let paths: Vec<&str> = loaded.files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt", "b.txt"]);
         assert_eq!(loaded.account_fingerprint, "fp");
         let meta = fs::metadata(manifest.path()).expect("metadata");
         use std::os::unix::fs::PermissionsExt;
@@ -731,6 +825,50 @@ mod tests {
         assert!(alert.can_approve_once);
         assert_eq!(alert.previous_count, 4);
         assert_eq!(alert.current_count, 1);
+    }
+
+    #[test]
+    fn mass_rename_alone_stays_quiet() {
+        let dir = root();
+        for (name, bytes) in [
+            ("a.txt", b"aaaa".as_slice()),
+            ("b.txt", b"bbbbbb".as_slice()),
+            ("c.txt", b"cccccccc".as_slice()),
+            ("d.txt", b"dddddddddd".as_slice()),
+        ] {
+            fs::write(dir.path().join(name), bytes).expect("write");
+        }
+        let (guard, _manifest_dir) = guard_for(dir.path(), guard_config(3, 60));
+        assert!(guard.record_current());
+        for (from, to) in [("a.txt", "x.txt"), ("b.txt", "y.txt"), ("c.txt", "z.txt")] {
+            fs::rename(dir.path().join(from), dir.path().join(to)).expect("rename");
+        }
+        // Same files under new names: not a deletion, the guard stays quiet.
+        assert!(guard.check().is_none());
+    }
+
+    #[test]
+    fn rename_is_excluded_but_real_deletions_still_alert() {
+        let dir = root();
+        for (name, bytes) in [
+            ("a.txt", b"aaaa".as_slice()),
+            ("b.txt", b"bbbbbb".as_slice()),
+            ("c.txt", b"cccccccc".as_slice()),
+            ("d.txt", b"dddddddddd".as_slice()),
+        ] {
+            fs::write(dir.path().join(name), bytes).expect("write");
+        }
+        let (guard, _manifest_dir) = guard_for(dir.path(), guard_config(3, 60));
+        assert!(guard.record_current());
+        // a.txt -> x.txt keeps the same bytes and mtime: a rename.
+        fs::rename(dir.path().join("a.txt"), dir.path().join("x.txt")).expect("rename");
+        // b, c, d are genuinely deleted and must still trip the guard.
+        for name in ["b.txt", "c.txt", "d.txt"] {
+            fs::remove_file(dir.path().join(name)).expect("remove");
+        }
+        let alert = guard.check().expect("alert");
+        assert_eq!(alert.reason, "mass_local_deletion");
+        assert_eq!(alert.missing_paths, ["b.txt", "c.txt", "d.txt"]);
     }
 
     #[test]
