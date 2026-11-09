@@ -1,11 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.44.14",
+  "version": "0.44.16",
   "mandatory": false,
-  "summary": "Received shares are labelled in the space selector and an empty folder list says so.",
+  "summary": "The deletion guard distinguishes mass renames from mass deletions.",
   "changelog": [
-    "Received OpenCloud shares read '(shared)' in the space selector, which now sits right above the remote folder field (#333).",
-    "A space without subfolders explains its empty folder list instead of showing an unexplained (None)."
+    "A bulk local rename no longer fires the deletion guard or churns the server trash bin: the guard now matches disappeared files against newly created ones by size and mtime (#335)."
   ],
   "released_at": "2026-11-09T00:00:00Z"
 }

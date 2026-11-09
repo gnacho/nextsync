@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.16] - 2026-11-09
+
+### Fixed
+
+- The deletion guard no longer mistakes a mass rename for a mass deletion. It stores each file's size and mtime and cross-matches disappeared files against newly created ones, so a bulk rename (for example a photo renamer rewriting names from EXIF) no longer fires a false deletion alert or churns the server trash bin (#335).
+
 ## [0.44.14] - 2026-11-09
 
 ### Changed
