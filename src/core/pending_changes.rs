@@ -175,8 +175,9 @@ pub fn pending_for_folder(
         .and_then(|meta| meta.modified())
         .unwrap_or(SystemTime::UNIX_EPOCH);
     let current = scan_local_files_with_times(&root, &matcher);
+    let previous_paths: Vec<String> = data.files.iter().map(|file| file.path.clone()).collect();
     (
-        compute_pending_changes(&data.files, &current, baseline_time),
+        compute_pending_changes(&previous_paths, &current, baseline_time),
         true,
     )
 }
@@ -184,6 +185,7 @@ pub fn pending_for_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::delete_guard::ManifestFile;
     use tempfile::tempdir;
 
     fn matcher() -> ExclusionMatcher {
@@ -300,7 +302,15 @@ mod tests {
             &folder.remote_path,
         );
         manifest
-            .save(&fingerprint, dir.path(), &["a.txt".to_string()])
+            .save(
+                &fingerprint,
+                dir.path(),
+                &[ManifestFile {
+                    path: "a.txt".to_string(),
+                    size: 1,
+                    mtime: 0,
+                }],
+            )
             .expect("save");
         std::fs::remove_file(dir.path().join("a.txt")).expect("remove");
         std::fs::write(dir.path().join("c.txt"), "x").expect("write");
