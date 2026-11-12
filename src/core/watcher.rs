@@ -212,11 +212,19 @@ pub fn classify_event(
 /// each write of the state database re-triggered the scheduler, which wrote the
 /// database again: an endless sync loop that transferred nothing (issue #324).
 fn is_excluded(path: &Path, root: &Path, matcher: &ExclusionMatcher) -> bool {
+    /// The app's own state directory. It lives inside the synchronized folder
+    /// and the engine rewrites its journal on every run, so its events must
+    /// never count, whatever the user's patterns say: one trigger per journal
+    /// write is an endless sync loop (issue #324).
+    const STATE_DIR: &str = ".nextsync";
     match path.strip_prefix(root) {
-        Ok(relative) => relative
-            .components()
-            .filter_map(|component| component.as_os_str().to_str())
-            .any(|name| matcher.matches_name(name)),
+        Ok(relative) => {
+            let names: Vec<&str> = relative
+                .components()
+                .filter_map(|component| component.as_os_str().to_str())
+                .collect();
+            names.contains(&STATE_DIR) || names.iter().any(|name| matcher.matches_name(name))
+        }
         Err(_) => matcher.matches_path(path),
     }
 }
@@ -241,6 +249,29 @@ mod tests {
 
     fn empty_matcher() -> ExclusionMatcher {
         ExclusionMatcher::new(Vec::<String>::new(), true)
+    }
+
+    /// The app's own journal lives inside the folder; its writes must never
+    /// re-arm the scheduler, even with no configured patterns (issue #324).
+    #[test]
+    fn the_state_directory_is_always_excluded() {
+        let root = Path::new("/home/u/Fotos");
+        let matcher = empty_matcher();
+        assert!(is_excluded(
+            Path::new("/home/u/Fotos/.nextsync/state.db-wal"),
+            root,
+            &matcher
+        ));
+        assert!(is_excluded(
+            Path::new("/home/u/Fotos/.nextsync"),
+            root,
+            &matcher
+        ));
+        assert!(!is_excluded(
+            Path::new("/home/u/Fotos/a.jpg"),
+            root,
+            &matcher
+        ));
     }
 
     /// Drain events until one `Change` satisfies `predicate` (5 s budget).
