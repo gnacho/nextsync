@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.18] - 2026-11-12
+
+### Fixed
+
+- The local watcher always ignores the app's own state directory. It used to depend on a configured pattern and the defaults do not include one for it, so every journal write re-armed the scheduler and opening an account started a full cycle each time (#337, #324).
+
 ## [0.44.16] - 2026-11-09
 
 ### Fixed
