@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.20] - 2026-11-12
+
+### Added
+
+- Per-account conflict policy in Advanced synchronization. Keeping both copies stays the default; "keep the newest" discards the older side and never writes a conflicted copy to the folder. A file/directory collision always keeps both, because dropping a directory is destructive (#338).
+
 ## [0.44.18] - 2026-11-12
 
 ### Fixed

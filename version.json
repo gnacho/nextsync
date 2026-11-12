@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.44.18",
+  "version": "0.44.20",
   "mandatory": false,
-  "summary": "The watcher ignores the app's own journal, so switching accounts no longer restarts synchronization.",
+  "summary": "A conflict policy per account: keep both copies as before, or keep the newest and stop writing conflicted copies.",
   "changelog": [
-    "The local watcher always ignores the app state directory. It relied on a configured pattern, the defaults do not include one for it, and every journal write re-armed the scheduler: opening an account started a full cycle each time."
+    "New setting in Advanced synchronization: when a file changed on both sides, keep both copies (default) or keep the newest and drop the older one without writing a conflict copy."
   ],
   "released_at": "2026-11-12T00:00:00Z"
 }
