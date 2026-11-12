@@ -154,6 +154,17 @@ pub struct FolderConfig {
     pub size_confirmed: bool,
 }
 
+/// What to do when the same path changed on both sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConflictPolicy {
+    /// Write a `(Nextcloud conflicted copy <date>)` file and keep both.
+    #[default]
+    KeepBoth,
+    /// Drop the older side and keep one file, with no conflict copy.
+    KeepNewest,
+}
+
 /// Per-account sync triggers and exclusions.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -170,6 +181,8 @@ pub struct SyncConfig {
     pub exclude_patterns: Vec<String>,
     /// Sync dotfiles.
     pub sync_hidden_files: bool,
+    /// How a path changed on both sides is resolved.
+    pub conflict_policy: ConflictPolicy,
 }
 
 impl Default for SyncConfig {
@@ -186,6 +199,7 @@ impl Default for SyncConfig {
             exclude_patterns_enabled: true,
             exclude_patterns: DEFAULT_PATTERNS.iter().map(|s| s.to_string()).collect(),
             sync_hidden_files: false,
+            conflict_policy: ConflictPolicy::KeepBoth,
         }
     }
 }
@@ -1120,7 +1134,17 @@ fn validate_sync(raw: Option<&Value>) -> Result<SyncConfig, ConfigError> {
         exclude_patterns_enabled: get_bool(obj, "exclude_patterns_enabled", true),
         exclude_patterns,
         sync_hidden_files: get_bool(obj, "sync_hidden_files", false),
+        conflict_policy: parse_conflict_policy(obj.get("conflict_policy")),
     })
+}
+
+/// Unknown or missing values fall back to keeping both copies: that is the
+/// only choice that cannot lose data.
+fn parse_conflict_policy(value: Option<&Value>) -> ConflictPolicy {
+    match value.and_then(Value::as_str) {
+        Some("keep-newest") => ConflictPolicy::KeepNewest,
+        _ => ConflictPolicy::KeepBoth,
+    }
 }
 
 fn validate_delete_guard(raw: Option<&Value>) -> Result<DeleteGuardConfig, ConfigError> {
@@ -1821,6 +1845,36 @@ mod tests {
         let config = validate_config(cfg).unwrap();
         assert_eq!(config.schema_version, 7);
         assert_eq!(config.accounts[0].provider, Provider::Nextcloud);
+    }
+
+    /// Issue #338: keeping both copies is the only choice that cannot lose
+    /// data, so it stays the default.
+    #[test]
+    fn conflict_policy_defaults_to_keeping_both() {
+        assert_eq!(
+            SyncConfig::default().conflict_policy,
+            ConflictPolicy::KeepBoth
+        );
+    }
+
+    #[test]
+    fn conflict_policy_parses_keep_newest_and_ignores_unknown_values() {
+        for (raw, expected) in [
+            (json!("keep-newest"), ConflictPolicy::KeepNewest),
+            (json!("keep-both"), ConflictPolicy::KeepBoth),
+            (json!("bogus"), ConflictPolicy::KeepBoth),
+            (json!(3), ConflictPolicy::KeepBoth),
+        ] {
+            let cfg = validate_config(json!({
+                "accounts": [{
+                    "server_url": "https://cloud.example.com",
+                    "login_name": "alice",
+                    "sync": { "conflict_policy": raw }
+                }]
+            }))
+            .unwrap();
+            assert_eq!(cfg.accounts[0].sync.conflict_policy, expected);
+        }
     }
 
     #[test]

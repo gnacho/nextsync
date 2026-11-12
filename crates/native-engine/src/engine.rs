@@ -216,7 +216,13 @@ impl Engine {
             .filter(|entry| !crate::local::ignored(&entry.path, entry.is_dir, &self.cfg))
             .collect();
         let local = scan_local(&self.cfg.local_root, &self.cfg)?;
-        let plan = reconcile(&local, &remote, &db_entries, complete);
+        let plan = reconcile(
+            &local,
+            &remote,
+            &db_entries,
+            complete,
+            self.cfg.conflict_policy,
+        );
         let loc: BTreeMap<&str, &LocalEntry> = local.iter().map(|e| (e.rel.as_str(), e)).collect();
         let rem: BTreeMap<&str, &RemoteEntry> =
             remote.iter().map(|e| (e.path.as_str(), e)).collect();

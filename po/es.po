@@ -2807,3 +2807,19 @@ msgstr "Volver a leer la carpeta desde el servidor"
 
 msgid "This server does not offer notify_push."
 msgstr "Este servidor no ofrece notify_push."
+
+#: src/ui/settings.rs
+msgid "When a file changed on both sides"
+msgstr "Cuando un archivo cambia en los dos lados"
+
+#: src/ui/settings.rs
+msgid "Keeping both writes a conflicted copy. Keeping the newest drops the older version."
+msgstr "Mantener las dos escribe una copia en conflicto. Quedarse con la más reciente descarta la versión antigua."
+
+#: src/ui/settings.rs
+msgid "Keep both copies"
+msgstr "Mantener las dos copias"
+
+#: src/ui/settings.rs
+msgid "Keep the newest"
+msgstr "Quedarse con la más reciente"

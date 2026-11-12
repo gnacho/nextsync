@@ -837,6 +837,7 @@ fn build_sync_advanced_page(
         page.add(&group);
     }
     let detailed_group = libadwaita::PreferencesGroup::new();
+    detailed_group.add(&conflict_policy_row(store, account_id, callbacks, account));
     detailed_group.add(&detailed_output_row(store, account_id, callbacks, account));
     page.add(&detailed_group);
     page.add(&deletion_guard_group(store, account_id, account, callbacks));
@@ -1061,6 +1062,47 @@ fn build_advanced_page(
     page.add(&backup_group);
 
     page
+}
+
+/// Conflict policy (issue #338): what happens when a path changed on both
+/// sides. Keeping both is the default; "newest" avoids conflict copies.
+pub(crate) fn conflict_policy_row(
+    store: &ConfigStore,
+    account_id: &str,
+    callbacks: &SettingsCallbacks,
+    account: &AccountConfig,
+) -> libadwaita::ComboRow {
+    let row = libadwaita::ComboRow::new();
+    row.set_title(t("When a file changed on both sides"));
+    row.set_subtitle(t(
+        "Keeping both writes a conflicted copy. Keeping the newest drops the older version.",
+    ));
+    row.set_model(Some(&gtk4::StringList::new(&[
+        t("Keep both copies"),
+        t("Keep the newest"),
+    ])));
+    row.set_selected(match account.sync.conflict_policy {
+        crate::storage::config::ConflictPolicy::KeepBoth => 0,
+        crate::storage::config::ConflictPolicy::KeepNewest => 1,
+    });
+    let store = store.clone();
+    let account_id = account_id.to_string();
+    let callbacks = callbacks.clone();
+    let guard = row.clone();
+    row.connect_selected_notify(move |_| {
+        let policy = if guard.selected() == 1 {
+            crate::storage::config::ConflictPolicy::KeepNewest
+        } else {
+            crate::storage::config::ConflictPolicy::KeepBoth
+        };
+        if let Err(error) = persist_account(&store, &account_id, |account| {
+            account.sync.conflict_policy = policy;
+        }) {
+            eprintln!("Settings: could not save the conflict policy: {error}");
+        }
+        invoke(&callbacks.on_reconfigure);
+    });
+    row
 }
 
 /// Detailed-output switch row (account-owned, issue #56).
