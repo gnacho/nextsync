@@ -66,6 +66,16 @@ pub fn is_safe_rel(rel: &str) -> bool {
         .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
+/// What to do when the same path changed on both sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConflictPolicy {
+    /// Write a `(Nextcloud conflicted copy <date>)` file and keep both.
+    #[default]
+    KeepBoth,
+    /// Drop the older side and keep one file, no conflict copy.
+    KeepNewest,
+}
+
 #[derive(Clone)]
 pub struct EngineConfig {
     pub provider: Provider,
@@ -84,6 +94,8 @@ pub struct EngineConfig {
     pub sync_hidden_files: bool,
     pub exclude_patterns: Vec<String>,
     pub delete_guard: DeleteGuardConfig,
+    /// How both-changed paths are resolved.
+    pub conflict_policy: ConflictPolicy,
     pub dry_run: bool,
     pub timeout: Duration,
     /// Files at or above this size use chunked upload (Nextcloud chunked v2,
@@ -151,6 +163,7 @@ impl EngineConfig {
             sync_hidden_files: false,
             exclude_patterns: Vec::new(),
             delete_guard: DeleteGuardConfig::default(),
+            conflict_policy: ConflictPolicy::default(),
             dry_run: false,
             timeout: Duration::from_secs(60),
             chunk_threshold: 10 * 1024 * 1024,

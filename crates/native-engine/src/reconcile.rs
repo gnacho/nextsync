@@ -106,6 +106,7 @@ pub fn reconcile(
     remote: &[RemoteEntry],
     db: &[DbEntry],
     remote_scan_complete: bool,
+    policy: crate::ConflictPolicy,
 ) -> Vec<Action> {
     let loc: BTreeMap<&str, &LocalEntry> = local.iter().map(|e| (e.rel.as_str(), e)).collect();
     let rem: BTreeMap<&str, &RemoteEntry> = remote.iter().map(|e| (e.path.as_str(), e)).collect();
@@ -216,10 +217,19 @@ pub fn reconcile(
                         if r.is_dir { "directory" } else { "file" },
                     );
                 }
-                if l.is_dir != r.is_dir || (remote_changed && local_changed) {
+                if l.is_dir != r.is_dir {
+                    // Dropping a file because the server has a directory (or the
+                    // other way round) is never "keep the newest": leave both.
                     actions.push(Action::Conflict {
                         rel: key.to_string(),
                     });
+                } else if remote_changed && local_changed {
+                    match resolve_conflict(l, r, policy) {
+                        Some(action) => actions.push(action),
+                        None => actions.push(Action::Conflict {
+                            rel: key.to_string(),
+                        }),
+                    }
                 } else if remote_changed && !l.is_dir {
                     actions.push(Action::Download {
                         rel: key.to_string(),
@@ -296,6 +306,13 @@ pub fn reconcile(
                     actions.push(Action::RecordOnly {
                         rel: key.to_string(),
                     });
+                } else if !l.is_dir && !r.is_dir {
+                    match resolve_conflict(l, r, policy) {
+                        Some(action) => actions.push(action),
+                        None => actions.push(Action::Conflict {
+                            rel: key.to_string(),
+                        }),
+                    }
                 } else {
                     actions.push(Action::Conflict {
                         rel: key.to_string(),
@@ -309,6 +326,36 @@ pub fn reconcile(
     let _ = budget;
     sort_plan(&mut actions);
     actions
+}
+
+/// Resolve a both-changed path under the configured policy.
+///
+/// `None` means "the caller writes a conflicted copy" (the default and the
+/// only sane answer for a file/directory collision). `KeepNewest` returns the
+/// action that keeps the newer side and drops the other, so the engine never
+/// writes a conflict copy.
+fn resolve_conflict(
+    l: &LocalEntry,
+    r: &RemoteEntry,
+    policy: crate::ConflictPolicy,
+) -> Option<Action> {
+    match policy {
+        crate::ConflictPolicy::KeepBoth => None,
+        crate::ConflictPolicy::KeepNewest => {
+            let local_newer = r.mtime.is_none_or(|rm| l.mtime > rm);
+            Some(if local_newer {
+                Action::Upload { rel: l.rel.clone() }
+            } else {
+                Action::Download {
+                    rel: r.path.clone(),
+                    etag: r.etag.clone(),
+                    size: r.size,
+                    mtime: r.mtime,
+                    checksum: r.checksum.clone(),
+                }
+            })
+        }
+    }
 }
 
 fn same_mtime(local: i64, remote: Option<i64>) -> bool {
@@ -388,12 +435,53 @@ mod tests {
     }
 
     #[test]
+    fn keep_newest_uploads_when_the_local_copy_is_newer() {
+        let mut r = rem("a", "e2", None);
+        r.mtime = Some(100);
+        let acts = reconcile(
+            &[loc("a", 10, 200, 1)],
+            &[r],
+            &[db("a", 10, 100, "e1", None)],
+            true,
+            crate::ConflictPolicy::KeepNewest,
+        );
+        assert_eq!(acts, vec![Action::Upload { rel: "a".into() }]);
+    }
+
+    #[test]
+    fn keep_newest_downloads_when_the_remote_copy_is_newer() {
+        let mut r = rem("a", "e2", None);
+        r.mtime = Some(300);
+        let acts = reconcile(
+            &[loc("a", 10, 200, 1)],
+            &[r],
+            &[db("a", 10, 100, "e1", None)],
+            true,
+            crate::ConflictPolicy::KeepNewest,
+        );
+        assert!(matches!(acts[0], Action::Download { .. }));
+    }
+
+    #[test]
+    fn keep_newest_never_drops_a_directory() {
+        let acts = reconcile(
+            &[loc("a", 10, 200, 1)],
+            &[rdir("a")],
+            &[],
+            true,
+            crate::ConflictPolicy::KeepNewest,
+        );
+        assert_eq!(acts, vec![Action::Conflict { rel: "a".into() }]);
+    }
+
+    #[test]
     fn unchanged_records_only() {
         let acts = reconcile(
             &[loc("a", 10, 100, 1)],
             &[rem("a", "e1", Some("1"))],
             &[db("a", 10, 100, "e1", Some("1"))],
             true,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert_eq!(acts, vec![Action::RecordOnly { rel: "a".into() }]);
     }
@@ -405,6 +493,7 @@ mod tests {
             &[rem("a", "e1", None)],
             &[db("a", 10, 100, "e1", None)],
             true,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert_eq!(acts, vec![Action::Upload { rel: "a".into() }]);
     }
@@ -416,6 +505,7 @@ mod tests {
             &[rem("a", "e2", None)],
             &[db("a", 10, 100, "e1", None)],
             true,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert!(matches!(acts[0], Action::Download { .. }));
     }
@@ -427,13 +517,20 @@ mod tests {
             &[rem("a", "e2", None)],
             &[db("a", 10, 100, "e1", None)],
             true,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert_eq!(acts, vec![Action::Conflict { rel: "a".into() }]);
     }
 
     #[test]
     fn new_local_uploads_new_remote_downloads() {
-        let acts = reconcile(&[loc("l", 1, 1, 1)], &[rem("r", "e", None)], &[], true);
+        let acts = reconcile(
+            &[loc("l", 1, 1, 1)],
+            &[rem("r", "e", None)],
+            &[],
+            true,
+            crate::ConflictPolicy::KeepBoth,
+        );
         assert!(acts.contains(&Action::Upload { rel: "l".into() }));
         assert!(acts
             .iter()
@@ -445,7 +542,13 @@ mod tests {
         let mut r = rem("a", "e9", None);
         r.size = 10;
         r.mtime = Some(100);
-        let acts = reconcile(&[loc("a", 10, 100, 1)], &[r], &[], true);
+        let acts = reconcile(
+            &[loc("a", 10, 100, 1)],
+            &[r],
+            &[],
+            true,
+            crate::ConflictPolicy::KeepBoth,
+        );
         assert_eq!(acts, vec![Action::RecordOnly { rel: "a".into() }]);
     }
 
@@ -453,7 +556,13 @@ mod tests {
     fn first_run_different_files_conflict() {
         let mut r = rem("a", "e9", None);
         r.size = 99;
-        let acts = reconcile(&[loc("a", 10, 100, 1)], &[r], &[], true);
+        let acts = reconcile(
+            &[loc("a", 10, 100, 1)],
+            &[r],
+            &[],
+            true,
+            crate::ConflictPolicy::KeepBoth,
+        );
         assert_eq!(acts, vec![Action::Conflict { rel: "a".into() }]);
     }
 
@@ -464,19 +573,32 @@ mod tests {
             &[rem("a", "e9", None)],
             &[db("a", 1, 1, "e", None)],
             true,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert_eq!(acts, vec![Action::DeleteRemote { rel: "a".into() }]);
     }
 
     #[test]
     fn entry_gone_on_both_sides_produces_no_action() {
-        let acts = reconcile(&[], &[], &[db("a", 1, 1, "e", None)], true);
+        let acts = reconcile(
+            &[],
+            &[],
+            &[db("a", 1, 1, "e", None)],
+            true,
+            crate::ConflictPolicy::KeepBoth,
+        );
         assert!(acts.is_empty(), "expected no actions, got {acts:?}");
     }
 
     #[test]
     fn missing_remote_deletes_local() {
-        let acts = reconcile(&[loc("a", 1, 1, 1)], &[], &[db("a", 1, 1, "e", None)], true);
+        let acts = reconcile(
+            &[loc("a", 1, 1, 1)],
+            &[],
+            &[db("a", 1, 1, "e", None)],
+            true,
+            crate::ConflictPolicy::KeepBoth,
+        );
         assert_eq!(acts, vec![Action::DeleteLocal { rel: "a".into() }]);
     }
 
@@ -487,6 +609,7 @@ mod tests {
             &[rem("new", "e1", Some("77"))],
             &[db("old", 10, 100, "e1", Some("77"))],
             true,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert_eq!(
             acts,
@@ -500,7 +623,13 @@ mod tests {
 
     #[test]
     fn new_directory_both_sides_records() {
-        let acts = reconcile(&[ldir("d")], &[rdir("d")], &[], true);
+        let acts = reconcile(
+            &[ldir("d")],
+            &[rdir("d")],
+            &[],
+            true,
+            crate::ConflictPolicy::KeepBoth,
+        );
         assert_eq!(acts, vec![Action::RecordOnly { rel: "d".into() }]);
     }
 
@@ -511,6 +640,7 @@ mod tests {
             &[],
             &[db("a", 1, 1, "e", None)],
             false,
+            crate::ConflictPolicy::KeepBoth,
         );
         assert!(!acts.iter().any(|a| a.is_delete()));
     }

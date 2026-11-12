@@ -89,6 +89,7 @@ fn a_local_file_never_turns_a_remote_collection_into_a_download() {
         ],
         &[],
         true,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     assert!(
@@ -125,6 +126,7 @@ fn the_journal_never_takes_part_in_reconciliation() {
         ],
         &[journal(".nextsync/state.db", false, 10, 1, "\"b\"")],
         true,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     assert_eq!(deletes(&plan), 0, "the journal must be invisible: {plan:?}");
@@ -141,6 +143,7 @@ fn an_inode_change_alone_is_not_a_local_change() {
         &[remote("notes.md", false, 10, "\"e1\"")],
         &[journal("notes.md", false, 10, 500, "\"e1\"")],
         true,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     assert!(
@@ -160,6 +163,7 @@ fn an_incomplete_remote_scan_never_deletes_anything() {
         &[remote("gone.txt", false, 10, "\"e1\"")],
         &[journal("gone.txt", false, 10, 100, "\"e1\"")],
         false,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     assert_eq!(
@@ -178,6 +182,7 @@ fn directories_never_conflict() {
         &[remote("docs", true, 0, "\"changed\"")],
         &[journal("docs", true, 0, 100, "\"old\"")],
         true,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     assert!(
@@ -197,6 +202,7 @@ fn an_entry_gone_on_both_sides_produces_no_action() {
         &[],
         &[journal("old.txt", false, 10, 100, "\"e1\"")],
         true,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     assert!(plan.is_empty(), "nothing to do: {plan:?}");
@@ -404,7 +410,13 @@ fn a_conflict_copy_present_on_both_sides_is_left_alone() {
     let local_entries = vec![local(name, false, 10, 100)];
     let remote_entries = vec![remote(name, false, 10, "e1")];
     let db_entries = vec![entry(name, false, "e1")];
-    let plan = reconcile(&local_entries, &remote_entries, &db_entries, true);
+    let plan = reconcile(
+        &local_entries,
+        &remote_entries,
+        &db_entries,
+        true,
+        native_engine::ConflictPolicy::KeepBoth,
+    );
     assert!(
         plan.iter().all(|a| !a.is_write()),
         "a settled conflict copy must not be touched: {plan:?}"
@@ -422,7 +434,13 @@ fn a_local_file_never_deletes_a_remote_collection() {
         remote("docs/b.txt", false, 10, "e2"),
     ];
     let db_entries = vec![entry("docs", true, "d1")];
-    let plan = reconcile(&local_entries, &remote_entries, &db_entries, true);
+    let plan = reconcile(
+        &local_entries,
+        &remote_entries,
+        &db_entries,
+        true,
+        native_engine::ConflictPolicy::KeepBoth,
+    );
     assert!(
         !plan
             .iter()
@@ -505,7 +523,13 @@ fn remote_rename_moves_the_local_file_instead_of_copying_it() {
     let mut renamed = remote("new.txt", false, 5, "e-new");
     renamed.fileid = Some("42".into());
 
-    let plan = reconcile(&scanned, &[renamed], &journal, true);
+    let plan = reconcile(
+        &scanned,
+        &[renamed],
+        &journal,
+        true,
+        native_engine::ConflictPolicy::KeepBoth,
+    );
 
     assert!(
         plan.iter().any(
@@ -620,7 +644,13 @@ fn a_journaled_hidden_entry_is_never_deleted_from_the_server() {
 
     // Without the filter the hidden directory is planned as a server deletion:
     // this is the behaviour that wiped 210 real files in production.
-    let unfiltered = reconcile(&local_entries, &remote_entries, &journal_entries, true);
+    let unfiltered = reconcile(
+        &local_entries,
+        &remote_entries,
+        &journal_entries,
+        true,
+        native_engine::ConflictPolicy::KeepBoth,
+    );
     assert_eq!(deletes(&unfiltered), 1);
 
     let filtered: Vec<RemoteEntry> = [(".comments", true), ("visible.txt", false)]
@@ -631,7 +661,13 @@ fn a_journaled_hidden_entry_is_never_deleted_from_the_server() {
             remote(rel, is_dir, 0, etag)
         })
         .collect();
-    let plan = reconcile(&local_entries, &filtered, &journal_entries, true);
+    let plan = reconcile(
+        &local_entries,
+        &filtered,
+        &journal_entries,
+        true,
+        native_engine::ConflictPolicy::KeepBoth,
+    );
     assert_eq!(deletes(&plan), 0);
 }
 
@@ -648,6 +684,7 @@ fn a_file_local_against_a_collection_remote_touches_neither_side() {
         ],
         &[],
         true,
+        native_engine::ConflictPolicy::KeepBoth,
     );
 
     let rendered = format!("{plan:?}");

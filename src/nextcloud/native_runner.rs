@@ -109,6 +109,14 @@ impl NativeEngineRunner {
             Vec::new()
         };
         cfg.delete_guard.enabled = self.account.delete_guard.enabled;
+        cfg.conflict_policy = match self.account.sync.conflict_policy {
+            crate::storage::config::ConflictPolicy::KeepBoth => {
+                native_engine::ConflictPolicy::KeepBoth
+            }
+            crate::storage::config::ConflictPolicy::KeepNewest => {
+                native_engine::ConflictPolicy::KeepNewest
+            }
+        };
         cfg
     }
 }
