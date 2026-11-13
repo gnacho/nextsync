@@ -92,10 +92,21 @@ NextSync keeps full local mirrors. It does not do everything the official client
 Download the `.pkg.tar.zst` from the [latest release](https://github.com/gnacho/nextsync/releases/latest) and install it:
 
 ```bash
-sudo pacman -U nextsync-0.42.0-1-x86_64.pkg.tar.zst
+sudo pacman -U nextsync-<version>-1-x86_64.pkg.tar.zst
 ```
 
 The package depends on `gtk4` and `libadwaita`. It brings its own sync engine, so no external client is required. The external clients are not needed at all.
+
+### Flatpak
+
+Any distribution with Flatpak can install the bundle published with each release:
+
+```bash
+flatpak install --user nextsync-<version>-x86_64.flatpak
+flatpak run io.github.gnacho.nextsync
+```
+
+The bundle carries its own GTK and libadwaita, so the distribution version does not matter. It is not on Flathub yet. The tray icon needs a StatusNotifier host, which on GNOME means an AppIndicator extension.
 
 ### From source
 
