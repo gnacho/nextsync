@@ -364,17 +364,13 @@ fn is_daily_log_name(name: &str, prefix: &str) -> bool {
     };
     // rest must be "YYYY-MM-DD.log" (14 bytes).
     let bytes = rest.as_bytes();
-    if bytes.len() != 14
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || !rest[10..].eq(".log")
-        || !bytes[..4].iter().all(u8::is_ascii_digit)
-        || !bytes[5..7].iter().all(u8::is_ascii_digit)
-        || !bytes[8..10].iter().all(u8::is_ascii_digit)
-    {
-        return false;
-    }
-    true
+    bytes.len() == 14
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && &bytes[10..] == b".log"
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
 }
 
 /// Open (append, create, mode 0600) the file for `date`, closing the previous
