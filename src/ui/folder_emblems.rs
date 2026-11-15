@@ -58,6 +58,16 @@ pub fn set_folder_emblem(path: &Path, emblem: Option<&str>) -> Result<(), glib::
     )
 }
 
+/// True when the failure means the filesystem cannot store `metadata::emblems`
+/// at all, which is what a missing gvfs metadata daemon reports. The Flatpak
+/// sandbox is the known case: retrying cannot succeed, so the caller should
+/// stop trying for that folder instead of repeating the error on every state
+/// change (issue #342).
+pub fn emblems_unsupported(message: &str) -> bool {
+    let message = message.to_lowercase();
+    message.contains("metadata::emblems") && message.contains("not supported")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +160,22 @@ mod tests {
             assert!(emblems.is_empty(), "cleared emblems: {emblems:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_metadata_daemon_is_recognised() {
+        // verbatim message reported inside the Flatpak sandbox (issue #342)
+        assert!(emblems_unsupported(
+            "setting the metadata::emblems attribute is not supported"
+        ));
+    }
+
+    #[test]
+    fn other_failures_are_not_mistaken_for_a_missing_daemon() {
+        assert!(!emblems_unsupported("Permission denied"));
+        assert!(!emblems_unsupported(
+            "setting the metadata::emblems attribute: permission denied"
+        ));
+        assert!(!emblems_unsupported("No such file or directory"));
     }
 }

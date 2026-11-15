@@ -457,24 +457,40 @@ impl AccountView {
                 let local_root_for_emblems = local_root_for_updates.clone();
                 let logger_for_emblems = logger.clone();
                 let previous = Rc::new(Cell::new(controller.snapshot().state));
+                // Issue #342: without a gvfs metadata daemon (the Flatpak
+                // sandbox) every emblem write fails, and this subscription runs
+                // on each state change, so the same line filled the log. After
+                // such a failure stop trying for this folder and log it once.
+                let emblems_off = Rc::new(Cell::new(false));
+                let emblem_failure_logged = Rc::new(Cell::new(false));
                 let subscription = controller.subscribe(move |snapshot| {
                     // Issue #44: mirror the live state onto the folder as a
                     // file manager emblem (metadata::emblems via GIO).
-                    let emblem = crate::ui::folder_emblems::folder_emblem_for(snapshot.state);
-                    let emblem_root = local_root_for_emblems.clone();
-                    let handle = gio::spawn_blocking(move || {
-                        crate::ui::folder_emblems::set_folder_emblem(&emblem_root, emblem)
-                    });
-                    let logger_for_emblems = logger_for_emblems.clone();
-                    let local_root_for_log = local_root_for_emblems.clone();
-                    glib::spawn_future_local(async move {
-                        if let Ok(Err(error)) = handle.await {
-                            logger_for_emblems.append(&format!(
-                                "emblem update failed for {}: {error}",
-                                local_root_for_log.display()
-                            ));
-                        }
-                    });
+                    if !emblems_off.get() {
+                        let emblem = crate::ui::folder_emblems::folder_emblem_for(snapshot.state);
+                        let emblem_root = local_root_for_emblems.clone();
+                        let off_for_write = emblems_off.clone();
+                        let logged_for_write = emblem_failure_logged.clone();
+                        let handle = gio::spawn_blocking(move || {
+                            crate::ui::folder_emblems::set_folder_emblem(&emblem_root, emblem)
+                        });
+                        let logger_for_emblems = logger_for_emblems.clone();
+                        let local_root_for_log = local_root_for_emblems.clone();
+                        glib::spawn_future_local(async move {
+                            if let Ok(Err(error)) = handle.await {
+                                if crate::ui::folder_emblems::emblems_unsupported(error.message()) {
+                                    off_for_write.set(true);
+                                }
+                                if !logged_for_write.get() {
+                                    logged_for_write.set(true);
+                                    logger_for_emblems.append(&format!(
+                                        "emblem update failed for {}: {error}",
+                                        local_root_for_log.display()
+                                    ));
+                                }
+                            }
+                        });
+                    }
                     // Issue #43: refresh the used space when a
                     // synchronization completes.
                     let now = snapshot.state;
