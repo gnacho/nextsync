@@ -199,7 +199,7 @@ impl Engine {
                 .collect();
             (entries, true)
         } else {
-            match self.discover_remote(&http, &endpoints, sink, cancel) {
+            match self.discover_remote(&http, &endpoints, &db_entries, sink, cancel) {
                 Ok(v) => v,
                 Err(e) => {
                     // A failed or partial scan must never drive deletions.
@@ -483,10 +483,25 @@ impl Engine {
         }
 
         // One Depth:1 listing per touched directory instead of one Depth:0
-        // PROPFIND per transferred file (issue #268).
+        // PROPFIND per transferred file (issue #268). Directory ETags change
+        // on every ancestor, so refresh those too or the next discovery cannot
+        // safely prune the unchanged subtrees.
+        let mut ancestor_refresh = BTreeSet::new();
         for dir in &refresh {
             if let Err(e) = self.refresh_dir(&http, &endpoints, &db, dir) {
                 log::warn!("refresh {dir}: {e}");
+            }
+            let mut ancestor = parent_dir(dir);
+            while !ancestor.is_empty() {
+                ancestor_refresh.insert(ancestor.clone());
+                ancestor = parent_dir(&ancestor);
+            }
+        }
+        for dir in &ancestor_refresh {
+            if !refresh.contains(dir) {
+                if let Err(e) = self.refresh_dir_etag(&http, &endpoints, &db, dir) {
+                    log::warn!("refresh directory etag {dir}: {e}");
+                }
             }
         }
 
@@ -631,7 +646,9 @@ impl Engine {
             Action::MkdirRemote { rel } => {
                 progress("mkdir", rel);
                 let _ = http.mkcol(&self.url(ep, rel));
-                self.record(db, action, loc, rem)
+                self.record(db, action, loc, rem)?;
+                refresh.insert(parent_dir(rel));
+                Ok(())
             }
             Action::Download {
                 rel,
@@ -694,6 +711,7 @@ impl Engine {
                 progress("delete", rel);
                 http.delete(&self.url(ep, rel))?;
                 db.remove(rel)?;
+                refresh.insert(parent_dir(rel));
                 Ok(())
             }
             Action::DeleteLocal { rel } => {
@@ -724,6 +742,8 @@ impl Engine {
                 let dst = self.url(ep, to);
                 http.move_to(&src, &dst, true)?;
                 db.rename(from, to)?;
+                refresh.insert(parent_dir(from));
+                refresh.insert(parent_dir(to));
                 Ok(())
             }
             Action::Conflict { rel } => {
@@ -804,6 +824,40 @@ impl Engine {
         db.upsert(&entry)
     }
 
+    /// Refresh a directory's own ETag after a transfer changed a descendant.
+    fn refresh_dir_etag(
+        &self,
+        http: &HttpClient,
+        ep: &Endpoints,
+        db: &StateDb,
+        dir: &str,
+    ) -> Result<()> {
+        if dir.is_empty() {
+            return Ok(());
+        }
+        let url = format!("{}/", self.url(ep, dir));
+        let Some(entry) = http.propfind(&url, "0")?.into_iter().next() else {
+            return Ok(());
+        };
+        let path = self.local_path(dir);
+        let meta = std::fs::symlink_metadata(&path).ok();
+        let mtime = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(entry.mtime.unwrap_or(0));
+        db.upsert(&DbEntry {
+            path: dir.to_string(),
+            is_dir: true,
+            size: 0,
+            mtime,
+            etag: entry.etag,
+            fileid: entry.fileid,
+            inode: inode_of_meta(meta.as_ref()),
+        })
+    }
+
     /// Read back the authoritative remote state after a transfer.
     /// Refresh every entry of one directory with a single Depth:1 listing.
     fn refresh_dir(
@@ -851,7 +905,9 @@ impl Engine {
                 inode: inode_of_meta(meta.as_ref()),
             })?;
         }
-        Ok(())
+        // Only mark the directory fresh after all its children were refreshed.
+        // A failed listing leaves the old ETag and forces discovery next run.
+        self.refresh_dir_etag(http, ep, db, dir)
     }
 
     fn ensure_remote_root(&self, http: &HttpClient) -> Result<()> {
@@ -953,9 +1009,14 @@ impl Engine {
         &self,
         http: &HttpClient,
         ep: &Endpoints,
+        cached: &[DbEntry],
         sink: &dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<(Vec<RemoteEntry>, bool)> {
+        let cached_by_path: BTreeMap<String, &DbEntry> = cached
+            .iter()
+            .map(|entry| (entry.path.clone(), entry))
+            .collect();
         let mut out = Vec::new();
         let mut queue = vec![(String::new(), ep.remote_root.clone())];
         let mut complete = true;
@@ -999,6 +1060,35 @@ impl Engine {
                     continue;
                 }
                 if entry.is_dir {
+                    // The parent's Depth:1 response already carries this ETag.
+                    // A match proves the whole cached subtree is unchanged;
+                    // anything missing or different falls through to a PROPFIND.
+                    let cached_dir = !entry.etag.is_empty()
+                        && cached_by_path
+                            .get(&rel)
+                            .is_some_and(|cached| cached.is_dir && cached.etag == entry.etag);
+                    if cached_dir {
+                        out.push(entry.clone());
+                        let prefix = format!("{rel}/");
+                        out.extend(
+                            cached_by_path
+                                .range(prefix.clone()..)
+                                .take_while(|(path, _)| path.starts_with(&prefix))
+                                .filter(|(_, cached)| {
+                                    accept_remote_entry(&cached.path, cached.is_dir, &self.cfg)
+                                })
+                                .map(|(_, cached)| RemoteEntry {
+                                    path: cached.path.clone(),
+                                    is_dir: cached.is_dir,
+                                    size: cached.size,
+                                    etag: cached.etag.clone(),
+                                    fileid: cached.fileid.clone(),
+                                    mtime: Some(cached.mtime),
+                                    checksum: None,
+                                }),
+                        );
+                        continue;
+                    }
                     queue.push((
                         rel.clone(),
                         format!("{}/{}", ep.remote_root, percent_encode_path(&rel)),
@@ -1184,5 +1274,441 @@ mod tests {
             join_remote("https://h/a", "/Docs/x y"),
             "https://h/a/Docs/x%20y"
         );
+    }
+
+    struct TestWebdav {
+        url: String,
+        requests: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl TestWebdav {
+        fn start(responses: BTreeMap<String, String>) -> Self {
+            use std::io::{BufRead, BufReader, Read, Write};
+            use std::sync::atomic::AtomicBool;
+            use std::sync::{Arc, Mutex};
+
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let server_requests = Arc::clone(&requests);
+            let server_stop = Arc::clone(&stop);
+            let thread = std::thread::spawn(move || {
+                while !server_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let mut reader = BufReader::new(stream.try_clone().unwrap());
+                            let mut request_line = String::new();
+                            reader.read_line(&mut request_line).unwrap();
+                            let path = request_line
+                                .split_whitespace()
+                                .nth(1)
+                                .unwrap_or("/")
+                                .to_string();
+                            let mut content_length = 0usize;
+                            let mut depth = String::new();
+                            loop {
+                                let mut line = String::new();
+                                reader.read_line(&mut line).unwrap();
+                                if line == "\r\n" || line.is_empty() {
+                                    break;
+                                }
+                                if let Some(value) = line
+                                    .strip_prefix("Content-Length:")
+                                    .or_else(|| line.strip_prefix("content-length:"))
+                                {
+                                    content_length = value.trim().parse().unwrap();
+                                }
+                                if let Some(value) = line
+                                    .strip_prefix("Depth:")
+                                    .or_else(|| line.strip_prefix("depth:"))
+                                {
+                                    depth = value.trim().to_string();
+                                }
+                            }
+                            let mut body = vec![0; content_length];
+                            reader.read_exact(&mut body).unwrap();
+                            server_requests.lock().unwrap().push((path.clone(), depth));
+                            let (status, body) = responses
+                                .get(&path)
+                                .map(|body| ("207 Multi-Status", body.clone()))
+                                .unwrap_or_else(|| ("404 Not Found", String::new()));
+                            write!(
+                                stream,
+                                "HTTP/1.1 {status}\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                body.len()
+                            )
+                            .unwrap();
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
+                        Err(e) => panic!("test WebDAV accept failed: {e}"),
+                    }
+                }
+            });
+            Self {
+                url,
+                requests,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn requests(&self) -> Vec<String> {
+            let mut requests: Vec<String> = self
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect();
+            requests.sort();
+            requests
+        }
+
+        fn requests_with_depth(&self) -> Vec<(String, String)> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for TestWebdav {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+
+    fn webdav_listing(path: &str, entries: &[(&str, bool, &str)]) -> String {
+        let mut body = String::from(
+            "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\">",
+        );
+        for (name, is_dir, etag) in entries {
+            body.push_str(&format!(
+                "<d:response><d:href>{path}/{name}</d:href><d:propstat><d:prop><d:getetag>{etag}</d:getetag><d:getcontentlength>1</d:getcontentlength><d:resourcetype>{}</d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>",
+                if *is_dir { "<d:collection/>" } else { "" }
+            ));
+        }
+        body.push_str("</d:multistatus>");
+        body
+    }
+
+    fn cached_entry(path: &str, is_dir: bool, etag: &str) -> DbEntry {
+        DbEntry {
+            path: path.into(),
+            is_dir,
+            size: 1,
+            mtime: 1,
+            etag: etag.into(),
+            fileid: None,
+            inode: 0,
+        }
+    }
+
+    fn cached_discovery_entries() -> Vec<DbEntry> {
+        vec![
+            cached_entry("stable", true, "s1"),
+            cached_entry("stable/old.txt", false, "o1"),
+            cached_entry("stable/nested", true, "n1"),
+            cached_entry("stable/nested/deep.txt", false, "d1"),
+            cached_entry("changed", true, "c1"),
+            cached_entry("changed/old.txt", false, "o1"),
+        ]
+    }
+
+    fn discover_with_cached(cached: &[DbEntry]) -> (TestWebdav, Vec<RemoteEntry>, bool) {
+        let responses = BTreeMap::from([
+            (
+                "/dav".into(),
+                webdav_listing(
+                    "/dav",
+                    &[
+                        ("stable", true, "s1"),
+                        ("changed", true, "c2"),
+                        ("root.txt", false, "r1"),
+                    ],
+                ),
+            ),
+            (
+                "/dav/changed".into(),
+                webdav_listing(
+                    "/dav/changed",
+                    &[("old.txt", false, "o1"), ("new.txt", false, "n2")],
+                ),
+            ),
+            (
+                "/dav/stable".into(),
+                webdav_listing(
+                    "/dav/stable",
+                    &[("old.txt", false, "o1"), ("nested", true, "n1")],
+                ),
+            ),
+            (
+                "/dav/stable/nested".into(),
+                webdav_listing("/dav/stable/nested", &[("deep.txt", false, "d1")]),
+            ),
+        ]);
+        let server = TestWebdav::start(responses);
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(EngineConfig::new(
+            Provider::Nextcloud,
+            server.url.clone(),
+            "user",
+            "secret",
+            dir.path(),
+            "",
+        ));
+        let http = HttpClient::new(&HttpOptions {
+            base_url: server.url.clone(),
+            username: "user".into(),
+            password: "secret".into(),
+            trust_invalid_certificates: false,
+            proxy: None,
+            timeout: std::time::Duration::from_secs(5),
+        })
+        .unwrap();
+        let endpoints = Endpoints {
+            remote_root: format!("{}/dav", server.url),
+            upload_root: String::new(),
+            space_root: String::new(),
+        };
+        let (remote, complete) = engine
+            .discover_remote(
+                &http,
+                &endpoints,
+                cached,
+                &crate::NullSink,
+                &CancelToken::new(),
+            )
+            .unwrap();
+        (server, remote, complete)
+    }
+
+    #[test]
+    fn unchanged_remote_subtrees_are_reused_without_another_propfind() {
+        let (server, remote, complete) = discover_with_cached(&cached_discovery_entries());
+
+        assert!(complete);
+        assert_eq!(server.requests(), ["/dav", "/dav/changed"]);
+        let paths: BTreeSet<&str> = remote.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            BTreeSet::from([
+                "changed",
+                "changed/new.txt",
+                "changed/old.txt",
+                "root.txt",
+                "stable",
+                "stable/nested",
+                "stable/nested/deep.txt",
+                "stable/old.txt",
+            ])
+        );
+    }
+
+    #[test]
+    fn prefix_siblings_in_the_journal_do_not_truncate_a_reused_subtree() {
+        let mut cached = cached_discovery_entries();
+        cached.extend([
+            cached_entry("stable-old", true, "so1"),
+            cached_entry("stable-old/keep.txt", false, "so2"),
+        ]);
+
+        let (_, remote, complete) = discover_with_cached(&cached);
+
+        assert!(complete);
+        let paths: BTreeSet<&str> = remote.iter().map(|entry| entry.path.as_str()).collect();
+        assert!(paths.contains("stable/nested"));
+        assert!(paths.contains("stable/nested/deep.txt"));
+    }
+
+    #[test]
+    fn missing_cached_etag_falls_back_to_propfind_for_that_directory() {
+        let mut cached = cached_discovery_entries();
+        cached
+            .iter_mut()
+            .find(|entry| entry.path == "stable")
+            .unwrap()
+            .etag
+            .clear();
+
+        let (server, _, complete) = discover_with_cached(&cached);
+
+        assert!(complete);
+        assert_eq!(server.requests(), ["/dav", "/dav/changed", "/dav/stable"]);
+    }
+
+    fn apply_remote_action(action: Action) -> BTreeSet<String> {
+        let paths: Vec<String> = match &action {
+            Action::MkdirRemote { rel } | Action::DeleteRemote { rel } => {
+                vec![format!("/dav/{rel}")]
+            }
+            Action::MoveRemote { from, .. } => vec![format!("/dav/{from}")],
+            _ => unreachable!(),
+        };
+        let server = TestWebdav::start(
+            paths
+                .into_iter()
+                .map(|path| (path, String::new()))
+                .collect(),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = EngineConfig::new(
+            Provider::Nextcloud,
+            server.url.clone(),
+            "user",
+            "secret",
+            dir.path(),
+            "",
+        );
+        let db = StateDb::open(&cfg.db_path()).unwrap();
+        let engine = Engine::new(cfg);
+        let http = HttpClient::new(&HttpOptions {
+            base_url: server.url.clone(),
+            username: "user".into(),
+            password: "secret".into(),
+            trust_invalid_certificates: false,
+            proxy: None,
+            timeout: std::time::Duration::from_secs(5),
+        })
+        .unwrap();
+        let endpoints = Endpoints {
+            remote_root: format!("{}/dav", server.url),
+            upload_root: String::new(),
+            space_root: String::new(),
+        };
+        let local_dir = match &action {
+            Action::MkdirRemote { rel } => Some(LocalEntry {
+                rel: rel.clone(),
+                is_dir: true,
+                size: 0,
+                mtime: 1,
+                inode: 0,
+            }),
+            _ => None,
+        };
+        let loc: BTreeMap<&str, &LocalEntry> = local_dir
+            .as_ref()
+            .map(|entry| (entry.rel.as_str(), entry))
+            .into_iter()
+            .collect();
+        let rem: BTreeMap<&str, &RemoteEntry> = BTreeMap::new();
+        let mut refresh = BTreeSet::new();
+
+        engine
+            .apply(
+                &http,
+                &endpoints,
+                &action,
+                &loc,
+                &rem,
+                &db,
+                &crate::NullSink,
+                0,
+                &CancelToken::new(),
+                &mut refresh,
+            )
+            .unwrap();
+        refresh
+    }
+
+    #[test]
+    fn remote_mutations_mark_parent_directories_for_refresh() {
+        assert_eq!(
+            apply_remote_action(Action::MkdirRemote {
+                rel: "parent/new".into(),
+            }),
+            BTreeSet::from(["parent".to_string()])
+        );
+        assert_eq!(
+            apply_remote_action(Action::DeleteRemote {
+                rel: "parent/old.txt".into(),
+            }),
+            BTreeSet::from(["parent".to_string()])
+        );
+        assert_eq!(
+            apply_remote_action(Action::MoveRemote {
+                from: "old/a.txt".into(),
+                to: "new/a.txt".into(),
+            }),
+            BTreeSet::from(["new".to_string(), "old".to_string()])
+        );
+    }
+
+    #[test]
+    fn refresh_dir_updates_the_directory_own_etag() {
+        let body = webdav_listing(
+            "/dav/stable",
+            &[("", true, "s2"), ("keep.txt", false, "k1")],
+        );
+        let server = TestWebdav::start(BTreeMap::from([("/dav/stable/".into(), body)]));
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = EngineConfig::new(
+            Provider::Nextcloud,
+            server.url.clone(),
+            "user",
+            "secret",
+            dir.path(),
+            "",
+        );
+        let db = StateDb::open(&cfg.db_path()).unwrap();
+        db.upsert(&cached_entry("stable", true, "s1")).unwrap();
+        let engine = Engine::new(cfg);
+        let http = HttpClient::new(&HttpOptions {
+            base_url: server.url.clone(),
+            username: "user".into(),
+            password: "secret".into(),
+            trust_invalid_certificates: false,
+            proxy: None,
+            timeout: std::time::Duration::from_secs(5),
+        })
+        .unwrap();
+        let endpoints = Endpoints {
+            remote_root: format!("{}/dav", server.url),
+            upload_root: String::new(),
+            space_root: String::new(),
+        };
+
+        engine
+            .refresh_dir(&http, &endpoints, &db, "stable")
+            .unwrap();
+
+        assert_eq!(
+            server.requests_with_depth(),
+            [
+                ("/dav/stable/".to_string(), "1".to_string()),
+                ("/dav/stable/".to_string(), "0".to_string()),
+            ]
+        );
+        let cached = db.load_all().unwrap();
+        assert_eq!(
+            cached
+                .iter()
+                .find(|entry| entry.path == "stable")
+                .unwrap()
+                .etag,
+            "s2"
+        );
+    }
+
+    #[test]
+    fn cached_directories_missing_from_the_parent_listing_stay_deleted() {
+        let mut cached = cached_discovery_entries();
+        cached.extend([
+            cached_entry("obsolete", true, "x1"),
+            cached_entry("obsolete/old.txt", false, "x2"),
+        ]);
+
+        let (_, remote, complete) = discover_with_cached(&cached);
+
+        assert!(complete);
+        assert!(remote
+            .iter()
+            .all(|entry| !entry.path.starts_with("obsolete")));
     }
 }
