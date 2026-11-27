@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NextSync se documentan aquí. El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado es **+0.0.2 por release, reiniciado en 0.1.4** (decisión del usuario, 22-Ago-2026; sustituye al +0.02 anterior).
 
+## [0.44.22] - 2026-11-28
+
+### Changed
+
+- Remote discovery prunes unchanged subtrees. The engine reuses each directory's ETag from its parent listing and skips the whole subtree when it matches the journal, so one remote change no longer re-walks every directory of the folder (a first pass after a restart used to spend minutes per folder on a sequential PROPFIND walk). Ancestor ETags are refreshed after remote mutations, and missing or stale ETags still fall back to a full PROPFIND for that directory (#344).
+
 ## [0.44.20] - 2026-11-12
 
 ### Added

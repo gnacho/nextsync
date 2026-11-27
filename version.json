@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "version": "0.44.20",
+  "version": "0.44.22",
   "mandatory": false,
-  "summary": "A conflict policy per account: keep both copies as before, or keep the newest and stop writing conflicted copies.",
+  "summary": "Remote discovery prunes unchanged subtrees using directory ETags.",
   "changelog": [
-    "New setting in Advanced synchronization: when a file changed on both sides, keep both copies (default) or keep the newest and drop the older one without writing a conflict copy."
+    "A single remote change no longer re-walks every directory of the folder; unchanged subtrees are reused from the journal (#344)."
   ],
-  "released_at": "2026-11-12T00:00:00Z"
+  "released_at": "2026-11-28T00:00:00Z"
 }
